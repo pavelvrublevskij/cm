@@ -1,3 +1,10 @@
+## v1.3.2
+
+### Bug fixes
+
+- **Switching sessions left the browser terminal attached to the previous one** — navigating directly from one session's detail view to another (e.g. resuming a different session while one was already open) kept the in-page terminal pane connected to the old project/session, since the cleanup that closes it only ran when leaving the `session-detail` view entirely. Input typed there was silently sent to the previous session's `claude` process instead of the one shown on screen. `App.navigate()` now also treats a same-view switch to a different slug/sessionId as "leaving," closing the stale terminal (and prompting to keep it running in the background, same as before) before the new one opens.
+- **New session showed the previous project's name in the header** — opening a new session for one project right after closing a session in another briefly showed the old project's name in the session-detail header chip. `loadDetail()` rendered the header before resetting its internal state to the new project, so it read the stale slug from the session just left.
+
 ## v1.3.1
 
 ### Features

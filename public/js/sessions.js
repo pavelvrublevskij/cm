@@ -797,6 +797,7 @@ const Sessions = {
     title.title = titleText;
     Sessions._detailInfo = info || {};
     Sessions._detailHasPlan = false;
+    Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0 };
     Sessions.renderDetailMeta(null);
 
     const idValue = document.getElementById('session-detail-id-value');
@@ -805,7 +806,6 @@ const Sessions = {
       idValue.style.display = sessionId ? 'inline-block' : 'none';
     }
 
-    Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0 };
     Sessions._pendingFlash = undefined;
     Sessions._clearDetailArchivedUI();
     Sessions._activityLoaded = false;
