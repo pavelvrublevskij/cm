@@ -1,6 +1,8 @@
-# Claude Manager
+# CM
 
 A local web UI for managing Claude Code configuration — settings, memory, MCP servers, keybindings, skills, output styles, sessions, token usage, and more.
+
+> Not affiliated with or endorsed by Anthropic.
 
 Runs entirely on your machine. No cloud, no accounts, no external dependencies beyond Node.js.
 
@@ -58,7 +60,7 @@ Available options:
 
 ### MCP scopes
 
-Claude Code supports three MCP scopes; Claude Manager shows all of them in the matching location Claude Code itself uses, so what you see in the UI matches what `claude mcp list` reports:
+Claude Code supports three MCP scopes; CM shows all of them in the matching location Claude Code itself uses, so what you see in the UI matches what `claude mcp list` reports:
 
 - **User scope** (`claude mcp add --scope user`) → `~/.claude.json` → `mcpServers` — visible on the global **MCP Servers** page.
 - **Project scope** (`claude mcp add --scope project`) → `<project>/.mcp.json` at the project root (checked into git) — visible inside a project's **MCP** tab.

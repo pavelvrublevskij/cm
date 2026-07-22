@@ -14,7 +14,7 @@ const https = require('https');
 
 let latestVersionCache = { version: null, checkedAt: 0 };
 const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
-const REMOTE_PACKAGE_URL = 'https://raw.githubusercontent.com/pavelvrublevskij/claude-manager/main/package.json';
+const REMOTE_PACKAGE_URL = 'https://raw.githubusercontent.com/pavelvrublevskij/cm/main/package.json';
 
 function checkLatestVersion() {
   return new Promise(resolve => {
@@ -66,8 +66,8 @@ const AdmZip = require('adm-zip');
 
 async function fetchReleaseInfo() {
   try {
-    const r = await fetch('https://api.github.com/repos/pavelvrublevskij/claude-manager/releases/latest', {
-      headers: { 'User-Agent': 'claude-manager' }
+    const r = await fetch('https://api.github.com/repos/pavelvrublevskij/cm/releases/latest', {
+      headers: { 'User-Agent': 'cm' }
     });
     if (r.ok) {
       const data = await r.json();
@@ -76,7 +76,7 @@ async function fetchReleaseInfo() {
       }
     }
   } catch (_) {}
-  return { zipUrl: 'https://github.com/pavelvrublevskij/claude-manager/archive/refs/heads/main.zip', latestVersion: null };
+  return { zipUrl: 'https://github.com/pavelvrublevskij/cm/archive/refs/heads/main.zip', latestVersion: null };
 }
 
 function copyDirSync(src, dest) {
@@ -98,12 +98,12 @@ app.post('/api/update/zip', async (req, res) => {
     if (latestVersion && !isNewer(latestVersion, version)) {
       return res.status(400).json({ error: 'Already on the latest version' });
     }
-    const r = await fetch(zipUrl, { headers: { 'User-Agent': 'claude-manager' }, redirect: 'follow' });
+    const r = await fetch(zipUrl, { headers: { 'User-Agent': 'cm' }, redirect: 'follow' });
     if (!r.ok) throw new Error(`Download failed: HTTP ${r.status}`);
     const zipBuffer = Buffer.from(await r.arrayBuffer());
 
     const zip = new AdmZip(zipBuffer);
-    const tmpDir = path.join(os.tmpdir(), 'claude-manager-update-' + Date.now());
+    const tmpDir = path.join(os.tmpdir(), 'cm-update-' + Date.now());
     fs.mkdirSync(tmpDir, { recursive: true });
     zip.extractAllTo(tmpDir, true);
 
@@ -241,7 +241,7 @@ if (require.main === module) {
     if (!terminalServer.handleUpgrade(req, socket, head)) socket.destroy();
   });
   server.listen(PORT, HOST, () => {
-    console.log(`Claude Manager running at http://${HOST}:${PORT}`);
+    console.log(`CM running at http://${HOST}:${PORT}`);
 
     // Auto-fetch pricing on startup if stale (>24h) or missing
     const lastFetch = pricing.getLastFetchedAt();

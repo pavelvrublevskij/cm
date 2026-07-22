@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Manager — run script
+# CM — run script
 #
 # Usage:
 #   ./run.sh     # Start the server
@@ -27,7 +27,7 @@ fi
 print_header() {
     printf "\n"
     printf "${BOLD}${CYAN}╔══════════════════════════════════════════════╗${NC}\n"
-    printf "${BOLD}${CYAN}║          Claude Manager                      ║${NC}\n"
+    printf "${BOLD}${CYAN}║          CM                                  ║${NC}\n"
     printf "${BOLD}${CYAN}╚══════════════════════════════════════════════╝${NC}\n"
     printf "\n"
 }
@@ -129,7 +129,7 @@ do_local_start() {
 
     wait_for_url "$URL" && open_browser "$URL" || true
 
-    printf "\n${GREEN}${BOLD}✓ Claude Manager is running at ${URL}${NC}\n"
+    printf "\n${GREEN}${BOLD}✓ CM is running at ${URL}${NC}\n"
     printf "  To stop: run ./run.sh 2\n\n"
 }
 
@@ -191,7 +191,7 @@ do_update_zip() {
         return 1
     fi
 
-    local REPO="pavelvrublevskij/claude-manager"
+    local REPO="pavelvrublevskij/cm"
     printf "  Fetching latest release info...\n"
     local ZIP_URL
     ZIP_URL=$(curl -sf "https://api.github.com/repos/$REPO/releases/latest" \

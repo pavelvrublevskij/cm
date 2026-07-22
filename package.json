@@ -1,5 +1,5 @@
 {
-  "name": "claude-manager",
+  "name": "cm",
   "version": "1.3.2",
   "description": "Local web UI for managing Claude Code settings and memory",
   "main": "server.js",

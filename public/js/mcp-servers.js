@@ -39,7 +39,7 @@ const McpServers = {
       To add or remove cloud integrations, use <code>/mcp</code> in Claude Code or visit
       <a href="https://claude.ai/settings/connectors" target="_blank" rel="noopener">claude.ai settings &rarr; Connectors</a>.
       <br><br>
-      <strong>Note:</strong> Claude Manager reads only local files, so the full list and live status
+      <strong>Note:</strong> CM reads only local files, so the full list and live status
       (connected / needs auth / failed) are only available inside Claude Code's <code>/mcp</code> dialog,
       which fetches them from claude.ai. Below are the integrations we can detect on disk:
       <ul style="margin:6px 0 0 16px;padding:0">

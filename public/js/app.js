@@ -281,8 +281,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const banner = document.getElementById('update-banner');
       banner.innerHTML = `New version <strong>v${escapeHtml(data.latest)}</strong> available! &nbsp;
         <a href="#" id="update-now-link" onclick="App.updateFromZip(event)">Update now</a> &nbsp;&bull;&nbsp;
-        <a href="https://github.com/pavelvrublevskij/claude-manager" target="_blank">View on GitHub</a> &nbsp;&bull;&nbsp;
-        <a href="https://github.com/pavelvrublevskij/claude-manager/blob/main/CHANGELOG.md" target="_blank">Changelog</a>`;
+        <a href="https://github.com/pavelvrublevskij/cm" target="_blank">View on GitHub</a> &nbsp;&bull;&nbsp;
+        <a href="https://github.com/pavelvrublevskij/cm/blob/main/CHANGELOG.md" target="_blank">Changelog</a>`;
       banner.style.display = 'block';
     }
   }).catch(() => {});

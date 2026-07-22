@@ -7,7 +7,7 @@ const Tour = {
   steps: [
     {
       element: null,
-      title: 'Welcome to Claude Manager',
+      title: 'Welcome to CM',
       text: 'Your local dashboard for Claude Code — browse sessions, track token usage, manage settings and memory. This tour takes about a minute.',
       position: 'center'
     },

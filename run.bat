@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: Claude Manager — run script
+:: CM — run script
 ::
 :: Usage:
 ::   run.bat           Start the server
@@ -14,7 +14,7 @@ set MIN_NODE=16
 :: Header
 echo.
 echo ======================================
-echo        Claude Manager
+echo        CM
 echo ======================================
 echo.
 
@@ -88,7 +88,7 @@ call :wait_for_server
 if %errorlevel% equ 0 start "" %URL%
 
 echo.
-echo   Claude Manager is running at %URL%
+echo   CM is running at %URL%
 echo   To stop: run run.bat 2
 echo.
 goto :eof
@@ -129,11 +129,11 @@ goto :eof
 echo [Update - Release Zip]
 echo.
 echo   Fetching latest release info...
-powershell -nologo -noprofile -command "try { (Invoke-RestMethod 'https://api.github.com/repos/pavelvrublevskij/claude-manager/releases/latest').zipball_url } catch { 'https://github.com/pavelvrublevskij/claude-manager/archive/refs/heads/main.zip' }" > "%TEMP%\cm_url.txt" 2>nul
+powershell -nologo -noprofile -command "try { (Invoke-RestMethod 'https://api.github.com/repos/pavelvrublevskij/cm/releases/latest').zipball_url } catch { 'https://github.com/pavelvrublevskij/cm/archive/refs/heads/main.zip' }" > "%TEMP%\cm_url.txt" 2>nul
 set /p ZIP_URL=<"%TEMP%\cm_url.txt"
 del "%TEMP%\cm_url.txt" >nul 2>&1
 
-set TMP_DIR=%TEMP%\claude-manager-update
+set TMP_DIR=%TEMP%\cm-update
 if exist "%TMP_DIR%" rmdir /s /q "%TMP_DIR%"
 mkdir "%TMP_DIR%"
 

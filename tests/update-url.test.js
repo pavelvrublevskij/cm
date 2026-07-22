@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 
 const OWNER = 'pavelvrublevskij';
-const REPO = 'claude-manager';
+const REPO = 'cm';
 
 // v1.2.1 is created with release/v1.2.1 branch (no tag/branch name collision),
 // so its zipball_url returns a clean 302 redirect — not the HTTP 300 that
@@ -10,7 +10,7 @@ const REPO = 'claude-manager';
 const KNOWN_TAG = 'v1.2.1';
 
 async function fetchZip(url) {
-  const r = await fetch(url, { headers: { 'User-Agent': 'claude-manager' }, redirect: 'follow' });
+  const r = await fetch(url, { headers: { 'User-Agent': 'cm' }, redirect: 'follow' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return Buffer.from(await r.arrayBuffer());
 }
