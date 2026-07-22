@@ -172,6 +172,19 @@ const Sessions = {
     } catch (e) {
       container.innerHTML = `<div class="empty-state"><p>Could not load sessions</p></div>`;
     }
+
+    Settings.ensureLoaded().then(() => Sessions.renderCleanupWarning());
+  },
+
+  renderCleanupWarning() {
+    const el = document.getElementById('sessions-cleanup-warning');
+    if (!el) return;
+    if (Settings.data && Settings.data.cleanupPeriodDays === undefined) {
+      el.style.display = '';
+      el.innerHTML = '&#9888; <code>cleanupPeriodDays</code> is not set &mdash; Claude Code deletes local session transcripts after 30 days by default, which may be why older sessions are missing. Click to choose how many days to keep them.';
+    } else {
+      el.style.display = 'none';
+    }
   },
 
   filterByDateRange(sessions) {

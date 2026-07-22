@@ -1,3 +1,15 @@
+## v1.3.1
+
+### Features
+
+- **Settings reference audit** — the Settings page's reference panel now reflects the current `settings.json` schema: added previously undocumented keys (`cleanupPeriodDays`, `attribution`, `fallbackModel`, `ultracode`, and many more across new Skills/Memory, Session & Workflow, UI & Display, Notifications, and Remote/Voice sections), flagged deprecated/incorrect keys (`includeCoAuthoredBy`, `notificationCommand`, a bogus root-level `defaultMode`) in a dedicated struck-through section, and split enterprise/managed-settings-only keys into their own section.
+- **Session retention warning** — if `cleanupPeriodDays` is missing from `settings.json` (meaning Claude Code silently deletes local session transcripts after its 30-day default), a warning banner now appears on both the Settings page and the per-project Sessions tab. Clicking it opens a dialog explaining why the setting matters and lets you set a retention period, defaulting to 365 days, in one step.
+
+### Bug fixes
+
+- **Browser terminal failing on macOS** — clicking "Open browser terminal" raised `posix_spawnp failed` because `node-pty` tried to exec `claude` directly, which requires the binary to already be on the Node process's stripped PATH. Fixed by running claude through `/bin/sh -c 'claude "$@"' -- ...` so the shell resolves it from the user's full login PATH, mirroring the existing Windows fix that uses `cmd.exe /c claude`.
+- **Session title missing for summarized sessions** — `getCustomTitle` only checked for `custom-title` JSONL entries; sessions with a `summary` entry but no custom title now fall back to that summary text instead of showing a blank title.
+
 ## v1.3.0
 
 ### Features

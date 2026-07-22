@@ -2896,6 +2896,9 @@ mark.search-highlight {
 .ref-table td:first-child { white-space: nowrap; }
 .ref-table code { background: var(--bg-tertiary); padding: 1px 4px; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
 
+.ref-row-deprecated td { color: var(--text-muted); }
+.ref-row-deprecated td:first-child code { text-decoration: line-through; opacity: 0.7; }
+
 .ref-footer { font-size: 11px; color: var(--text-muted); line-height: 1.5; padding-top: 8px; border-top: 1px solid var(--border); }
 .ref-footer code { background: var(--bg-tertiary); padding: 1px 4px; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
 .ref-footer strong { color: var(--text-primary); }
