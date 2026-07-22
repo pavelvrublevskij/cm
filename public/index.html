@@ -269,6 +269,7 @@
               <button class="btn btn-sm" onclick="Settings.toggleReference()">Settings Reference</button>
             </div>
           </div>
+          <div id="cleanup-warning" class="session-branch-warning" style="display:none; cursor:pointer;" onclick="Settings.openCleanupPrompt()"></div>
           <div class="settings-layout">
             <div class="settings-main">
               <div id="settings-visual" class="settings-tree"></div>
@@ -490,6 +491,7 @@
             </div>
           </div>
           <div class="project-tab active" id="tab-sessions">
+            <div id="sessions-cleanup-warning" class="session-branch-warning" style="display:none; cursor:pointer;" onclick="Settings.openCleanupPrompt()"></div>
             <div id="sessions-list"></div>
           </div>
           <div class="project-tab" id="tab-proj-settings">

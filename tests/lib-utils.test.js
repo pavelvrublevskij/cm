@@ -250,29 +250,44 @@ test('dayInRange: day within range is included', () => {
 });
 
 // ── hourKeyInRange ────────────────────────────────────────────────────────────
+//
+// hourKeyInRange takes a UTC "YYYY-MM-DD HH" key and compares it against from/to
+// bounds using the *local* wall-clock day/hour (see lib/usage-filters.js), so
+// fromTime/toTime are meant to be read in the machine's local timezone. A key
+// like '2026-05-01 08' is only "8am local" on a machine running in UTC+0 — on
+// any other offset the local hour is different, so hardcoding UTC strings and
+// assuming they equal local hours made these tests fail outside UTC (e.g. under
+// Europe/Vilnius, UTC+3). buildHourKey() below constructs the UTC key that
+// corresponds to a given *local* date/hour on whichever machine runs the test.
+
+function buildHourKey(year, month, day, localHour) {
+  const d = new Date(year, month - 1, day, localHour, 0, 0);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}`;
+}
 
 test('hourKeyInRange: no filters accepts all', () => {
-  assert.ok(hourKeyInRange('2026-05-01 10', null, null, null, null));
+  assert.ok(hourKeyInRange(buildHourKey(2026, 5, 1, 10), null, null, null, null));
 });
 
 test('hourKeyInRange: excludes hour before fromTime', () => {
-  assert.ok(!hourKeyInRange('2026-05-01 08', null, null, '09:00', null));
+  assert.ok(!hourKeyInRange(buildHourKey(2026, 5, 1, 8), null, null, '09:00', null));
 });
 
 test('hourKeyInRange: includes hour equal to fromTime', () => {
-  assert.ok(hourKeyInRange('2026-05-01 09', null, null, '09:00', null));
+  assert.ok(hourKeyInRange(buildHourKey(2026, 5, 1, 9), null, null, '09:00', null));
 });
 
 test('hourKeyInRange: excludes hour after toTime', () => {
-  assert.ok(!hourKeyInRange('2026-05-01 18', null, null, null, '17:00'));
+  assert.ok(!hourKeyInRange(buildHourKey(2026, 5, 1, 18), null, null, null, '17:00'));
 });
 
 test('hourKeyInRange: includes hour equal to toTime', () => {
-  assert.ok(hourKeyInRange('2026-05-01 17', null, null, null, '17:00'));
+  assert.ok(hourKeyInRange(buildHourKey(2026, 5, 1, 17), null, null, null, '17:00'));
 });
 
 test('hourKeyInRange: excludes day outside date range', () => {
-  assert.ok(!hourKeyInRange('2026-04-30 10', '2026-05-01', null, null, null));
+  assert.ok(!hourKeyInRange(buildHourKey(2026, 4, 30, 12), '2026-05-01', null, null, null));
 });
 
 // ── getFilteredByModel ────────────────────────────────────────────────────────

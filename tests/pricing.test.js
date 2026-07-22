@@ -2,6 +2,54 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
 const { app } = require('./helpers/app');
+const { parsePricingFromHtml } = require('../lib/pricing');
+
+function pricingRow(cells) {
+  return '<tr>' + cells.map(c => `<td class="p-2">${c}</td>`).join('') + '</tr>';
+}
+
+test('parsePricingFromHtml: model name split across <br/> from a dated pricing tier does not glue onto the qualifier', () => {
+  // Real markup captured from the pricing page for a model with an introductory tier
+  // followed by a standard tier starting on a later date.
+  const html = pricingRow([
+    'Claude Sonnet 5<br/><a class="inline-link" href="#x">through August 31, 2026</a>',
+    '$2 / MTok', '$2.50 / MTok', '$4 / MTok', '$0.20 / MTok', '$10 / MTok'
+  ]) + pricingRow([
+    'Claude Sonnet 5<br/>starting September 1, 2026',
+    '$3 / MTok', '$3.75 / MTok', '$6 / MTok', '$0.30 / MTok', '$15 / MTok'
+  ]);
+
+  const models = parsePricingFromHtml(html);
+  assert.ok(models['claude-sonnet-5'], 'clean claude-sonnet-5 key present');
+  assert.strictEqual(Object.keys(models).some(k => k.includes('through') || k.includes('starting')), false,
+    'no garbled qualifier-suffixed key leaked into the result');
+});
+
+test('parsePricingFromHtml: first tier row wins when a model has multiple dated pricing rows', () => {
+  const html = pricingRow([
+    'Claude Sonnet 5<br/>through August 31, 2026',
+    '$2 / MTok', '$2.50 / MTok', '$4 / MTok', '$0.20 / MTok', '$10 / MTok'
+  ]) + pricingRow([
+    'Claude Sonnet 5<br/>starting September 1, 2026',
+    '$3 / MTok', '$3.75 / MTok', '$6 / MTok', '$0.30 / MTok', '$15 / MTok'
+  ]);
+
+  const models = parsePricingFromHtml(html);
+  assert.strictEqual(models['claude-sonnet-5'].input, 2);
+  assert.strictEqual(models['claude-sonnet-5'].output, 10);
+});
+
+test('parsePricingFromHtml: single-row model without a pricing tier still parses normally', () => {
+  const html = pricingRow([
+    'Claude Haiku 4.5',
+    '$1 / MTok', '$1.25 / MTok', '$2 / MTok', '$0.10 / MTok', '$5 / MTok'
+  ]);
+
+  const models = parsePricingFromHtml(html);
+  assert.ok(models['claude-haiku-4-5']);
+  assert.strictEqual(models['claude-haiku-4-5'].input, 1);
+  assert.strictEqual(models['claude-haiku-4-5'].output, 5);
+});
 
 test('GET /api/pricing returns current pricing and source metadata', async () => {
   const res = await request(app).get('/api/pricing');
