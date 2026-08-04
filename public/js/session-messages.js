@@ -19,7 +19,7 @@ Object.assign(Sessions, {
 
     for (const block of msg.content) {
       if (block.type === 'text') {
-        bodyHtml += `<div class="chat-text">${renderMarkdown(block.text)}</div>`;
+        bodyHtml += `<div class="chat-text">${renderChatMarkdown(block.text)}</div>`;
       } else if (block.type === 'tool_use') {
         if (block.name === 'Agent') {
           bodyHtml += Sessions._renderAgentLaunchBlock(block);
@@ -128,6 +128,7 @@ Object.assign(Sessions, {
         return;
       }
       convEl.innerHTML = data.messages.map(m => Sessions.renderMessage(m)).join('');
+      addCodeCopyButtons(convEl);
     } catch (e) {
       convEl.innerHTML = `<div class="empty-state"><p>${escapeHtml(e.message)}</p></div>`;
     }

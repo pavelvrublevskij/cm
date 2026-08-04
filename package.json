@@ -1,6 +1,6 @@
 {
   "name": "cm",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "description": "Local web UI for managing Claude Code settings and memory. Not affiliated with or endorsed by Anthropic.",
   "main": "server.js",
   "scripts": {

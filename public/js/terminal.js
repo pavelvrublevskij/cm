@@ -234,7 +234,7 @@ const TerminalPanel = {
     localStorage.setItem(Sessions.CONVERSATION_HIDDEN_KEY, hidden ? '1' : '0');
     Sessions.applyConversationHiddenState();
     if (hidden) {
-      Sessions.stopAutoRefresh();
+      Sessions.stopConversationRefresh();
     } else {
       if (instantPoll) Sessions.pollNewMessages();
       Sessions.startAutoRefresh();

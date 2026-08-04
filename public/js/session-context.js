@@ -16,16 +16,18 @@ Object.assign(Sessions, {
       const hasPlans = data.plans && data.plans.length > 0;
       if (!hasFiles && !hasPlans) return;
 
-      const ctx = Sessions._ctx;
-      const oldFilesMap = new Map(ctx ? ctx.files.map(f => [f.path, f]) : []);
+      const ctx = Sessions._ctx && Sessions._ctx.sessionId === sessionId ? Sessions._ctx : null;
+      const oldFiles = ctx ? ctx.files : [];
+      const oldFilesMap = new Map(oldFiles.map(f => [f.path, f]));
       const changedPaths = new Set(
         data.files.filter(f => {
           const old = oldFilesMap.get(f.path);
-          return !old || f.mtime !== old.mtime;
+          return !old || f.mtime !== old.mtime || !!f.isNew !== !!old.isNew || !!f.isDeleted !== !!old.isDeleted;
         }).map(f => f.path)
       );
-      const plansChanged = (data.plans ? data.plans.length : 0) !== (ctx ? ctx.plans.length : 0);
-      if (!changedPaths.size && !plansChanged) return;
+      const filesDropped = data.files.length !== oldFiles.length;
+      const plansChanged = Sessions._plansKey(data.plans) !== Sessions._plansKey(ctx && ctx.plans);
+      if (!changedPaths.size && !filesDropped && !plansChanged) return;
 
       const savedSort = ctx && ctx.sort || 'default';
       Sessions.renderContext(el, sessionId, data);
@@ -33,6 +35,10 @@ Object.assign(Sessions, {
 
       Sessions._flashItems(el, changedPaths);
     } catch (_) {}
+  },
+
+  _plansKey(plans) {
+    return (plans || []).map(p => `${p.name}@${p.mtime}`).join('|');
   },
 
   annotateDetailPlan(stats) {
@@ -76,7 +82,11 @@ Object.assign(Sessions, {
   renderContext(el, sessionId, data) {
     const hasFiles = data.files && data.files.length > 0;
     const hasPlans = data.plans && data.plans.length > 0;
-    if (!hasFiles && !hasPlans) { Sessions.switchTab('conversation'); return; }
+    if (!hasFiles && !hasPlans) {
+      Sessions._ctx = { sessionId, projSlug: data.projSlug || '', files: [], plans: [], sort: 'default' };
+      Sessions.switchTab('conversation');
+      return;
+    }
 
     Sessions._ctx = { sessionId, projSlug: data.projSlug || '', files: data.files || [], plans: data.plans || [], sort: 'default' };
 
@@ -148,6 +158,13 @@ Object.assign(Sessions, {
       const items = groupFiles.map(f => {
         const status = f.isNew ? 'new' : (f.isDeleted ? 'deleted' : 'edited');
         const badge = `<span class="ctx-file-badge ctx-file-badge-${status}">${status}</span>`;
+        const openBtns = f.isDeleted ? '' : `<div class="action-menu" data-path="${escapeHtml(f.path)}">
+          <button class="btn btn-sm action-menu-btn" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)" aria-label="File actions">&#8942;</button>
+          <div class="action-menu-panel">
+            <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openCtxFile(this.closest('.action-menu').dataset.path)">Open in editor</button>
+            <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.revealCtxFile(this.closest('.action-menu').dataset.path)">Show in file explorer</button>
+          </div>
+        </div>`;
         return `<div class="ctx-file-item ctx-file-${status}"
           data-session="${escapeHtml(sessionId)}"
           data-hash="${escapeHtml(f.hash || '')}"
@@ -155,7 +172,7 @@ Object.assign(Sessions, {
           data-path="${escapeHtml(f.path)}"
           data-is-new="${f.isNew ? '1' : ''}"
           data-is-deleted="${f.isDeleted ? '1' : ''}"
-          onclick="Sessions._openCtxDiff(this)">${badge}<span class="ctx-file-name">${escapeHtml(f.name)}</span></div>`;
+          onclick="Sessions._openCtxDiff(this)">${badge}<span class="ctx-file-name">${escapeHtml(f.name)}</span>${openBtns}</div>`;
       }).join('');
       return `<div class="ctx-file-group">${header}${items}</div>`;
     }).join('');
@@ -197,6 +214,26 @@ Object.assign(Sessions, {
       allItems,
       index
     });
+  },
+
+  async openCtxFile(filePath) {
+    const projSlug = Sessions._ctx ? Sessions._ctx.projSlug : '';
+    if (!projSlug) return;
+    try {
+      await api('/api/file-history/open-file', { method: 'POST', body: { projSlug, filePath } });
+    } catch (e) {
+      toast('Could not open file: ' + e.message, 'error');
+    }
+  },
+
+  async revealCtxFile(filePath) {
+    const projSlug = Sessions._ctx ? Sessions._ctx.projSlug : '';
+    if (!projSlug) return;
+    try {
+      await api('/api/file-history/reveal-file', { method: 'POST', body: { projSlug, filePath } });
+    } catch (e) {
+      toast('Could not show file in explorer: ' + e.message, 'error');
+    }
   },
 
   toggleCtx(sectionId) {

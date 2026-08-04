@@ -22,12 +22,20 @@ const FileHistory = {
       </div>`;
     }
 
+    const state = { filePath, isDeleted };
+
     const overlay = openModal({
       title: `${filePath} ${label}`,
       cls: 'modal--diff',
       body: `${navHtml}<div id="fh-diff-body"><div class="loading"><div class="spinner"></div>Computing diff…</div></div>`,
-      buttons: []
+      buttons: [
+        { label: 'Show in explorer', onClick: () => { Sessions.revealCtxFile(state.filePath); return false; } },
+        { label: 'Open in editor', primary: true, onClick: () => { Sessions.openCtxFile(state.filePath); return false; } }
+      ]
     });
+
+    overlay._fhState = state;
+    FileHistory._updateActionButtons(overlay, state);
 
     if (allItems && allItems.length > 1 && index >= 0) {
       FileHistory._updateNav(overlay, allItems, index);
@@ -35,6 +43,15 @@ const FileHistory = {
 
     FileHistory._addResizeHandle(overlay.querySelector('.modal'));
     await FileHistory._loadDiff(overlay, sessionId, hash, version, projSlug, filePath, { isNew, isDeleted });
+  },
+
+  _updateActionButtons(overlay, state) {
+    overlay.querySelectorAll('.btn-group .btn').forEach(btn => {
+      if (btn.textContent === 'Show in explorer' || btn.textContent === 'Open in editor') {
+        btn.disabled = state.isDeleted;
+        btn.title = state.isDeleted ? 'File was deleted' : '';
+      }
+    });
   },
 
   _makeLabel(isNew, isDeleted, version) {
@@ -75,6 +92,12 @@ const FileHistory = {
 
     const titleEl = overlay.querySelector('h3');
     if (titleEl) titleEl.textContent = `${path} ${FileHistory._makeLabel(isNewBool, isDeletedBool, version)}`;
+
+    if (overlay._fhState) {
+      overlay._fhState.filePath = path;
+      overlay._fhState.isDeleted = isDeletedBool;
+      FileHistory._updateActionButtons(overlay, overlay._fhState);
+    }
 
     FileHistory._updateNav(overlay, allItems, newIndex);
 

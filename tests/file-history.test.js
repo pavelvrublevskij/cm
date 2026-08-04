@@ -456,3 +456,81 @@ test('diff-current: path traversal in filePath returns 400', async () => {
     .query({ version: 1, projSlug: PROJ_SLUG, filePath: '../../../etc/passwd' });
   assert.strictEqual(res.status, 400);
 });
+
+// ── /open-file endpoint ───────────────────────────────────────────────────────
+
+test('open-file: missing projSlug returns 400', async () => {
+  const res = await request(app)
+    .post('/api/file-history/open-file')
+    .send({ filePath: 'index.js' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('open-file: invalid projSlug returns 400', async () => {
+  const res = await request(app)
+    .post('/api/file-history/open-file')
+    .send({ projSlug: '../bad', filePath: 'index.js' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('open-file: missing filePath returns 400', async () => {
+  const res = await request(app)
+    .post('/api/file-history/open-file')
+    .send({ projSlug: PROJ_SLUG });
+  assert.strictEqual(res.status, 400);
+});
+
+test('open-file: path traversal in filePath returns 400', async () => {
+  const res = await request(app)
+    .post('/api/file-history/open-file')
+    .send({ projSlug: PROJ_SLUG, filePath: '../../../etc/passwd' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('open-file: missing file on disk returns 404', async () => {
+  const res = await request(app)
+    .post('/api/file-history/open-file')
+    .send({ projSlug: PROJ_SLUG, filePath: 'nonexistent.js' });
+  assert.strictEqual(res.status, 404);
+});
+
+test('open-file SKIPPED: spawns OS default app (side-effect)', { skip: true }, () => {});
+
+// ── /reveal-file endpoint ─────────────────────────────────────────────────────
+
+test('reveal-file: missing projSlug returns 400', async () => {
+  const res = await request(app)
+    .post('/api/file-history/reveal-file')
+    .send({ filePath: 'index.js' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('reveal-file: invalid projSlug returns 400', async () => {
+  const res = await request(app)
+    .post('/api/file-history/reveal-file')
+    .send({ projSlug: '../bad', filePath: 'index.js' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('reveal-file: missing filePath returns 400', async () => {
+  const res = await request(app)
+    .post('/api/file-history/reveal-file')
+    .send({ projSlug: PROJ_SLUG });
+  assert.strictEqual(res.status, 400);
+});
+
+test('reveal-file: path traversal in filePath returns 400', async () => {
+  const res = await request(app)
+    .post('/api/file-history/reveal-file')
+    .send({ projSlug: PROJ_SLUG, filePath: '../../../etc/passwd' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('reveal-file: missing file on disk returns 404', async () => {
+  const res = await request(app)
+    .post('/api/file-history/reveal-file')
+    .send({ projSlug: PROJ_SLUG, filePath: 'nonexistent.js' });
+  assert.strictEqual(res.status, 404);
+});
+
+test('reveal-file SKIPPED: spawns OS file explorer (side-effect)', { skip: true }, () => {});

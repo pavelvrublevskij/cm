@@ -569,9 +569,11 @@
               <button class="session-tab-btn active" id="tab-btn-file-changes" onclick="Sessions.switchTab('file-changes')">File Changes</button>
               <button class="session-tab-btn" id="tab-btn-conversation" onclick="Sessions.switchTab('conversation')">Conversation</button>
               <button class="session-tab-btn" id="tab-btn-activity" onclick="Sessions.switchTab('activity')">Activity</button>
+              <button class="session-tab-btn" id="tab-btn-scratchpad" onclick="Sessions.switchTab('scratchpad')">Scratchpad</button>
             </div>
             <div id="session-context" class="session-context" style="display:none"></div>
             <div id="session-activity" class="session-activity-panel" style="display:none"></div>
+            <div id="session-scratchpad" class="session-scratchpad-panel" style="display:none"></div>
             <div class="session-messages-wrap" id="session-messages-wrap" style="display:none">
             <div class="session-messages-header">
               <div class="subtitle" id="session-count" style="color:var(--text-muted)"></div>
@@ -734,6 +736,7 @@
   <script src="/js/session-messages.js"></script>
   <script src="/js/session-context.js"></script>
   <script src="/js/session-activity.js"></script>
+  <script src="/js/session-scratchpad.js"></script>
   <script src="/js/crud-frontmatter.js"></script>
   <script src="/js/project-settings-tab.js"></script>
   <script src="/js/project-mcp-tab.js"></script>
