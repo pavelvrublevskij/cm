@@ -7,6 +7,7 @@ const TerminalPanel = {
   AUTOOPEN_KEY: 'claude-manager-terminal-autoopen',
   MIN_WIDTH_PCT: 25,
   MAX_WIDTH_PCT: 80,
+  DEFAULT_WIDTH_PCT: 25,        // 25% terminal / 50% source / 25% file structure
   COLLAPSE_THRESHOLD_PCT: 92,
   CLICK_THRESHOLD_PX: 3,
 
@@ -105,7 +106,7 @@ const TerminalPanel = {
     const host = document.getElementById('terminal-host');
     if (!pane || !host || !body) return;
 
-    const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || 50;
+    const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || this.DEFAULT_WIDTH_PCT;
     body.style.setProperty('--terminal-width', savedWidth + '%');
 
     pane.classList.add('connected');
@@ -283,7 +284,7 @@ const TerminalPanel = {
       if (collapse) {
         this._setConversationHidden(true);
       } else {
-        const saved = isNaN(finalPct) ? 50 : Math.max(this.MIN_WIDTH_PCT, Math.min(this.MAX_WIDTH_PCT, finalPct));
+        const saved = isNaN(finalPct) ? this.DEFAULT_WIDTH_PCT : Math.max(this.MIN_WIDTH_PCT, Math.min(this.MAX_WIDTH_PCT, finalPct));
         body.style.setProperty('--terminal-width', saved + '%');
         localStorage.setItem(this.WIDTH_KEY, String(saved));
         if (wasHidden) this._setConversationHidden(false, true);

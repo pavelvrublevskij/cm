@@ -27,4 +27,13 @@
   --token-cache-write: #ffdd66;
   --token-cache-read: #ffcc00;
   --token-cost: #ff3300;
+  --code-comment: #8a5c00;
+  --code-keyword: #ffcc66;
+  --code-string: #cc8800;
+  --code-number: #ffdd99;
+  --code-def: #ffb000;
+  --code-tag: #ffcc66;
+  --code-attr: #cc8800;
+  --code-operator: #996600;
+  --code-error: #ff5533;
 }

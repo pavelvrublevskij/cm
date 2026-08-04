@@ -50,6 +50,7 @@ Available options:
 | **Plugins** | `~/.claude/plugins/` | View marketplaces and blocklist (read-only) |
 | **Project Memory** | `~/.claude/projects/*/memory/` | CRUD memory files with frontmatter editor, export/import as ZIP |
 | **Sessions** | `~/.claude/projects/*/` | Browse history, rename, search messages, view conversation with tool-use display, in-page terminal |
+| **Project Files** | `<project>/**` | Browse the project tree in a session's **Files** tab, read any file, edit and save it (optional autosave) |
 | **Project Settings** | `.claude/settings.local.json`, `.claude/settings.json` | Edit local and shared project permissions |
 | **Project MCP (project scope)** | `<project>/.mcp.json` | Project-level MCP server config (checked into git) |
 | **Project MCP (local scope)** | `~/.claude.json` → `projects["<path>"].mcpServers` | Per-project, per-user MCP server config |
@@ -77,6 +78,9 @@ An embedded xterm.js terminal panel lives inside the session detail view — ope
 ### Session Conversation
 Full conversation replay with structured tool-use display: `Edit` renders a before/after diff, `Bash` shows the command in a code block, and other tools (Read, Write, Glob, Grep, Agent, WebFetch…) each have a tailored compact view. User messages, assistant responses, and tool calls all render with syntax highlighting.
 
+### Project File Explorer & Editor
+A session's **Files** tab pairs the session with the project it ran in: the files that session changed stay pinned at the top as a tree with new/edited/deleted badges, and the full project tree sits below them, minus those changed files. Clicking any file opens it in the pane beside the tree — source first, with a Source/Diff toggle for files the session touched. Source is editable and saved back to disk (CodeMirror, syntax highlighting driven by each theme's own token palette). With the terminal open the tab sits at 25% structure / 50% source / 25% terminal, all draggable. The **Scratchpad** tab uses the same layout and pane for the temp files Claude created during the session, read-only. Unsaved edits are marked with ● on the file row, in the pane header, and in the status bar; autosave is off by default and configurable under **CM Settings → Editor**. Switching files keeps unsaved text in memory rather than dropping it, and a file's original line endings are preserved on save.
+
 ### Session Search
 Full-text search across all messages in a project — covers user messages, assistant responses, tool calls, and tool results — with context snippets and match highlighting.
 
@@ -97,13 +101,14 @@ lib/               # Shared server helpers
   slug.js          # Project slug <-> filesystem path decoder
   frontmatter.js   # YAML frontmatter read/write helpers
   usage-index.js   # Token usage indexer and aggregation
-routes/            # Express route modules (13 files)
+routes/            # Express route modules (20 files)
 data/              # App-local storage (gitignored, never in ~/.claude/)
 public/
   index.html       # SPA shell
   css/style.css    # Dark/light theme
   js/
     utils.js       # Shared client utilities + constants
+    code-view.js   # Shared split layout, code viewer, rendered preview
     modal.js       # Modal dialog factory
     app.js         # Navigation and routing
     [feature].js   # One file per UI feature
@@ -118,7 +123,7 @@ Works on Windows, macOS, and Linux. Path resolution handles all OS conventions a
 ## Security
 
 - Server binds to `127.0.0.1` only — never exposed to the network
-- All file writes create a backup first
+- All config file writes create a backup first (project files saved from the Files tab are written directly, last write wins)
 - Path traversal is prevented on all endpoints
 - No credentials or secrets are ever written — only read for display
 

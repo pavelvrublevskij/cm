@@ -1,10 +1,12 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
+const crypto = require('crypto');
 const { CLAUDE_DIR, PROJECTS_DIR } = require('../lib/paths');
 const { wrapRoute } = require('../lib/file-helpers');
+const { openPath, revealInFileManager } = require('../lib/os-open');
 const planCache = require('../lib/plan-cache');
+const { resolveProjectPath } = require('../lib/project-files');
 const { decodeSlug } = require('../lib/slug');
 
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
@@ -12,49 +14,25 @@ const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 const router = express.Router();
 const FILE_HISTORY_DIR = path.join(CLAUDE_DIR, 'file-history');
 
-/** Open a file with the OS default association (Explorer/Finder/xdg-open). */
-function openPath(targetPath) {
-  const platform = process.platform;
-  if (platform === 'win32') {
-    spawn('explorer.exe', [targetPath], { detached: true, stdio: 'ignore' }).unref();
-  } else if (platform === 'darwin') {
-    execFile('open', [targetPath]);
-  } else {
-    execFile('xdg-open', [targetPath]);
-  }
-}
-
-/** Reveal a file in the OS file explorer, selecting it (Linux falls back to opening the containing folder). */
-function revealInFileManager(targetPath) {
-  const platform = process.platform;
-  if (platform === 'win32') {
-    spawn('explorer.exe', ['/select,' + targetPath], { detached: true, stdio: 'ignore' }).unref();
-  } else if (platform === 'darwin') {
-    execFile('open', ['-R', targetPath]);
-  } else {
-    execFile('xdg-open', [path.dirname(targetPath)]);
-  }
+/**
+ * Claude Code names file-history backups `<sha256(absolute path) truncated to 16 hex>@v<n>`.
+ * Recomputing it recovers the path -> backup mapping for sessions whose transcript carries no
+ * file-history-snapshot records (newer Claude Code versions omit them).
+ */
+function backupHash(absPath) {
+  return crypto.createHash('sha256').update(absPath, 'utf8').digest('hex').slice(0, 16);
 }
 
 /** Resolve+validate a projSlug/filePath pair against the project dir. Returns { error, status } or { target }. */
 function resolveProjectFile(projSlug, filePath) {
-  if (!projSlug || projSlug.includes('..') || projSlug.includes('/') || projSlug.includes('\\')) {
-    return { status: 400, error: 'Invalid projSlug' };
-  }
   if (!filePath) return { status: 400, error: 'Invalid file path' };
 
-  const projectDir = decodeSlug(projSlug);
-  if (!projectDir) return { status: 404, error: 'Project not found' };
-
-  const target = path.resolve(projectDir, filePath);
-  const rel = path.relative(path.resolve(projectDir), target);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    return { status: 400, error: 'Invalid file path' };
-  }
-  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+  const resolved = resolveProjectPath(projSlug, filePath);
+  if (resolved.error) return resolved;
+  if (!fs.existsSync(resolved.target) || !fs.statSync(resolved.target).isFile()) {
     return { status: 404, error: 'File not found' };
   }
-  return { target };
+  return { target: resolved.target };
 }
 
 router.get('/:sessionId/context', wrapRoute((req, res) => {
@@ -160,6 +138,16 @@ router.get('/:sessionId/context', wrapRoute((req, res) => {
     }
 
     const histFiles = fs.existsSync(histDir) ? fs.readdirSync(histDir) : [];
+
+    // Files found via tool calls carry no backup name; recover it from the path so their diffs work.
+    if (projectDir && histFiles.length) {
+      for (const [filePath, info] of Object.entries(fileMap)) {
+        if (info.hash || info.isNew) continue;
+        const candidate = backupHash(path.resolve(projectDir, filePath));
+        if (histFiles.some(f => f.startsWith(candidate + '@v'))) info.hash = candidate;
+      }
+    }
+
     files = Object.entries(fileMap).map(([filePath, info]) => {
       const versions = info.hash ? histFiles
         .filter(f => f.startsWith(info.hash + '@v'))
@@ -177,7 +165,10 @@ router.get('/:sessionId/context', wrapRoute((req, res) => {
         }
       }
       return { path: filePath, hash: info.hash, versions, isNew: info.isNew, isDeleted, mtime };
-    }).filter(f => f.versions.length > 0 || f.isNew || f.hash !== null);
+    });
+    // Every entry came from a snapshot backup or a Write/Edit/MultiEdit/NotebookEdit call, so all of
+    // them were touched by this session. Files without a recorded snapshot have no diff, but their
+    // current source is still viewable in the Files tab — they used to be filtered out here.
   }
 
   // Plans linked to this session via ExitPlanMode planFilePath
@@ -248,18 +239,11 @@ router.get('/:sessionId/:hash/diff-current', wrapRoute((req, res) => {
   if (!isNew && (hash.includes('..') || hash.includes('/') || hash.includes('\\'))) {
     return res.status(400).json({ error: 'Invalid parameters' });
   }
-  if (!projSlug || projSlug.includes('..') || projSlug.includes('/') || projSlug.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid projSlug' });
-  }
 
-  const projectDir = decodeSlug(projSlug);
-  if (!projectDir) return res.status(404).json({ error: 'Project not found' });
+  const resolved = resolveProjectPath(projSlug, filePath);
+  if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
 
-  const currentFile = path.resolve(projectDir, filePath);
-  const rel = path.relative(path.resolve(projectDir), currentFile);
-  if (rel.startsWith('..')) {
-    return res.status(400).json({ error: 'Invalid file path' });
-  }
+  const currentFile = resolved.target;
   const currentExists = fs.existsSync(currentFile);
 
   let oldText = '';
@@ -271,7 +255,7 @@ router.get('/:sessionId/:hash/diff-current', wrapRoute((req, res) => {
   }
 
   const newText = currentExists ? fs.readFileSync(currentFile, 'utf-8') : '';
-  res.json({ ...computeDiff(oldText, newText), currentText: newText });
+  res.json(computeDiff(oldText, newText));
 }));
 
 function computeDiff(oldText, newText) {

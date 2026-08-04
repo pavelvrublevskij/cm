@@ -220,6 +220,7 @@ app.use('/api/plans', require('./routes/plans'));
 app.use('/api/file-history', require('./routes/file-history'));
 app.use('/api/projects', require('./routes/git'));
 app.use('/api/projects', require('./routes/scratchpad'));
+app.use('/api/projects', require('./routes/project-files'));
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

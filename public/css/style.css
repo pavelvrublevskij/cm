@@ -583,7 +583,7 @@ body {
   color: var(--text-primary, #e6edf3);
 }
 .terminal-pane {
-  flex: 0 0 var(--terminal-width, 50%);
+  flex: 0 0 var(--terminal-width, 25%);
   display: flex;
   flex-direction: column;
   background: #000;
@@ -3384,12 +3384,309 @@ mark.search-highlight {
   .charts-grid { grid-template-columns: 1fr; }
 }
 
-/* --- Session Context Panel --- */
+/* --- Split code layout: structure column + source pane.
+   Shared by the Files tab (changed files pinned above the project tree, editable pane)
+   and the Scratchpad tab (file list, read-only pane). --- */
 
-.session-context {
+.sf-layout {
+  /* A third of the main panel — with the terminal at 25%, that lands on 25% structure / 50% source */
+  --sf-structure-width: 33%;
   flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sf-structure {
+  flex: 0 0 var(--sf-structure-width);
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+}
+.sf-layout.sf-structure-collapsed .sf-structure { display: none; }
+
+.sf-splitter {
+  flex: 0 0 12px;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+.sf-splitter:hover { background: var(--border-light); }
+.sf-splitter::before {
+  content: '\00AB';                  /* « — structure visible, click to hide */
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.sf-layout.sf-structure-collapsed .sf-splitter::before {
+  content: '\00BB';                  /* » — structure hidden, click to show */
+}
+
+.sf-tree-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.sf-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px calc(10px + var(--sf-depth, 0) * 14px);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sf-row:hover { background: var(--bg-hover); }
+.sf-row-active { background: var(--accent-bg); color: var(--accent); }
+.sf-row-dir { color: var(--text-secondary); }
+
+.sf-arrow {
+  font-size: 8px;
+  color: var(--text-muted);
+  width: 8px;
+  flex: 0 0 8px;
+}
+
+.sf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sf-dirty {
+  color: var(--warning);
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+
+/* Changed-file rows share the tree row layout and add a status badge on the right */
+.sf-row .ctx-file-badge { margin-left: auto; }
+#ctx-files-section .ctx-body { padding: 6px 0 10px; }
+#ctx-files-section .ctx-sort-bar { padding: 6px 16px 4px; }
+#ctx-files-section .ctx-empty { padding: 6px 16px; }
+
+/* flex-basis 0, not auto: content width (a wide diff) must never resize the columns */
+.sf-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+}
+
+.sf-pane-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.sf-pane-path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sf-pane-dir { color: var(--text-muted); }
+.sf-pane-dirty { font-size: 11px; }
+
+.sf-pane-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.sf-mode-toggle {
+  display: flex;
+  gap: 4px;
+}
+.sf-mode-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.1s, color 0.1s;
+}
+.sf-mode-btn:hover { border-color: var(--accent); color: var(--accent); }
+.sf-mode-btn.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sf-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The diff fills the pane and scrolls inside it, rather than sizing it */
+.sf-pane-body .diff-stats { padding: 8px 12px 0; margin-bottom: 8px; }
+.sf-pane-body .diff-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+}
+.sf-preview-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px;
+}
+.sf-preview-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background: #fff;
+}
+
+.sf-status-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.sf-status-dirty { color: var(--warning); font-weight: 600; }
+.sf-status-sep { opacity: 0.5; }
+
+.sf-pane-empty {
+  margin: auto;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.sf-pane-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sf-editor-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.sf-textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  resize: none;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sf-textarea:focus { outline: none; }
+
+/* CodeMirror themed from the active CM palette so all themes work */
+.sf-editor-host .CodeMirror {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sf-editor-host .CodeMirror-gutters {
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+}
+.sf-editor-host .CodeMirror-linenumber { color: var(--text-muted); }
+.sf-editor-host .CodeMirror-cursor { border-left: 1px solid var(--accent); }
+.sf-editor-host .CodeMirror-selected { background: var(--bg-hover); }
+.sf-editor-host .CodeMirror-activeline-background { background: var(--bg-tertiary); }
+.sf-editor-host .CodeMirror-activeline .CodeMirror-linenumber {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.sf-editor-host .CodeMirror-matchingbracket {
+  color: var(--warning) !important;
+  font-weight: 600;
+}
+/* Token colours come from the active theme's --code-* palette, not the chart/badge colours.
+   Shared by the editor and the diff view via .code-colors. */
+.code-colors .cm-comment { color: var(--code-comment); font-style: italic; }
+.code-colors .cm-keyword,
+.code-colors .cm-builtin { color: var(--code-keyword); }
+.code-colors .cm-string,
+.code-colors .cm-string-2 { color: var(--code-string); }
+.code-colors .cm-atom,
+.code-colors .cm-number,
+.code-colors .cm-quote { color: var(--code-number); }
+.code-colors .cm-def,
+.code-colors .cm-variable-2,
+.code-colors .cm-variable-3,
+.code-colors .cm-header,
+.code-colors .cm-link { color: var(--code-def); }
+.code-colors .cm-tag,
+.code-colors .cm-meta { color: var(--code-tag); }
+.code-colors .cm-attribute,
+.code-colors .cm-qualifier,
+.code-colors .cm-property { color: var(--code-attr); }
+.code-colors .cm-operator,
+.code-colors .cm-punctuation,
+.code-colors .cm-bracket { color: var(--code-operator); }
+.code-colors .cm-variable,
+.code-colors .cm-variable-1 { color: var(--text-primary); }
+.code-colors .cm-error { color: var(--code-error); }
+.CodeMirror-dialog {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border) !important;
+  font-size: 12px;
+}
+.CodeMirror-dialog input {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
 }
 
 /* --- Activity Tab --- */
@@ -3648,44 +3945,6 @@ mark.search-highlight {
   color: var(--accent);
 }
 
-.ctx-file-item {
-  padding: 5px 8px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.1s;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.ctx-file-item:hover {
-  background: var(--bg-hover);
-}
-
-.ctx-file-name {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.ctx-file-group {
-  margin-bottom: 4px;
-}
-
-.ctx-file-group-header {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 4px 8px 2px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 2px;
-}
-
 .ctx-file-badge {
   font-size: 10px;
   font-family: var(--font-sans, inherit);
@@ -3753,7 +4012,7 @@ mark.search-highlight {
   text-align: center;
 }
 
-.ctx-file-deleted .ctx-file-name {
+.ctx-file-deleted .sf-name {
   text-decoration: line-through;
   color: var(--text-muted);
 }
@@ -3791,61 +4050,10 @@ mark.search-highlight {
   color: var(--text-muted);
 }
 
-/* --- Scratchpad Tab --- */
+/* --- Scratchpad Tab (uses the shared .sf-layout split above) --- */
 
-.session-scratchpad-panel {
-  flex: 1 1 auto;
-  min-height: 0;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.scratchpad-toolbar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-}
-
-.scratchpad-count {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.scratchpad-file-list {
-  padding: 6px 0;
-}
-
-.scratchpad-file-item {
-  padding: 6px 14px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid var(--border);
-  transition: background 0.1s;
-}
-.scratchpad-file-item:last-child { border-bottom: none; }
-.scratchpad-file-item:hover { background: var(--bg-hover); }
-
-.scratchpad-file-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.scratchpad-file-dir { color: var(--text-muted); }
-
-.scratchpad-file-size,
-.scratchpad-file-time {
+.sp-row-size {
+  margin-left: auto;
   flex: 0 0 auto;
   font-size: 11px;
   color: var(--text-muted);
@@ -3853,24 +4061,17 @@ mark.search-highlight {
 }
 
 .scratchpad-empty {
-  padding: 20px 14px;
-  color: var(--text-muted);
+  margin: auto;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
 .scratchpad-hint {
   font-size: 12px;
-  margin-top: 4px;
-}
-
-.scratchpad-file-content {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 60vh;
-  overflow-y: auto;
-  margin: 0;
+  margin-top: 8px;
+  color: var(--text-muted);
 }
 
 .session-plan-badge {
@@ -3978,41 +4179,6 @@ mark.search-highlight {
   background: var(--bg);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-}
-
-.md-view-toggle {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-}
-
-.md-toggle-btn {
-  padding: 2px 12px;
-  font-size: 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: border-color 0.1s, color 0.1s;
-}
-
-.md-toggle-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.md-toggle-btn.active {
-  background: var(--accent-bg);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.md-preview-pane {
-  padding: 4px 8px;
-  max-height: 60vh;
-  overflow-y: auto;
-  line-height: 1.6;
 }
 
 /* --- Active Sessions Bar --- */
