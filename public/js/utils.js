@@ -42,6 +42,20 @@ function renderMarkdown(text) {
   return clean.replace(/</g, '&lt;').replace(/\n/g, '<br>');
 }
 
+/** Render markdown for chat messages, escaping any raw HTML in the source instead of injecting it (chat text is untrusted user/model content, not a document preview). */
+function renderChatMarkdown(text) {
+  const clean = stripAnsi(text);
+  if (typeof marked === 'undefined') {
+    return clean.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+  }
+  if (!renderChatMarkdown._renderer) {
+    const r = new marked.Renderer();
+    r.html = token => escapeHtml(typeof token === 'string' ? token : (token.raw != null ? token.raw : (token.text || '')));
+    renderChatMarkdown._renderer = r;
+  }
+  return marked.parse(clean, { breaks: true, renderer: renderChatMarkdown._renderer });
+}
+
 /** Extract a human-readable short name from a project slug. */
 function decodeName(slug) {
   const segments = slug.replace(/^[A-Za-z]--/, '').split('-').filter(Boolean);
@@ -77,6 +91,22 @@ async function copyToClipboard(text, label = 'Copied') {
   } catch (e) {
     toast('Copy failed', 'error');
   }
+}
+
+/** Add a hover "Copy" button to each code block within a container. */
+function addCodeCopyButtons(container) {
+  container.querySelectorAll('.chat-text pre:not(.has-copy-btn)').forEach(pre => {
+    pre.classList.add('has-copy-btn');
+    const btn = document.createElement('button');
+    btn.className = 'code-copy-btn';
+    btn.type = 'button';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', () => {
+      const code = pre.querySelector('code');
+      copyToClipboard(code ? code.textContent : pre.textContent, 'Code copied');
+    });
+    pre.appendChild(btn);
+  });
 }
 
 function debounce(fn, ms) {

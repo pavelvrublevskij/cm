@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { execFile, spawn } = require('child_process');
 const { CLAUDE_DIR, PROJECTS_DIR } = require('../lib/paths');
 const { wrapRoute } = require('../lib/file-helpers');
 const planCache = require('../lib/plan-cache');
@@ -10,6 +11,51 @@ const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 
 const router = express.Router();
 const FILE_HISTORY_DIR = path.join(CLAUDE_DIR, 'file-history');
+
+/** Open a file with the OS default association (Explorer/Finder/xdg-open). */
+function openPath(targetPath) {
+  const platform = process.platform;
+  if (platform === 'win32') {
+    spawn('explorer.exe', [targetPath], { detached: true, stdio: 'ignore' }).unref();
+  } else if (platform === 'darwin') {
+    execFile('open', [targetPath]);
+  } else {
+    execFile('xdg-open', [targetPath]);
+  }
+}
+
+/** Reveal a file in the OS file explorer, selecting it (Linux falls back to opening the containing folder). */
+function revealInFileManager(targetPath) {
+  const platform = process.platform;
+  if (platform === 'win32') {
+    spawn('explorer.exe', ['/select,' + targetPath], { detached: true, stdio: 'ignore' }).unref();
+  } else if (platform === 'darwin') {
+    execFile('open', ['-R', targetPath]);
+  } else {
+    execFile('xdg-open', [path.dirname(targetPath)]);
+  }
+}
+
+/** Resolve+validate a projSlug/filePath pair against the project dir. Returns { error, status } or { target }. */
+function resolveProjectFile(projSlug, filePath) {
+  if (!projSlug || projSlug.includes('..') || projSlug.includes('/') || projSlug.includes('\\')) {
+    return { status: 400, error: 'Invalid projSlug' };
+  }
+  if (!filePath) return { status: 400, error: 'Invalid file path' };
+
+  const projectDir = decodeSlug(projSlug);
+  if (!projectDir) return { status: 404, error: 'Project not found' };
+
+  const target = path.resolve(projectDir, filePath);
+  const rel = path.relative(path.resolve(projectDir), target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return { status: 400, error: 'Invalid file path' };
+  }
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+    return { status: 404, error: 'File not found' };
+  }
+  return { target };
+}
 
 router.get('/:sessionId/context', wrapRoute((req, res) => {
   const { sessionId } = req.params;
@@ -148,6 +194,23 @@ router.get('/:sessionId/context', wrapRoute((req, res) => {
   res.json({ files, plans, projSlug });
 }));
 
+router.post('/open-file', wrapRoute((req, res) => {
+  const { projSlug, filePath } = req.body || {};
+  const resolved = resolveProjectFile(projSlug, filePath);
+  if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+
+  openPath(resolved.target);
+  res.json({ ok: true });
+}));
+
+router.post('/reveal-file', wrapRoute((req, res) => {
+  const { projSlug, filePath } = req.body || {};
+  const resolved = resolveProjectFile(projSlug, filePath);
+  if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+
+  revealInFileManager(resolved.target);
+  res.json({ ok: true });
+}));
 
 router.get('/:sessionId/:hash/diff', wrapRoute((req, res) => {
   const { sessionId, hash } = req.params;

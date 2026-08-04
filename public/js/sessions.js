@@ -807,10 +807,12 @@ const Sessions = {
     }
 
     Sessions._pendingFlash = undefined;
+    Sessions._ctx = null;
     Sessions._clearDetailArchivedUI();
     Sessions._activityLoaded = false;
     Sessions._activityItems = [];
     Sessions._activityFilter = null;
+    Sessions._scratchpadLoaded = false;
     container.innerHTML = '';
 
     // Reset search
@@ -825,6 +827,8 @@ const Sessions = {
       container.innerHTML = '<div class="empty-state"><p>Waiting for session to start...</p></div>';
       const ctxEl = document.getElementById('session-context');
       if (ctxEl) ctxEl.innerHTML = '';
+      const spEl = document.getElementById('session-scratchpad');
+      if (spEl) spEl.innerHTML = '';
       if (typeof TerminalPanel !== 'undefined') {
         if (TerminalPanel.isOpen()) TerminalPanel.close();
         TerminalPanel.open(slug, null);
@@ -839,6 +843,8 @@ const Sessions = {
     Sessions.switchTab('file-changes');
     const ctxEl = document.getElementById('session-context');
     if (ctxEl) { ctxEl.innerHTML = ''; }
+    const spEl = document.getElementById('session-scratchpad');
+    if (spEl) { spEl.innerHTML = ''; }
     Sessions.loadContext(sessionId, info);
 
     await Sessions.loadMore();
@@ -855,7 +861,7 @@ const Sessions = {
   },
 
   startAutoRefresh() {
-    Sessions.stopAutoRefresh();
+    Sessions.stopConversationRefresh();
     if (Sessions.isConversationHidden()) return;
     Sessions._refreshTimer = setInterval(() => Sessions.pollNewMessages(), Sessions.refreshIntervalMs());
     if (typeof setFooterStatus === 'function') {
@@ -865,18 +871,26 @@ const Sessions = {
   },
 
   startCtxPolling() {
-    if (Sessions._ctxTimer) { clearInterval(Sessions._ctxTimer); Sessions._ctxTimer = null; }
+    Sessions.stopCtxPolling();
     Sessions._ctxTimer = setInterval(() => {
       const { slug, sessionId } = Sessions.detailState;
       if (slug && sessionId) Sessions.pollContext(slug, sessionId);
     }, Sessions.refreshIntervalMs());
   },
 
+  stopConversationRefresh() {
+    if (Sessions._refreshTimer) { clearInterval(Sessions._refreshTimer); Sessions._refreshTimer = null; }
+    if (typeof setFooterStatus === 'function') setFooterStatus('Idle', false);
+  },
+
+  stopCtxPolling() {
+    if (Sessions._ctxTimer) { clearInterval(Sessions._ctxTimer); Sessions._ctxTimer = null; }
+  },
+
   stopAutoRefresh() {
     Sessions._stopDiscovery();
-    if (Sessions._refreshTimer) { clearInterval(Sessions._refreshTimer); Sessions._refreshTimer = null; }
-    if (Sessions._ctxTimer) { clearInterval(Sessions._ctxTimer); Sessions._ctxTimer = null; }
-    if (typeof setFooterStatus === 'function') setFooterStatus('Idle', false);
+    Sessions.stopConversationRefresh();
+    Sessions.stopCtxPolling();
   },
 
   _startDiscovery(slug) {
@@ -912,6 +926,7 @@ const Sessions = {
     Sessions.loadMore().then(() => {
       Sessions.setupScroll();
       if (!Sessions.isConversationHidden()) Sessions.startAutoRefresh();
+      Sessions.startCtxPolling();
     });
   },
 
@@ -952,6 +967,7 @@ const Sessions = {
       const container = document.getElementById('session-messages');
       if (!container) return;
       container.insertAdjacentHTML('afterbegin', html);
+      addCodeCopyButtons(container);
 
       state.total = data.total;
       state.offset += added;
@@ -1029,6 +1045,7 @@ const Sessions = {
 
       const html = data.messages.map(m => Sessions.renderMessage(m)).join('');
       container.insertAdjacentHTML('beforeend', html);
+      addCodeCopyButtons(container);
 
       Sessions.updateMessageCount();
 
@@ -1210,24 +1227,30 @@ const Sessions = {
     const ctx = document.getElementById('session-context');
     const msgs = document.getElementById('session-messages-wrap');
     const act = document.getElementById('session-activity');
+    const sp = document.getElementById('session-scratchpad');
     const fcBtn = document.getElementById('tab-btn-file-changes');
     const cvBtn = document.getElementById('tab-btn-conversation');
     const acBtn = document.getElementById('tab-btn-activity');
+    const spBtn = document.getElementById('tab-btn-scratchpad');
     if (!ctx || !msgs || !fcBtn || !cvBtn) return;
     const isFC = tab === 'file-changes';
     const isAct = tab === 'activity';
+    const isSP = tab === 'scratchpad';
     ctx.style.display = isFC ? 'block' : 'none';
-    msgs.style.display = isAct || isFC ? 'none' : '';
+    msgs.style.display = isAct || isFC || isSP ? 'none' : '';
     if (act) act.style.display = isAct ? 'flex' : 'none';
+    if (sp) sp.style.display = isSP ? 'flex' : 'none';
     fcBtn.classList.toggle('active', isFC);
-    cvBtn.classList.toggle('active', !isFC && !isAct);
+    cvBtn.classList.toggle('active', !isFC && !isAct && !isSP);
     if (acBtn) acBtn.classList.toggle('active', isAct);
+    if (spBtn) spBtn.classList.toggle('active', isSP);
     if (isFC && Sessions._pendingFlash !== undefined) {
       const pending = Sessions._pendingFlash;
       Sessions._pendingFlash = undefined;
       Sessions._flashItems(ctx, pending);
     }
     if (isAct && !Sessions._activityLoaded) Sessions.loadActivity();
+    if (isSP && !Sessions._scratchpadLoaded) Sessions.loadScratchpad();
   },
 
   _rerenderPlans() {

@@ -1,3 +1,16 @@
+## v1.4.0
+
+### Features
+
+- **Scratchpad tab in session detail** — a new tab alongside File Changes / Conversation / Activity shows files Claude created in its temporary scratchpad directory (`<tmp>/claude/<project>/<session>/scratchpad/`) for that session: a file list with size and modified time, inline text preview, and per-file actions to open in the default editor or reveal in the OS file explorer. Sessions with no scratchpad files show an explanatory empty state instead of an error.
+- **Open in editor / show in file explorer for changed files** — File Changes rows and the diff modal now offer "Open in editor" and "Show in file explorer" for each changed file, via the same kebab (⋮) dropdown already used for session-card actions rather than stacking separate buttons per row. In the diff modal these actions follow prev/next navigation between files and are disabled once a file no longer exists on disk.
+- **One-click code block copy in conversation view** — hovering a code block in the session conversation now reveals a "Copy" button that copies the block's contents to the clipboard.
+
+### Bug fixes
+
+- **File Changes stopped refreshing until the session was reopened** — the File Changes list polls on its own timer, but `startAutoRefresh()` cleared that timer along with the conversation one and only restarted the conversation poll. Collapsing/expanding the conversation pane, changing the refresh interval, or letting a new terminal session be auto-discovered therefore killed file-change polling for good, so the list only caught up when the session was reopened. Conversation refresh and File Changes polling now have separate start/stop controls, hiding the conversation no longer stops file polling, and a discovered session starts it.
+- **File Changes missed updates after switching sessions** — the poll compared the incoming file list against the last rendered one, but that cache was never reset per session and was skipped entirely for sessions with no files, so a new session's files could be diffed against another session's snapshot and dismissed as unchanged. The cache is now session-scoped, and change detection also catches files dropping out of the list, new/deleted status flips, and plans updated without a change in count.
+
 ## v1.3.2
 
 ### Bug fixes
