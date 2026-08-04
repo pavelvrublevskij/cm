@@ -12,6 +12,7 @@ const context = vm.createContext({
   Sessions,
   escapeHtml: s => String(s),
   renderMarkdown: s => String(s),
+  renderChatMarkdown: s => String(s),
   shortModel: s => String(s),
   debounce: fn => fn,
   document: { getElementById: () => null },
