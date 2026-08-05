@@ -943,6 +943,8 @@ const Sessions = {
     const slugAtStart = state.slug;
     const sessionAtStart = state.sessionId;
 
+    Sessions.refreshOpenAgentConvs();
+
     try {
       const data = await api(`/api/projects/${slugAtStart}/sessions/${sessionAtStart}?offset=0&limit=20`);
       if (state.slug !== slugAtStart || state.sessionId !== sessionAtStart) return;

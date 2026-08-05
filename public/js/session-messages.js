@@ -117,20 +117,37 @@ Object.assign(Sessions, {
     if (arrowEl) arrowEl.innerHTML = isOpen ? '&#9654;' : '&#9660;';
     if (isOpen || convEl.dataset.loaded) return;
 
-    const { slug, sessionId } = Sessions.detailState;
+    convEl.dataset.agentId = agentId;
     convEl.innerHTML = '<div class="loading"><div class="spinner"></div> Loading sub-agent conversation…</div>';
+    await Sessions._loadAgentConv(agentId, convEl);
+  },
+
+  async _loadAgentConv(agentId, convEl) {
+    const { slug, sessionId } = Sessions.detailState;
 
     try {
       const data = await api(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/subagents/${encodeURIComponent(agentId)}`);
+      const count = data.messages ? data.messages.length : 0;
+      if (convEl.dataset.loaded && convEl.dataset.msgCount === String(count)) return;
+
       convEl.dataset.loaded = '1';
-      if (!data.messages || !data.messages.length) {
+      convEl.dataset.msgCount = String(count);
+      if (!count) {
         convEl.innerHTML = '<div class="empty-state"><p>No messages recorded</p></div>';
         return;
       }
       convEl.innerHTML = data.messages.map(m => Sessions.renderMessage(m)).join('');
       addCodeCopyButtons(convEl);
     } catch (e) {
-      convEl.innerHTML = `<div class="empty-state"><p>${escapeHtml(e.message)}</p></div>`;
+      if (!convEl.dataset.loaded) convEl.innerHTML = `<div class="empty-state"><p>${escapeHtml(e.message)}</p></div>`;
+    }
+  },
+
+  async refreshOpenAgentConvs() {
+    const nodes = document.querySelectorAll('.chat-agent-conv[data-agent-id]');
+    for (const convEl of nodes) {
+      if (convEl.style.display === 'none') continue;
+      await Sessions._loadAgentConv(convEl.dataset.agentId, convEl);
     }
   },
 
