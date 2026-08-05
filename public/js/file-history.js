@@ -76,6 +76,19 @@ const FileHistory = {
     return api(`/api/file-history/${encodeURIComponent(sessionId)}/${hashSeg}/diff-current?${params.toString()}`);
   },
 
+  /** 1-indexed line numbers in the *current* file touched by the session, per diff-current hunks. */
+  computeChangedLines(hunks) {
+    const lines = new Set();
+    for (const hunk of hunks) {
+      let newLine = hunk.newStart;
+      for (const l of hunk.lines) {
+        if (l.type === '+') lines.add(newLine++);
+        else if (l.type === ' ') newLine++;
+      }
+    }
+    return lines;
+  },
+
   async _loadDiff(overlay, sessionId, hash, version, projSlug, filePath, { isNew, isDeleted }) {
     try {
       const result = await FileHistory.fetchDiffCurrent(sessionId, hash, version, projSlug, filePath, { isNew });

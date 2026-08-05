@@ -27,16 +27,21 @@ const CodeView = {
   /**
    * Mount a code view in `host` and return an adapter with getValue()/refresh(), or null when
    * `host` is missing. Falls back to a plain textarea when the CodeMirror CDN is unavailable.
-   * opts: { readOnly, onChange, onSave }
+   * opts: { readOnly, onChange, onSave, trackChanges, changedLines }
+   * trackChanges reserves a gutter + overview ruler for session-changed lines; changedLines is a
+   * Set of 1-indexed line numbers to mark immediately (it may arrive later via setChangedLines).
    */
   mount(host, text, filePath, opts = {}) {
     if (!host) return null;
 
     if (typeof CodeMirror !== 'undefined') {
+      const gutters = ['CodeMirror-linenumbers'];
+      if (opts.trackChanges) gutters.push('sf-gutter-changes');
       const cm = CodeMirror(host, {
         value: text,
         mode: codeModeFor(filePath),
         lineNumbers: true,
+        gutters,
         matchBrackets: true,
         styleActiveLine: true,
         indentUnit: 2,
@@ -44,9 +49,20 @@ const CodeView = {
         extraKeys: opts.onSave ? { 'Ctrl-S': opts.onSave, 'Cmd-S': opts.onSave } : undefined
       });
       if (opts.onChange) cm.on('change', opts.onChange);
+      if (opts.trackChanges && opts.changedLines) CodeView._applyChangeMarkers(cm, host, opts.changedLines);
       return {
         getValue: () => cm.getValue(),
-        refresh: () => cm.refresh()
+        refresh: () => cm.refresh(),
+        setChangedLines: lines => CodeView._applyChangeMarkers(cm, host, lines),
+        getViewState: () => {
+          const cursor = cm.getCursor();
+          return { cursor: { line: cursor.line, ch: cursor.ch }, scrollTop: cm.getScrollInfo().top };
+        },
+        setViewState: state => {
+          if (!state) return;
+          if (state.cursor) cm.setCursor(state.cursor);
+          if (typeof state.scrollTop === 'number') cm.scrollTo(null, state.scrollTop);
+        }
       };
     }
 
@@ -64,8 +80,67 @@ const CodeView = {
     }
     return {
       getValue: () => ta.value,
-      refresh: () => {}
+      refresh: () => {},
+      setChangedLines: () => {},
+      getViewState: () => ({ selectionStart: ta.selectionStart, selectionEnd: ta.selectionEnd, scrollTop: ta.scrollTop }),
+      setViewState: state => {
+        if (!state) return;
+        if (typeof state.selectionStart === 'number') { ta.selectionStart = state.selectionStart; ta.selectionEnd = state.selectionEnd; }
+        if (typeof state.scrollTop === 'number') ta.scrollTop = state.scrollTop;
+      }
     };
+  },
+
+  /** Colour the gutter for each changed line and lay out matching ticks on an overview ruler. */
+  _applyChangeMarkers(cm, host, changedLines) {
+    const total = cm.lineCount();
+    for (let i = 0; i < total; i++) cm.setGutterMarker(i, 'sf-gutter-changes', null);
+    const existingRuler = host.querySelector('.sf-overview-ruler');
+    if (existingRuler) existingRuler.remove();
+    host.classList.remove('sf-has-ruler');
+
+    if (!changedLines || !changedLines.size) {
+      cm.refresh();
+      return;
+    }
+    changedLines.forEach(line => {
+      const idx = line - 1;
+      if (idx < 0 || idx >= total) return;
+      const marker = document.createElement('div');
+      marker.className = 'sf-gutter-marker';
+      cm.setGutterMarker(idx, 'sf-gutter-changes', marker);
+    });
+
+    const ruler = document.createElement('div');
+    ruler.className = 'sf-overview-ruler';
+    CodeView._buildRulerTicks(ruler, changedLines, total, cm);
+    host.appendChild(ruler);
+    host.classList.add('sf-has-ruler');
+    cm.refresh();
+  },
+
+  /** Group consecutive changed lines into ranges so the ruler shows blocks, not a speckle of ticks. */
+  _buildRulerTicks(ruler, changedLines, total, cm) {
+    const sorted = [...changedLines].sort((a, b) => a - b);
+    const ranges = [];
+    for (const line of sorted) {
+      const last = ranges[ranges.length - 1];
+      if (last && line <= last.end + 1) last.end = Math.max(last.end, line);
+      else ranges.push({ start: line, end: line });
+    }
+    ranges.forEach(r => {
+      const tick = document.createElement('div');
+      tick.className = 'sf-ruler-tick';
+      tick.style.top = ((r.start - 1) / total * 100) + '%';
+      tick.style.height = Math.max((r.end - r.start + 1) / total * 100, 0.8) + '%';
+      tick.title = r.start === r.end ? `Line ${r.start}` : `Lines ${r.start}–${r.end}`;
+      tick.addEventListener('click', () => {
+        cm.setCursor(r.start - 1, 0);
+        cm.scrollIntoView({ line: r.start - 1, ch: 0 }, 100);
+        cm.focus();
+      });
+      ruler.appendChild(tick);
+    });
   },
 
   // --- split layout: resizable, collapsible structure column ---

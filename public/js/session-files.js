@@ -184,10 +184,11 @@ const SessionFiles = {
     const canPreview = !isDeleted && CodeView.isPreviewable(relPath);
     // Markdown and HTML land on their rendered form; everything else on the source.
     const mode = (opts.mode === 'diff' || isDeleted) && canDiff ? 'diff' : (canPreview ? 'preview' : 'source');
-    SessionFiles.open = { path: relPath, mode, ctx, canDiff, canPreview, isDeleted, loading: !isDeleted, saved: '', mtime: null };
+    SessionFiles.open = { path: relPath, mode, ctx, canDiff, canPreview, isDeleted, loading: !isDeleted, saved: '', mtime: null, changedLines: undefined };
     SessionFiles.renderPane();
     SessionFiles.renderTree();
     SessionFiles._updateActiveRow();
+    if (canDiff && !isDeleted) SessionFiles._loadChangedLines(SessionFiles.open);
     if (isDeleted) return;
 
     try {
@@ -323,14 +324,31 @@ const SessionFiles = {
     const ctx = open.ctx;
     const projSlug = SessionFiles._projSlug();
     try {
-      const result = await FileHistory.fetchDiffCurrent(ctx.session, ctx.hash, parseInt(ctx.from, 10), projSlug, open.path, {
+      const result = open._diffResult || await FileHistory.fetchDiffCurrent(ctx.session, ctx.hash, parseInt(ctx.from, 10), projSlug, open.path, {
         isNew: ctx.isNew === '1'
       });
       if (SessionFiles.open !== open || open.mode !== 'diff') return;
+      open._diffResult = result;
       FileHistory.renderDiff(body, result, open.path);
     } catch (e) {
       if (SessionFiles.open !== open || open.mode !== 'diff') return;
       body.innerHTML = `<div class="empty-state"><p>Could not load diff: ${escapeHtml(e.message)}</p></div>`;
+    }
+  },
+
+  /** Fetch the same diff-current hunks the Diff tab uses, but just to mark changed lines in Source. */
+  async _loadChangedLines(open) {
+    const ctx = open.ctx;
+    try {
+      const result = await FileHistory.fetchDiffCurrent(ctx.session, ctx.hash, parseInt(ctx.from, 10), SessionFiles._projSlug(), open.path, {
+        isNew: ctx.isNew === '1'
+      });
+      if (SessionFiles.open !== open) return;
+      open._diffResult = result;
+      open.changedLines = result.tooLarge ? null : FileHistory.computeChangedLines(result.hunks || []);
+      if (open.mode === 'source' && SessionFiles.editor) SessionFiles.editor.setChangedLines(open.changedLines);
+    } catch (e) {
+      open.changedLines = null;
     }
   },
 
@@ -362,8 +380,13 @@ const SessionFiles = {
     if (!open) return;
     SessionFiles.editor = CodeView.mount(document.getElementById('sf-editor-host'), SessionFiles._currentText(), open.path, {
       onChange: () => SessionFiles.onEdit(),
-      onSave: () => SessionFiles.save()
+      onSave: () => SessionFiles.save(),
+      trackChanges: open.canDiff,
+      changedLines: open.changedLines
     });
+    if (SessionFiles.editor && SessionFiles.editor.setViewState) {
+      SessionFiles.editor.setViewState(FileViewCache.get(SessionFiles._projSlug(), open.path));
+    }
   },
 
   /** Editor text with the file's own line endings restored — editors hand back LF regardless. */
@@ -399,6 +422,9 @@ const SessionFiles = {
     if (value === null) return;
     if (value === open.saved) delete SessionFiles.buffers[open.path];
     else SessionFiles.buffers[open.path] = value;
+    if (SessionFiles.editor && SessionFiles.editor.getViewState) {
+      FileViewCache.set(SessionFiles._projSlug(), open.path, SessionFiles.editor.getViewState());
+    }
   },
 
   _scheduleAutosave() {

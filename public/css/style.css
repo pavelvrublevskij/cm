@@ -3634,6 +3634,35 @@ mark.search-highlight {
   font-size: 12px;
   line-height: 1.5;
 }
+.sf-editor-host.sf-has-ruler .CodeMirror { right: 8px; }
+
+.sf-gutter-changes { width: 4px; }
+.sf-gutter-marker {
+  width: 3px;
+  height: 100%;
+  margin: 0 auto;
+  border-radius: 1px;
+  background: #3fb950;
+}
+
+.sf-overview-ruler {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  z-index: 4;
+}
+.sf-ruler-tick {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: #3fb950;
+  cursor: pointer;
+}
+.sf-ruler-tick:hover { background: #56d364; }
 .sf-editor-host .CodeMirror-gutters {
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
