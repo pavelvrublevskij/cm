@@ -85,6 +85,8 @@ beforeEach(() => {
   Sessions._refreshTimer = null;
   Sessions._ctxTimer = null;
   Sessions._discoverTimer = null;
+  harness.spPolls = 0;
+  Sessions.pollScratchpad = () => { harness.spPolls++; }; // session-scratchpad.js supplies this on the page
 });
 
 // ── polling lifecycle ─────────────────────────────────────────────────────────
@@ -150,6 +152,18 @@ test('the File Changes timer polls the session in detailState', async () => {
 
   assert.strictEqual(harness.apiCalls.length, 1);
   assert.ok(harness.apiCalls[0].includes('s1'));
+});
+
+test('the same timer tick also refreshes the scratchpad', async () => {
+  Sessions.startCtxPolling();
+  harness.apiResponse = { files: [], plans: [], projSlug: 'proj' };
+
+  await harness.timers.get(Sessions._ctxTimer).fn();
+  assert.strictEqual(harness.spPolls, 1);
+
+  Sessions.detailState.sessionId = null;
+  await harness.timers.get(Sessions._ctxTimer).fn();
+  assert.strictEqual(harness.spPolls, 1, 'no session, nothing to poll');
 });
 
 // ── change detection ──────────────────────────────────────────────────────────

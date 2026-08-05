@@ -876,7 +876,9 @@ const Sessions = {
     Sessions.stopCtxPolling();
     Sessions._ctxTimer = setInterval(() => {
       const { slug, sessionId } = Sessions.detailState;
-      if (slug && sessionId) Sessions.pollContext(slug, sessionId);
+      if (!slug || !sessionId) return;
+      Sessions.pollContext(slug, sessionId);
+      Sessions.pollScratchpad();
     }, Sessions.refreshIntervalMs());
   },
 

@@ -37,7 +37,7 @@ Object.assign(Sessions, {
 
     el.innerHTML = `<div class="sf-structure" id="sp-structure">
         <div class="sf-tree-header">
-          <span>Scratchpad (${data.files.length})</span>
+          <span id="sp-count">Scratchpad (${data.files.length})</span>
           <button class="icon-btn" onclick="Sessions.openScratchpadFolder()" title="Open folder" aria-label="Open folder">&#128193;</button>
         </div>
         <div id="sp-list">${Sessions._renderScratchpadList()}</div>
@@ -129,8 +129,8 @@ Object.assign(Sessions, {
           <div class="action-menu">
             <button class="btn btn-sm action-menu-btn" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)" aria-label="File actions">&#8942;</button>
             <div class="action-menu-panel">
-              <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openScratchpadFile(${open.index})">Open in editor</button>
-              <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.revealScratchpadFile(${open.index})">Show in file explorer</button>
+              <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openScratchpadFile(Sessions._spOpen.index)">Open in editor</button>
+              <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.revealScratchpadFile(Sessions._spOpen.index)">Show in file explorer</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openScratchpadFolder()">Open folder</button>
             </div>
           </div>
@@ -165,6 +165,53 @@ Object.assign(Sessions, {
   _refreshScratchpadList() {
     const list = document.getElementById('sp-list');
     if (list) list.innerHTML = Sessions._renderScratchpadList();
+  },
+
+  _scratchpadKey(data) {
+    if (!data || !data.exists) return '';
+    return (data.files || []).map(f => `${f.path}@${f.size}@${f.mtime}`).join('|');
+  },
+
+  /** Refresh the file list on the detail view's poll tick, keeping the open file in place. */
+  async pollScratchpad() {
+    const el = document.getElementById('session-scratchpad');
+    if (!el || !Sessions._scratchpadLoaded) return;
+    const { slug, sessionId } = Sessions.detailState;
+    if (!slug || !sessionId) return;
+
+    try {
+      const data = await api(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/scratchpad`);
+      if (Sessions.detailState.slug !== slug || Sessions.detailState.sessionId !== sessionId) return;
+      if (Sessions._scratchpadKey(data) === Sessions._scratchpadKey(Sessions._scratchpadData)) return;
+
+      const prev = Sessions._scratchpadData;
+      const prevHadFiles = !!(prev && prev.exists && prev.files.length);
+      const hasFiles = !!(data.exists && data.files.length);
+      const openPath = Sessions._spOpen && Sessions._spOpen.path;
+      Sessions._scratchpadData = data;
+
+      if (!prevHadFiles || !hasFiles) {
+        Sessions._spOpen = null;
+        Sessions._spEditor = null;
+        Sessions.renderScratchpad(el, data);
+        return;
+      }
+
+      if (openPath) {
+        const index = data.files.findIndex(f => f.path === openPath);
+        if (index < 0) {
+          Sessions._spOpen = null;
+          Sessions._spEditor = null;
+          Sessions._renderScratchpadPane();
+        } else {
+          Sessions._spOpen.index = index;
+        }
+      }
+
+      Sessions._refreshScratchpadList();
+      const count = document.getElementById('sp-count');
+      if (count) count.textContent = `Scratchpad (${data.files.length})`;
+    } catch (_) {}
   },
 
   async openScratchpadFolder() {

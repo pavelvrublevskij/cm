@@ -98,6 +98,7 @@ beforeEach(() => {
   Sessions._scratchpadData = null;
   Sessions._spOpen = null;
   Sessions._spEditor = null;
+  Sessions._scratchpadLoaded = false;
 });
 
 async function loadWith(files, exists = true) {
@@ -220,6 +221,77 @@ test('loading a session clears the previously open file', async () => {
   await loadWith(FILES);
   assert.strictEqual(Sessions._spOpen, null);
   assert.strictEqual(Sessions._spEditor, null);
+});
+
+// ── live refresh ──────────────────────────────────────────────────────────────
+
+test('polling shows files added after the tab was opened', async () => {
+  await loadWith(FILES);
+  const added = [{ path: 'fresh.txt', size: 5, mtime: 9 }, ...FILES];
+  harness.apiHandler = () => ({ exists: true, files: added });
+  await Sessions.pollScratchpad();
+
+  assert.ok(el('sp-list').innerHTML.includes('fresh.txt'));
+  assert.strictEqual(el('sp-count').textContent, 'Scratchpad (4)');
+});
+
+test('polling an unchanged scratchpad leaves the list alone', async () => {
+  await loadWith(FILES);
+  el('sp-list').innerHTML = 'UNTOUCHED';
+  harness.apiHandler = () => ({ exists: true, files: FILES });
+  await Sessions.pollScratchpad();
+  assert.strictEqual(el('sp-list').innerHTML, 'UNTOUCHED');
+});
+
+test('a new file does not disturb the open file, only its index', async () => {
+  await loadWith(FILES);
+  harness.apiHandler = () => ({ binary: false, content: 'const a = 1;', size: 40 });
+  await Sessions.openScratchpadInPane(1);
+  harness.cm = null;
+
+  harness.apiHandler = () => ({ exists: true, files: [{ path: 'fresh.txt', size: 5, mtime: 9 }, ...FILES] });
+  await Sessions.pollScratchpad();
+
+  assert.strictEqual(Sessions._spOpen.path, 'nested/probe.js');
+  assert.strictEqual(Sessions._spOpen.index, 2, 'index follows the file down the list');
+  assert.strictEqual(harness.cm, null, 'the viewer is not remounted');
+  assert.ok(el('sp-list').innerHTML.includes('sf-row-active'));
+});
+
+test('polling closes the pane when the open file is gone', async () => {
+  await loadWith(FILES);
+  harness.apiHandler = () => ({ binary: false, content: 'x', size: 40 });
+  await Sessions.openScratchpadInPane(1);
+
+  harness.apiHandler = () => ({ exists: true, files: FILES.filter(f => f.path !== 'nested/probe.js') });
+  await Sessions.pollScratchpad();
+
+  assert.strictEqual(Sessions._spOpen, null);
+  assert.ok(el('sp-pane').innerHTML.includes('Select a file'));
+});
+
+test('polling replaces the empty state once the first file appears', async () => {
+  await loadWith([], false);
+  harness.apiHandler = () => ({ exists: true, files: FILES });
+  await Sessions.pollScratchpad();
+
+  const html = el('session-scratchpad').innerHTML;
+  assert.ok(html.includes('sf-splitter'), 'the split layout is built');
+  assert.ok(html.includes('Scratchpad (3)'));
+});
+
+test('polling falls back to the empty state when every file is gone', async () => {
+  await loadWith(FILES);
+  harness.apiHandler = () => ({ exists: true, files: [] });
+  await Sessions.pollScratchpad();
+  assert.ok(el('session-scratchpad').innerHTML.includes('No scratchpad files'));
+});
+
+test('polling is skipped until the tab has been opened', async () => {
+  Sessions._scratchpadLoaded = false;
+  harness.apiHandler = () => ({ exists: true, files: FILES });
+  await Sessions.pollScratchpad();
+  assert.strictEqual(harness.apiCalls.length, 0);
 });
 
 // ── OS actions still reachable ────────────────────────────────────────────────
