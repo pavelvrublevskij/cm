@@ -57,8 +57,10 @@ const context = vm.createContext({
   FileHistory: {},
   SessionFiles: {
     open: null,
+    treeLoaded: false,
     setChangedPaths: paths => { harness.changedPaths = paths; },
     openFile: (path, opts) => { harness.opened = { path, opts }; },
+    reloadTree: () => { harness.treeReloads++; },
   },
   App: { navigate: () => {}, setHash: () => {} },
   TerminalPanel: { isOpen: () => false, shouldAutoOpen: () => false },
@@ -77,6 +79,8 @@ beforeEach(() => {
   harness.ctxEl = makeEl();
   harness.changedPaths = null;
   harness.opened = null;
+  harness.treeReloads = 0;
+  context.SessionFiles.treeLoaded = false;
   Sessions._ctxCollapsed = new Set();
   Sessions._ctx = null;
   Sessions._detailInfo = {};
@@ -191,6 +195,42 @@ test('pollContext re-renders when a new file appears', async () => {
   await Sessions.pollContext('proj', 's1');
 
   assert.ok(harness.ctxEl.innerHTML.includes('b.js'));
+});
+
+test('pollContext reloads the browsable tree when a new file appears and the tree is loaded', async () => {
+  context.SessionFiles.treeLoaded = true;
+  harness.apiResponse = { files: [file('a.js', 100)], plans: [], projSlug: 'proj' };
+  await Sessions.pollContext('proj', 's1');
+  harness.treeReloads = 0;
+
+  harness.apiResponse = { files: [file('a.js', 100), file('b.js', 100, { isNew: true })], plans: [], projSlug: 'proj' };
+  await Sessions.pollContext('proj', 's1');
+
+  assert.strictEqual(harness.treeReloads, 1);
+});
+
+test('pollContext does not reload the tree when it has not been opened yet', async () => {
+  context.SessionFiles.treeLoaded = false;
+  harness.apiResponse = { files: [file('a.js', 100)], plans: [], projSlug: 'proj' };
+  await Sessions.pollContext('proj', 's1');
+  harness.treeReloads = 0;
+
+  harness.apiResponse = { files: [file('a.js', 100), file('b.js', 100, { isNew: true })], plans: [], projSlug: 'proj' };
+  await Sessions.pollContext('proj', 's1');
+
+  assert.strictEqual(harness.treeReloads, 0);
+});
+
+test('pollContext does not reload the tree for a plan-only change', async () => {
+  context.SessionFiles.treeLoaded = true;
+  harness.apiResponse = { files: [file('a.js', 100)], plans: [{ name: 'plan-a', mtime: '2026-01-01T10:00:00.000Z' }], projSlug: 'proj' };
+  await Sessions.pollContext('proj', 's1');
+  harness.treeReloads = 0;
+
+  harness.apiResponse = { files: [file('a.js', 100)], plans: [{ name: 'plan-a', mtime: '2026-01-01T11:00:00.000Z' }], projSlug: 'proj' };
+  await Sessions.pollContext('proj', 's1');
+
+  assert.strictEqual(harness.treeReloads, 0);
 });
 
 test('pollContext re-renders when a file drops out of the list', async () => {

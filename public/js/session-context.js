@@ -36,6 +36,11 @@ Object.assign(Sessions, {
       if (savedSort !== 'default') Sessions.sortCtxFiles(savedSort);
 
       Sessions._flashItems(el, changedPaths);
+
+      // New/removed files change what the browsable tree's cached directory listings should show.
+      if ((changedPaths.size || filesDropped) && typeof SessionFiles !== 'undefined' && SessionFiles.treeLoaded) {
+        SessionFiles.reloadTree();
+      }
     } catch (_) {}
   },
 
