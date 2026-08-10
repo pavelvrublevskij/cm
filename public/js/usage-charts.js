@@ -90,7 +90,23 @@ const UsageCharts = {
 
     this.renderPeriod(periods, p);
     this.renderModels(summary, p);
-    this.renderProjects(projects, p);
+    this.renderProjects(projects, p, summary);
+  },
+
+  modelColorMap(summary, p) {
+    const byModel = summary && summary.byModel ? summary.byModel : {};
+    const pricing = summary && summary.modelPricing ? summary.modelPricing : {};
+    const models = Object.entries(byModel).map(([model, t]) => {
+      const r = matchPricing(model, pricing) || {};
+      const cost = (t.input_tokens || 0) * (r.input || 0) / 1e6
+        + (t.output_tokens || 0) * (r.output || 0) / 1e6
+        + (t.cache_creation_input_tokens || 0) * (r.cache_write || 0) / 1e6
+        + (t.cache_read_input_tokens || 0) * (r.cache_read || 0) / 1e6;
+      return { model, cost };
+    }).sort((a, b) => b.cost - a.cost);
+    const map = {};
+    models.forEach((m, i) => { map[m.model] = this.modelColor(i, p); });
+    return map;
   },
 
   renderPeriod(periods, p) {
@@ -284,7 +300,7 @@ const UsageCharts = {
     });
   },
 
-  renderProjects(projects, p) {
+  renderProjects(projects, p, summary) {
     const canvas = document.getElementById('chart-projects');
     const subEl = document.getElementById('chart-projects-sub');
     if (!canvas) return;
@@ -302,36 +318,64 @@ const UsageCharts = {
     if (subEl) subEl.textContent = `Top ${list.length} of ${(projects || []).length} • ${this.fmtCost(total)} total`;
 
     const labels = list.map(x => Usage.basename(x.name));
-    const data = list.map(x => x.cost);
+    const pricing = summary && summary.modelPricing ? summary.modelPricing : {};
+    const colorMap = this.modelColorMap(summary, p);
 
-    const ctx = canvas.getContext('2d');
-    const grad = ctx.createLinearGradient(0, 0, 600, 0);
-    grad.addColorStop(0, this.hexToRgba(p.accent, 0.45));
-    grad.addColorStop(1, this.hexToRgba(p.accent, 1));
+    const models = new Set();
+    list.forEach(proj => Object.keys(proj.byModel || {}).forEach(m => models.add(m)));
+    const modelList = Array.from(models).sort((a, b) => {
+      const order = Object.keys(colorMap);
+      return order.indexOf(a) - order.indexOf(b);
+    });
+
+    const costForModel = (proj, model) => {
+      const t = (proj.byModel || {})[model];
+      if (!t) return 0;
+      const r = matchPricing(model, pricing) || {};
+      return (t.input_tokens || 0) * (r.input || 0) / 1e6
+        + (t.output_tokens || 0) * (r.output || 0) / 1e6
+        + (t.cache_creation_input_tokens || 0) * (r.cache_write || 0) / 1e6
+        + (t.cache_read_input_tokens || 0) * (r.cache_read || 0) / 1e6;
+    };
+
+    const lastNonZeroModelIndex = list.map(proj => {
+      let last = -1;
+      modelList.forEach((m, i) => { if (costForModel(proj, m) > 0) last = i; });
+      return last;
+    });
+
+    const roundedCap = { topLeft: 0, bottomLeft: 0, topRight: 6, bottomRight: 6 };
+    const square = { topLeft: 0, bottomLeft: 0, topRight: 0, bottomRight: 0 };
+
+    const datasets = modelList.map((model, mi) => {
+      const color = colorMap[model] || p.accent;
+      return {
+        label: shortModel(model) || model,
+        data: list.map(proj => costForModel(proj, model)),
+        backgroundColor: this.hexToRgba(color, 0.85),
+        hoverBackgroundColor: color,
+        borderColor: 'transparent',
+        borderRadius: (ctx) => lastNonZeroModelIndex[ctx.dataIndex] === mi ? roundedCap : square,
+        borderSkipped: false,
+        stack: 'projects',
+        maxBarThickness: 22,
+      };
+    });
 
     const tooltipBg = this.hexToRgba(p.bg, 0.96);
 
     this.charts.projects = new Chart(canvas, {
       type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Cost',
-          data,
-          backgroundColor: grad,
-          hoverBackgroundColor: p.accent,
-          borderColor: 'transparent',
-          borderRadius: 6,
-          borderSkipped: false,
-          maxBarThickness: 22,
-        }],
-      },
+      data: { labels, datasets },
       options: {
         indexAxis: 'y',
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: false },
+          legend: {
+            position: 'bottom',
+            labels: { boxWidth: 10, boxHeight: 10, padding: 12, usePointStyle: true, color: p.muted },
+          },
           tooltip: {
             backgroundColor: tooltipBg,
             titleColor: p.text,
@@ -344,26 +388,26 @@ const UsageCharts = {
                 const item = list[items[0].dataIndex];
                 return item ? item.name : '';
               },
-              label: (ctx) => {
-                const item = list[ctx.dataIndex];
-                if (!item) return UsageCharts.fmtCost(ctx.parsed.x);
-                const lines = [
-                  `Cost: ${UsageCharts.fmtCost(item.cost)}`,
+              label: (ctx) => `${ctx.dataset.label}: ${UsageCharts.fmtCost(ctx.parsed.x)}`,
+              footer: (items) => {
+                const item = list[items[0].dataIndex];
+                if (!item) return '';
+                return [
+                  `Total: ${UsageCharts.fmtCost(item.cost)}`,
                   `Sessions: ${item.sessionCount}`,
-                  `Input: ${UsageCharts.fmtTokensShort(item.input_tokens)}`,
-                  `Output: ${UsageCharts.fmtTokensShort(item.output_tokens)}`,
                 ];
-                return lines;
               },
             },
           },
         },
         scales: {
           x: {
+            stacked: true,
             grid: { color: UsageCharts.hexToRgba(p.border, 0.6), drawBorder: false },
             ticks: { color: p.muted, callback: (v) => UsageCharts.fmtCost(v) },
           },
           y: {
+            stacked: true,
             grid: { display: false, drawBorder: false },
             ticks: { color: p.text, autoSkip: false },
           },
