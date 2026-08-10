@@ -7,6 +7,7 @@ const path = require('path');
 // Load code-view.js + session-files.js in a browser-like sandbox with stub DOM/CodeMirror/timers
 // so the Files tab tree, dirty tracking and autosave can be asserted without a browser.
 const src = fs.readFileSync(path.join(__dirname, '../public/js/code-view.js'), 'utf-8')
+  + '\n' + fs.readFileSync(path.join(__dirname, '../public/js/file-view-cache.js'), 'utf-8')
   + '\n' + fs.readFileSync(path.join(__dirname, '../public/js/session-files.js'), 'utf-8');
 
 const harness = {
@@ -87,6 +88,10 @@ const context = vm.createContext({
       getValue: () => inst.value,
       on: (evt, fn) => { inst.handlers[evt] = fn; },
       refresh() {},
+      getCursor: () => ({ line: 0, ch: 0 }),
+      getScrollInfo: () => ({ top: 0 }),
+      setCursor() {},
+      scrollTo() {},
       type(text) { inst.value = text; if (inst.handlers.change) inst.handlers.change(); },
     };
     harness.cm = inst;
