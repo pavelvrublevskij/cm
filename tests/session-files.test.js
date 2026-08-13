@@ -85,13 +85,15 @@ const context = vm.createContext({
     const inst = {
       value: opts.value,
       handlers: {},
+      cursor: { line: 0, ch: 0 },
+      scrollTop: 0,
       getValue: () => inst.value,
       on: (evt, fn) => { inst.handlers[evt] = fn; },
       refresh() {},
-      getCursor: () => ({ line: 0, ch: 0 }),
-      getScrollInfo: () => ({ top: 0 }),
-      setCursor() {},
-      scrollTo() {},
+      getCursor: () => inst.cursor,
+      getScrollInfo: () => ({ top: inst.scrollTop }),
+      setCursor: c => { inst.cursor = c; },
+      scrollTo: (x, top) => { inst.scrollTop = top; },
       type(text) { inst.value = text; if (inst.handlers.change) inst.handlers.change(); },
     };
     harness.cm = inst;
@@ -104,12 +106,20 @@ const context = vm.createContext({
     showDiffCurrent: () => { harness.modalOpened = true; },
   },
 });
-vm.runInContext(src + '\nglobalThis._SessionFiles = SessionFiles; globalThis._CodeView = CodeView;', context);
+vm.runInContext(src + '\nglobalThis._SessionFiles = SessionFiles; globalThis._CodeView = CodeView; globalThis._FileViewCache = FileViewCache;', context);
 const SessionFiles = context._SessionFiles;
 const CodeView = context._CodeView;
+const FileViewCache = context._FileViewCache;
 
 function dirEntry(name) { return { name, type: 'dir' }; }
 function fileEntry(name) { return { name, type: 'file', size: 10, mtime: 1 }; }
+
+// cursor objects round-tripped through FileViewCache are built inside the vm sandbox, so
+// assert.deepStrictEqual's cross-realm prototype check would reject them; compare fields instead.
+function assertCursor(cursor, line, ch) {
+  assert.strictEqual(cursor.line, line);
+  assert.strictEqual(cursor.ch, ch);
+}
 
 function treeHandler(map) {
   return url => {
@@ -130,6 +140,8 @@ beforeEach(() => {
   harness.cmOpts = null;
   harness.toasts = [];
   harness.modalOpened = false;
+  context.Sessions._ctx.projSlug = 'proj';
+  FileViewCache._store = {};
   SessionFiles.reset('proj-slug');
 });
 
@@ -414,6 +426,97 @@ test('leaving source drops the stale editor reference', async () => {
 
   SessionFiles.setMode('source');
   assert.ok(SessionFiles.editor, 'coming back re-mounts it');
+});
+
+// ── file view cache ───────────────────────────────────────────────────────────
+
+test('FileViewCache stores and retrieves state scoped by project and path', () => {
+  FileViewCache.set('proj-a', 'a.js', { cursor: { line: 2, ch: 3 }, scrollTop: 50 });
+  assert.deepStrictEqual(FileViewCache.get('proj-a', 'a.js'), { cursor: { line: 2, ch: 3 }, scrollTop: 50 });
+});
+
+test('FileViewCache returns null for an unknown project/path pair', () => {
+  assert.strictEqual(FileViewCache.get('unknown-proj', 'unknown.js'), null);
+});
+
+test('FileViewCache keeps the same path separate across projects', () => {
+  FileViewCache.set('proj-a', 'shared.js', { cursor: { line: 1, ch: 0 }, scrollTop: 0 });
+  FileViewCache.set('proj-b', 'shared.js', { cursor: { line: 9, ch: 0 }, scrollTop: 900 });
+
+  assert.strictEqual(FileViewCache.get('proj-a', 'shared.js').cursor.line, 1);
+  assert.strictEqual(FileViewCache.get('proj-b', 'shared.js').cursor.line, 9);
+});
+
+test('a freshly opened file starts with no cursor/scroll restore', async () => {
+  harness.apiHandler = () => ({ content: 'a\nb\nc', mtime: 1 });
+  await SessionFiles.openFile('a.js');
+  assertCursor(harness.cm.cursor, 0, 0);
+  assert.strictEqual(harness.cm.scrollTop, 0);
+});
+
+test('switching files stashes the cursor and scroll position, then restores it on reopen', async () => {
+  harness.apiHandler = () => ({ content: 'a\nb\nc', mtime: 1 });
+  await SessionFiles.openFile('a.js');
+  harness.cm.cursor = { line: 2, ch: 1 };
+  harness.cm.scrollTop = 120;
+
+  harness.apiHandler = () => ({ content: 'x', mtime: 1 });
+  await SessionFiles.openFile('b.js');
+  assertCursor(harness.cm.cursor, 0, 0);
+
+  harness.apiHandler = () => ({ content: 'a\nb\nc', mtime: 1 });
+  await SessionFiles.openFile('a.js');
+  assertCursor(harness.cm.cursor, 2, 1);
+  assert.strictEqual(harness.cm.scrollTop, 120);
+});
+
+test('switching to diff and back to source restores the cursor and scroll position', async () => {
+  harness.apiHandler = () => ({ content: 'a\nb', mtime: 1 });
+  await SessionFiles.openFile('routes/git.js', {
+    ctx: { session: 's1', hash: 'abc', from: '1', path: 'routes/git.js', isNew: '', isDeleted: '' }
+  });
+  harness.cm.cursor = { line: 1, ch: 0 };
+  harness.cm.scrollTop = 40;
+
+  SessionFiles.setMode('diff');
+  SessionFiles.setMode('source');
+
+  assertCursor(harness.cm.cursor, 1, 0);
+  assert.strictEqual(harness.cm.scrollTop, 40);
+});
+
+test('saving stashes the cursor and scroll position too', async () => {
+  harness.apiHandler = () => ({ content: 'a\nb', mtime: 1 });
+  await SessionFiles.openFile('a.js');
+  harness.cm.type('edited');
+  harness.cm.cursor = { line: 1, ch: 3 };
+  harness.cm.scrollTop = 60;
+
+  harness.apiHandler = () => ({ ok: true, mtime: 2 });
+  await SessionFiles.save();
+
+  harness.apiHandler = () => ({ content: 'x', mtime: 1 });
+  await SessionFiles.openFile('b.js');
+  harness.apiHandler = () => ({ content: 'edited', mtime: 2 });
+  await SessionFiles.openFile('a.js');
+
+  assertCursor(harness.cm.cursor, 1, 3);
+  assert.strictEqual(harness.cm.scrollTop, 60);
+});
+
+test('cursor/scroll state is scoped per project, not shared across projects on the same path', async () => {
+  harness.apiHandler = () => ({ content: 'a', mtime: 1 });
+  await SessionFiles.openFile('a.js');
+  harness.cm.cursor = { line: 5, ch: 2 };
+  harness.cm.scrollTop = 200;
+
+  context.Sessions._ctx.projSlug = 'other-proj';
+  SessionFiles.reset('other-slug');
+  harness.apiHandler = () => ({ content: 'a', mtime: 1 });
+  await SessionFiles.openFile('a.js');
+
+  assertCursor(harness.cm.cursor, 0, 0);
+  assert.strictEqual(harness.cm.scrollTop, 0);
 });
 
 // ── dirty state ───────────────────────────────────────────────────────────────
