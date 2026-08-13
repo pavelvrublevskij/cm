@@ -7,7 +7,7 @@ const TerminalPanel = {
   AUTOOPEN_KEY: 'claude-manager-terminal-autoopen',
   MIN_WIDTH_PCT: 25,
   MAX_WIDTH_PCT: 80,
-  DEFAULT_WIDTH_PCT: 25,        // 25% terminal / 50% source / 25% file structure
+  DEFAULT_WIDTH_PCT: 35,        // 35% terminal / 40% source / 25% file structure
   COLLAPSE_THRESHOLD_PCT: 92,
   CLICK_THRESHOLD_PX: 3,
 

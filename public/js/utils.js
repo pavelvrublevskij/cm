@@ -95,7 +95,7 @@ async function copyToClipboard(text, label = 'Copied') {
 
 /** Add a hover "Copy" button to each code block within a container. */
 function addCodeCopyButtons(container) {
-  container.querySelectorAll('.chat-text pre:not(.has-copy-btn)').forEach(pre => {
+  container.querySelectorAll('.chat-text pre:not(.has-copy-btn), .markdown-body pre:not(.has-copy-btn)').forEach(pre => {
     pre.classList.add('has-copy-btn');
     const btn = document.createElement('button');
     btn.className = 'code-copy-btn';

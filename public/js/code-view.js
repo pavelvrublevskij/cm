@@ -22,6 +22,7 @@ const CodeView = {
       return;
     }
     container.innerHTML = `<div class="sf-preview-pane markdown-body">${renderMarkdown(text)}</div>`;
+    addCodeCopyButtons(container);
   },
 
   /**
