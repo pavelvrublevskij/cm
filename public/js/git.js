@@ -35,13 +35,28 @@ const GitActions = {
     if (footer) { footer.innerHTML = ''; footer.style.display = 'none'; }
   },
 
+  _syncHtml() {
+    const info = GitActions._info || {};
+    const parts = [];
+    if (info.ahead) parts.push(`↑${info.ahead}`);
+    if (info.behind) parts.push(`↓${info.behind}`);
+    if (!parts.length) return '';
+    const title = `${info.ahead || 0} ahead / ${info.behind || 0} behind ${escapeHtml(info.upstream || 'upstream')}`;
+    return `<span class="git-sync-label" title="${title}">${parts.join(' ')}</span>`;
+  },
+
   _menuHtml(branch) {
-    const count = (GitActions._info.files || []).length;
+    const info = GitActions._info;
+    const count = (info.files || []).length;
     const countBadge = count > 0 ? `<span class="git-count-badge">${count}</span>` : '';
-    const branchLabel = branch ? `<span>${escapeHtml(branch)}</span>` : '';
+    const branchLabel = branch
+      ? (info.detached
+        ? `<span class="git-detached-label" title="Detached HEAD">detached @ ${escapeHtml(branch)}</span>`
+        : `<span>${escapeHtml(branch)}</span>`)
+      : '';
     const icon = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="display:inline-block;vertical-align:middle"><path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm0 2.122a2.25 2.25 0 1 0-1.5 0v.878A2.25 2.25 0 0 0 5.75 8.5h1.5v2.128a2.251 2.251 0 1 0 1.5 0V8.5h1.5a2.25 2.25 0 0 0 2.25-2.25v-.878a2.25 2.25 0 1 0-1.5 0v.878a.75.75 0 0 1-.75.75h-4.5A.75.75 0 0 1 5 6.25v-.878zm3.75 7.378a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm3-8.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z"/></svg>`;
     return `<div class="action-menu">
-        <button class="btn btn-sm git-icon-btn" title="Git actions" onclick="event.stopPropagation(); GitActions.toggleMenu(this)">${icon}${branchLabel}${countBadge}</button>
+        <button class="btn btn-sm git-icon-btn" title="Git actions" onclick="event.stopPropagation(); GitActions.toggleMenu(this)">${icon}${branchLabel}${GitActions._syncHtml()}${countBadge}</button>
         <div class="action-menu-panel">
           <button class="action-menu-item" onclick="event.stopPropagation(); GitActions.openCommitModal(false)">Commit</button>
           <button class="action-menu-item" onclick="event.stopPropagation(); GitActions.push()">Push</button>
@@ -82,7 +97,7 @@ const GitActions = {
 
     const files = info.files || [];
     const branchHtml = info.branch
-      ? `<div style="margin-bottom:12px;font-size:13px;color:var(--text-muted)">Branch: <strong>${escapeHtml(info.branch)}</strong></div>`
+      ? `<div style="margin-bottom:12px;font-size:13px;color:var(--text-muted)">${info.detached ? 'Detached HEAD' : 'Branch'}: <strong>${escapeHtml(info.branch)}</strong></div>`
       : '';
 
     let filesHtml;

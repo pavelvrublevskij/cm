@@ -8,7 +8,7 @@ const { openPath, revealInFileManager } = require('../lib/os-open');
 const planCache = require('../lib/plan-cache');
 const { resolveProjectPath } = require('../lib/project-files');
 const { decodeSlug } = require('../lib/slug');
-const { git, parseStatus } = require('../lib/git');
+const { git, gitOk, parseStatus } = require('../lib/git');
 
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 
@@ -19,11 +19,7 @@ const FILE_HISTORY_DIR = path.join(CLAUDE_DIR, 'file-history');
  *  Bash (cp, scripts, ...) rather than the Write/Edit/MultiEdit/NotebookEdit tools we scan for. */
 async function gitFilesInWindow(projectDir, from, to) {
   if (!from) return [];
-  try {
-    await git(['rev-parse', '--git-dir'], projectDir);
-  } catch (_) {
-    return [];
-  }
+  if (!(await gitOk(projectDir))) return [];
 
   let raw;
   try {

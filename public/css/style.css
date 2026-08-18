@@ -4057,6 +4057,17 @@ mark.search-highlight {
   color: var(--text-primary);
 }
 
+.git-sync-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent, #58a6ff);
+  white-space: nowrap;
+}
+
+.git-detached-label {
+  color: var(--warning, #d29922);
+}
+
 .git-count-badge {
   font-size: 10px;
   font-weight: 600;

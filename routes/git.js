@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const { safeSlug, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
-const { git, parseStatus } = require('../lib/git');
+const { git, gitOk, headInfo, upstreamStatus, parseStatus } = require('../lib/git');
 
 const router = Router();
 
@@ -10,14 +10,10 @@ router.get('/:slug/git/info', wrapRoute(async (req, res) => {
   const projectPath = decodeSlug(req.params.slug);
   if (!projectPath) return res.json({ available: false });
 
-  try {
-    await git(['rev-parse', '--git-dir'], projectPath);
-  } catch (_) {
-    return res.json({ available: false });
-  }
+  if (!(await gitOk(projectPath))) return res.json({ available: false });
 
-  let branch = null;
-  try { branch = await git(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath); } catch (_) {}
+  const { branch, detached } = await headInfo(projectPath);
+  const { upstream, ahead, behind } = await upstreamStatus(projectPath);
 
   let hasRemote = false;
   try { hasRemote = (await git(['remote'], projectPath)).length > 0; } catch (_) {}
@@ -28,7 +24,7 @@ router.get('/:slug/git/info', wrapRoute(async (req, res) => {
     files = parseStatus(raw);
   } catch (_) {}
 
-  res.json({ available: true, branch, hasRemote, files });
+  res.json({ available: true, branch, detached, upstream, ahead, behind, hasRemote, files });
 }));
 
 router.post('/:slug/git/commit', wrapRoute(async (req, res) => {
