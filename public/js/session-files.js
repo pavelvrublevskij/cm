@@ -22,6 +22,7 @@ const SessionFiles = {
   searchQuery: '',
   searchActive: false,
   searchMatches: null,
+  searchContentOnly: null,
   searchExpand: null,
   searchTruncated: false,
   _searchTimer: null,
@@ -72,6 +73,7 @@ const SessionFiles = {
     SessionFiles.searchQuery = '';
     SessionFiles.searchActive = false;
     SessionFiles.searchMatches = null;
+    SessionFiles.searchContentOnly = null;
     SessionFiles.searchExpand = null;
     SessionFiles.searchTruncated = false;
     const tree = document.getElementById('sf-tree');
@@ -146,7 +148,8 @@ const SessionFiles = {
     for (const entry of entries) {
       const relPath = dir ? dir + '/' + entry.name : entry.name;
       if (searching && !SessionFiles._searchVisible(relPath, entry.type)) continue;
-      const label = searching ? SessionFiles._highlightMatch(entry.name, SessionFiles.searchQuery) : escapeHtml(entry.name);
+      const contentOnly = searching && SessionFiles.searchContentOnly.has(relPath);
+      const label = searching && !contentOnly ? SessionFiles._highlightMatch(entry.name, SessionFiles.searchQuery) : escapeHtml(entry.name);
       if (entry.type === 'dir') {
         const open = searching ? SessionFiles.searchExpand.has(relPath) : SessionFiles.expanded.has(relPath);
         html += `<div class="sf-row sf-row-dir" style="--sf-depth:${depth}"
@@ -213,6 +216,7 @@ const SessionFiles = {
     if (!query) {
       SessionFiles.searchActive = false;
       SessionFiles.searchMatches = null;
+      SessionFiles.searchContentOnly = null;
       SessionFiles.searchExpand = null;
       SessionFiles.searchTruncated = false;
       SessionFiles.renderTree();
@@ -234,6 +238,7 @@ const SessionFiles = {
 
     const matches = data.matches || [];
     const searchMatches = new Set(matches.map(m => `${m.type}:${m.path}`));
+    const searchContentOnly = new Set(matches.filter(m => m.matchedBy === 'content').map(m => m.path));
     const searchExpand = new Set();
     for (const m of matches) {
       const parts = m.path.split('/');
@@ -244,6 +249,7 @@ const SessionFiles = {
 
     SessionFiles.searchActive = true;
     SessionFiles.searchMatches = searchMatches;
+    SessionFiles.searchContentOnly = searchContentOnly;
     SessionFiles.searchExpand = searchExpand;
     SessionFiles.searchTruncated = !!data.truncated;
     SessionFiles.renderTree();
@@ -266,15 +272,26 @@ const SessionFiles = {
     return ch !== ch.toLowerCase() && ch === ch.toUpperCase();
   },
 
-  /** True if name[i] starts a new hump — see the matching isHumpStart in lib/project-files.js. */
-  _isHumpStart(name, i) {
-    return SessionFiles._isUpper(name[i]) && (i === 0 || !SessionFiles._isUpper(name[i - 1]));
+  _isLower(ch) {
+    return ch !== ch.toUpperCase() && ch === ch.toLowerCase();
+  },
+
+  _isSeparator(ch) {
+    return !SessionFiles._isUpper(ch) && !SessionFiles._isLower(ch);
+  },
+
+  /** True if name[i] starts a new word — see the matching isWordStart in lib/project-files.js. */
+  _isWordStart(name, i) {
+    if (i === 0) return true;
+    const prev = name[i - 1];
+    return SessionFiles._isSeparator(prev) || (SessionFiles._isUpper(name[i]) && SessionFiles._isLower(prev));
   },
 
   /**
    * Wrap the part of name that matched the fuzzy query, mirroring lib/project-files.js'
-   * fuzzyMatch: a contiguous substring highlights as one run, an acronym match (query letters
-   * landing on name's hump-start letters, e.g. "pr" hitting ProjectRunner) highlights each hit letter.
+   * fuzzyMatch: a contiguous substring highlights as one run, a word-initials match (query letters
+   * landing on name's word-start letters, e.g. "pr" hitting ProjectRunner, or "pf" hitting
+   * "project-files") highlights each hit letter.
    */
   _highlightMatch(name, query) {
     if (!query) return escapeHtml(name);
@@ -290,7 +307,7 @@ const SessionFiles = {
     let html = '';
     for (let i = 0; i < name.length; i++) {
       const ch = name[i];
-      const matched = qi < lowerQuery.length && SessionFiles._isHumpStart(name, i) && ch.toLowerCase() === lowerQuery[qi];
+      const matched = qi < lowerQuery.length && SessionFiles._isWordStart(name, i) && ch.toLowerCase() === lowerQuery[qi];
       if (matched) qi++;
       html += matched ? `<mark class="sf-search-hit">${escapeHtml(ch)}</mark>` : escapeHtml(ch);
     }

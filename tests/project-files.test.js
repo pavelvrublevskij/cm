@@ -44,14 +44,25 @@ before(() => {
     hasSymlinkSupport = false;
   }
 
-  // Fixtures for the "pr" case-matching rules: contiguous substrings match regardless of case,
-  // non-contiguous matches only land on uppercase (hump) letters.
+  // Fixtures for the "pr" word-start matching rules: contiguous substrings match regardless of
+  // case; non-contiguous matches only land on word-start letters (start of name, after a
+  // separator, or a camelCase hump) — never on a letter merely sitting mid-word.
   const caseDir = path.join(PROJ_DIR, 'search-cases');
   fs.mkdirSync(caseDir, { recursive: true });
-  ['PowerRanger.txt', 'P-Runner.txt', 'printer.txt', 'supreme.txt', 'xxxpr.txt',
-    'pyRunner.txt', 'Player.txt', 'pursue.txt',
+  ['PowerRanger.txt', 'P-Runner.txt', 'project-files.test.txt', 'printer.txt', 'supreme.txt', 'xxxpr.txt',
+    'typeRunner.txt', 'Player.txt', 'pursue.txt',
     'Uncommitted_changes_before_Checkout_at_4_7_2026_10_43_AM__Changes_.xml'
   ].forEach(name => fs.writeFileSync(path.join(caseDir, name), 'x'));
+
+  // Fixtures for content search: the filename itself never matches "needle" in any of these.
+  const contentDir = path.join(PROJ_DIR, 'content-search');
+  fs.mkdirSync(contentDir, { recursive: true });
+  fs.writeFileSync(path.join(contentDir, 'unrelated-name.txt'), 'line one\nhas a NEEDLE in it\nline three\n');
+  fs.writeFileSync(path.join(contentDir, 'no-match.txt'), 'nothing of interest here\n');
+  fs.writeFileSync(path.join(contentDir, 'binary-file.bin'), Buffer.concat([
+    Buffer.from([0x00, 0x01, 0x02]), Buffer.from('needle')
+  ]));
+  fs.writeFileSync(path.join(contentDir, 'oversized-file.txt'), 'needle'.padEnd(CONTENT_MAX_BYTES + 10, 'x'));
 });
 
 after(() => {
@@ -193,11 +204,17 @@ test('search: "pr" matches a contiguous run regardless of case, in any position'
   assert.ok(paths.includes('search-cases/xxxpr.txt'), '..pr — contiguous at the end');
 });
 
-test('search: "pr" matches non-contiguous letters only when both land on uppercase humps', async () => {
+test('search: "pr" matches non-contiguous letters when both land on word starts', async () => {
   const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'pr' });
   const paths = res.body.matches.map(m => m.path);
-  assert.ok(paths.includes('search-cases/PowerRanger.txt'), 'P..R.. — both letters are humps');
-  assert.ok(paths.includes('search-cases/P-Runner.txt'), 'P..-R.. — separator does not block the hump match');
+  assert.ok(paths.includes('search-cases/PowerRanger.txt'), 'P..R.. — both letters are camelCase humps');
+  assert.ok(paths.includes('search-cases/P-Runner.txt'), 'P..-R.. — a separator also marks a word start');
+});
+
+test('search: "pf" matches lowercase word initials split by a separator, not just camelCase humps', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'pf' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.ok(paths.includes('search-cases/project-files.test.txt'), 'the p of "project" and the f right after the dash in "files"');
 });
 
 test('search: "pr" is case-insensitive on the query itself', async () => {
@@ -211,12 +228,12 @@ test('search: "pr" is case-insensitive on the query itself', async () => {
   assert.deepStrictEqual(paths.pr, paths.PR);
 });
 
-test('search: "pr" does not match a non-contiguous run through any lowercase letter', async () => {
+test('search: "pr" does not match through a letter that is merely sitting mid-word', async () => {
   const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'pr' });
   const paths = res.body.matches.map(m => m.path);
-  assert.strictEqual(paths.includes('search-cases/pyRunner.txt'), false, 'p..R.. — p itself is lowercase');
-  assert.strictEqual(paths.includes('search-cases/Player.txt'), false, 'P..r.. — r itself is lowercase');
-  assert.strictEqual(paths.includes('search-cases/pursue.txt'), false, 'p..r — both letters are lowercase');
+  assert.strictEqual(paths.includes('search-cases/typeRunner.txt'), false, 'p..R.. — the p in "type" is mid-word, not a word start');
+  assert.strictEqual(paths.includes('search-cases/Player.txt'), false, 'P..r.. — the r in "Player" is mid-word, not a word start');
+  assert.strictEqual(paths.includes('search-cases/pursue.txt'), false, 'p..r — the r in "pursue" is mid-word, not a word start');
 });
 
 test('search: an unrelated all-caps token cannot supply an anchor for a later query letter', async () => {
@@ -227,6 +244,45 @@ test('search: an unrelated all-caps token cannot supply an anchor for a later qu
     false,
     'the C in "Checkout" is a real hump start, but the M in "AM" only continues that all-caps run — not a hump start of its own'
   );
+});
+
+// ── content search ────────────────────────────────────────────────────────────
+
+test('search: a file whose contents match, but whose name does not, is still found', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'needle' });
+  const match = res.body.matches.find(m => m.path === 'content-search/unrelated-name.txt');
+  assert.ok(match);
+  assert.strictEqual(match.matchedBy, 'content');
+});
+
+test('search: content matching is case-insensitive', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'NEEDLE' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.ok(paths.includes('content-search/unrelated-name.txt'));
+});
+
+test('search: a name match reports matchedBy "name" even when content also happens to qualify', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'deep' });
+  const match = res.body.matches.find(m => m.path === 'src/nested/deep.txt');
+  assert.strictEqual(match.matchedBy, 'name');
+});
+
+test('search: content search skips binary files', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'needle' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.strictEqual(paths.includes('content-search/binary-file.bin'), false);
+});
+
+test('search: content search skips oversized files', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'needle' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.strictEqual(paths.includes('content-search/oversized-file.txt'), false);
+});
+
+test('search: a file matching neither name nor content is excluded', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'needle' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.strictEqual(paths.includes('content-search/no-match.txt'), false);
 });
 
 test('search: excludes node_modules and .git from results', async () => {

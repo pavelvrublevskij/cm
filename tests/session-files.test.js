@@ -357,6 +357,20 @@ test('a non-contiguous acronym match highlights each matched capital separately'
   assert.ok(html.includes('<mark class="sf-search-hit">P</mark>ower<mark class="sf-search-hit">R</mark>anger.js'));
 });
 
+test('a content-only match shows the filtered file with its plain, unhighlighted name', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('unrelated.txt'), fileEntry('other.txt')] },
+    { needle: [{ path: 'unrelated.txt', type: 'file', matchedBy: 'content' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('needle');
+
+  const html = el('sf-tree').innerHTML;
+  assert.ok(html.includes('unrelated.txt'));
+  assert.strictEqual(html.includes('other.txt'), false);
+  assert.strictEqual(html.includes('<mark'), false, 'nothing in the name itself matched the query');
+});
+
 test('no matches renders a distinct empty state', async () => {
   harness.apiHandler = searchAndTreeHandler(
     { '': [fileEntry('app.js')] },
