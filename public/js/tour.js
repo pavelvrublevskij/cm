@@ -54,9 +54,14 @@ const Tour = {
   ],
 
   shouldShow(minor) {
-    const stored = localStorage.getItem(Tour.STORAGE_KEY);
-    if (stored === null) return true;
-    return parseInt(stored, 10) < minor;
+    if (!Number.isFinite(minor)) return false;
+    const stored = parseInt(localStorage.getItem(Tour.STORAGE_KEY), 10);
+    if (!Number.isFinite(stored)) return true;
+    return stored < minor;
+  },
+
+  markSeen(minor) {
+    if (Number.isFinite(minor)) localStorage.setItem(Tour.STORAGE_KEY, String(minor));
   },
 
   start(minor) {
@@ -64,12 +69,13 @@ const Tour = {
     Tour.active = true;
     Tour._minor = minor;
     Tour.current = 0;
+    Tour.markSeen(minor);
     Tour._createDOM();
     Tour._showStep(0);
   },
 
   skip() {
-    if (Tour._minor !== null) localStorage.setItem(Tour.STORAGE_KEY, String(Tour._minor));
+    Tour.markSeen(Tour._minor);
     Tour._destroy();
   },
 
