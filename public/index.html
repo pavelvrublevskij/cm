@@ -469,6 +469,7 @@
               <button class="tab-btn" id="skills-tab-btn" onclick="ProjectTabs.switch('proj-skills', this)">Skills</button>
               <button class="tab-btn" id="output-styles-tab-btn" onclick="ProjectTabs.switch('proj-output-styles', this)">Output Styles</button>
               <button class="tab-btn" onclick="ProjectTabs.switch('claude-md', this)">CLAUDE.md</button>
+              <button class="tab-btn" id="git-tab-btn" style="display:none" onclick="ProjectTabs.switch('git', this)">Git</button>
             </div>
             <button class="btn btn-sm" onclick="ProjectTabs.refresh()">Refresh</button>
           </div>
@@ -511,6 +512,10 @@
           </div>
           <div class="project-tab" id="tab-proj-output-styles">
             <div id="proj-output-styles-content"></div>
+          </div>
+
+          <div class="project-tab" id="tab-git">
+            <div id="git-tab-body"></div>
           </div>
 
           <div class="project-tab" id="tab-claude-md">
@@ -831,6 +836,8 @@
   <script src="/js/file-history.js"></script>
   <script src="/js/tour.js"></script>
   <script src="/js/git.js"></script>
+  <script src="/js/git-recipes.js"></script>
+  <script src="/js/git-panel.js"></script>
   <script src="/js/active-sessions-bar.js"></script>
   <script src="/js/app.js"></script>
 </body>

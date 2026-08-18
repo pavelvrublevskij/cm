@@ -7,11 +7,14 @@
  * @param {number} [opts.width] - Modal width in px
  * @param {string} opts.body - HTML string for the modal body
  * @param {Array} opts.buttons - Array of { label, primary?, danger?, onClick }
+ * @param {Function} [opts.onClose] - Called after the modal is dismissed, however it was dismissed
+ * @param {string} [opts.cancelLabel] - Label for the dismiss button (default "Cancel")
  * @returns {HTMLElement} The overlay element (for external removal if needed)
  */
-function openModal({ title, width, body, buttons = [], cls }) {
+function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  const close = () => { overlay.remove(); if (onClose) onClose(); };
 
   const modal = document.createElement('div');
   modal.className = 'modal' + (cls ? ' ' + cls : '');
@@ -31,8 +34,8 @@ function openModal({ title, width, body, buttons = [], cls }) {
 
   const cancelBtn = document.createElement('button');
   cancelBtn.className = 'btn';
-  cancelBtn.textContent = 'Cancel';
-  cancelBtn.onclick = () => overlay.remove();
+  cancelBtn.textContent = cancelLabel || 'Cancel';
+  cancelBtn.onclick = close;
   btnGroup.appendChild(cancelBtn);
 
   for (const { label, primary, danger, onClick } of buttons) {
@@ -41,7 +44,7 @@ function openModal({ title, width, body, buttons = [], cls }) {
     btn.textContent = label;
     btn.onclick = async () => {
       const result = await onClick();
-      if (result !== false) overlay.remove();
+      if (result !== false) close();
     };
     btnGroup.appendChild(btn);
   }
@@ -50,7 +53,7 @@ function openModal({ title, width, body, buttons = [], cls }) {
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
 
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
   return overlay;
 }

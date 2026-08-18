@@ -167,6 +167,7 @@ const App = {
     if (simpleViews[view]) {
       document.getElementById('view-' + view).classList.add('active');
       if (typeof GitActions !== 'undefined') GitActions.reset();
+      if (typeof GitPanel !== 'undefined') GitPanel.unmount();
       simpleViews[view]();
     } else if (view === 'project-detail') {
       document.getElementById('view-project-detail').classList.add('active');
