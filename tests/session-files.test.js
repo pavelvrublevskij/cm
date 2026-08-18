@@ -19,6 +19,7 @@ const harness = {
   apiHandler: null,
   cm: null,
   toasts: [],
+  copyTargets: [],
 };
 
 function makeEl(id) {
@@ -78,6 +79,7 @@ const context = vm.createContext({
   formatBytes: n => `${n} B`,
   codeModeFor: p => (p.endsWith('.java') ? 'text/x-java' : p.endsWith('.js') ? 'javascript' : null),
   renderMarkdown: s => 'MD:' + s,
+  addCodeCopyButtons: container => { harness.copyTargets.push(container); },
   showLoading: (container, text) => { container.innerHTML = text; },
   toast: (msg, type) => { harness.toasts.push({ msg, type }); },
   CodeMirror: (host, opts) => {
@@ -139,6 +141,7 @@ beforeEach(() => {
   harness.cm = null;
   harness.cmOpts = null;
   harness.toasts = [];
+  harness.copyTargets = [];
   harness.modalOpened = false;
   context.Sessions._ctx.projSlug = 'proj';
   FileViewCache._store = {};
@@ -378,6 +381,7 @@ test('markdown opens on its rendered preview', async () => {
   assert.strictEqual(SessionFiles.open.mode, 'preview', 'preview is the landing mode');
   assert.ok(el('sf-pane-body').innerHTML.includes('markdown-body'));
   assert.ok(el('sf-pane-body').innerHTML.includes('MD:# Title'), 'rendered, not raw');
+  assert.deepStrictEqual(harness.copyTargets, [el('sf-pane-body')], 'code blocks in the preview get copy buttons');
 
   SessionFiles.setMode('source');
   assert.strictEqual(SessionFiles.open.mode, 'source');

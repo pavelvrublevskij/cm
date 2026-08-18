@@ -18,6 +18,7 @@ const harness = {
   cm: null,
   cmOpts: null,
   toasts: [],
+  copyTargets: [],
 };
 
 function makeEl(id) {
@@ -69,6 +70,7 @@ const context = vm.createContext({
   timeAgo: () => '3m ago',
   codeModeFor: p => (p.endsWith('.js') ? 'javascript' : null),
   renderMarkdown: s => 'MD:' + s,
+  addCodeCopyButtons: container => { harness.copyTargets.push(container); },
   showLoading: (container, text) => { container.innerHTML = text; },
   toast: (msg, type) => { harness.toasts.push({ msg, type }); },
   CodeMirror: (host, opts) => {
@@ -95,6 +97,7 @@ beforeEach(() => {
   harness.cm = null;
   harness.cmOpts = null;
   harness.toasts = [];
+  harness.copyTargets = [];
   Sessions._scratchpadData = null;
   Sessions._spOpen = null;
   Sessions._spEditor = null;
@@ -169,6 +172,7 @@ test('markdown opens on its rendered preview', async () => {
 
   assert.strictEqual(Sessions._spOpen.mode, 'preview');
   assert.ok(el('sp-pane-body').innerHTML.includes('MD:# Notes'));
+  assert.deepStrictEqual(harness.copyTargets, [el('sp-pane-body')], 'code blocks in the preview get copy buttons');
 
   Sessions.setScratchpadMode('source');
   assert.strictEqual(harness.cm.getValue(), '# Notes');
