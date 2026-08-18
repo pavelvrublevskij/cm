@@ -3427,10 +3427,13 @@ mark.search-highlight {
   content: '\00BB';                  /* » — structure hidden, click to show */
 }
 
-.sf-tree-header {
+.sf-tree-toolbar {
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+.sf-tree-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3442,6 +3445,30 @@ mark.search-highlight {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
+}
+
+.sf-search-bar {
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.sf-search-input {
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+}
+
+.sf-search-truncated {
+  padding: 6px 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.sf-search-hit {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .sf-row {

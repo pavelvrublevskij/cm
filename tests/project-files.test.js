@@ -16,6 +16,8 @@ function slugForPath(p) {
 
 const SLUG = slugForPath(PROJ_DIR);
 
+let hasSymlinkSupport = false;
+
 before(() => {
   fs.mkdirSync(path.join(PROJ_DIR, 'src', 'nested'), { recursive: true });
   fs.mkdirSync(path.join(PROJ_DIR, 'empty-dir'), { recursive: true });
@@ -30,6 +32,26 @@ before(() => {
   fs.mkdirSync(path.join(PROJ_DIR, 'forked', 'two'), { recursive: true });
   fs.writeFileSync(path.join(PROJ_DIR, 'binary.dat'), Buffer.from([0x00, 0x01, 0x02, 0xff]));
   fs.writeFileSync(path.join(PROJ_DIR, 'big.txt'), 'x'.repeat(CONTENT_MAX_BYTES + 10));
+
+  try {
+    fs.symlinkSync(
+      path.join(PROJ_DIR, 'src'),
+      path.join(PROJ_DIR, 'linked-dir'),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    );
+    hasSymlinkSupport = true;
+  } catch (_) {
+    hasSymlinkSupport = false;
+  }
+
+  // Fixtures for the "pr" case-matching rules: contiguous substrings match regardless of case,
+  // non-contiguous matches only land on uppercase (hump) letters.
+  const caseDir = path.join(PROJ_DIR, 'search-cases');
+  fs.mkdirSync(caseDir, { recursive: true });
+  ['PowerRanger.txt', 'P-Runner.txt', 'printer.txt', 'supreme.txt', 'xxxpr.txt',
+    'pyRunner.txt', 'Player.txt', 'pursue.txt',
+    'Uncommitted_changes_before_Checkout_at_4_7_2026_10_43_AM__Changes_.xml'
+  ].forEach(name => fs.writeFileSync(path.join(caseDir, name), 'x'));
 });
 
 after(() => {
@@ -116,6 +138,133 @@ test('tree: unknown project returns 404', async () => {
 
 test('tree: pointing at a file returns 404', async () => {
   const res = await request(app).get(`/api/projects/${SLUG}/files/tree`).query({ path: 'index.js' });
+  assert.strictEqual(res.status, 404);
+});
+
+test('tree: a linked directory appears as a dir entry', async (t) => {
+  if (!hasSymlinkSupport) return t.skip('symlinks unsupported in this environment');
+  const res = await request(app).get(`/api/projects/${SLUG}/files/tree`);
+  const linked = res.body.entries.find(e => e.name === 'linked-dir');
+  assert.ok(linked, 'linked-dir should be listed');
+  assert.strictEqual(linked.type, 'dir');
+});
+
+test('tree: contents of a linked directory are listed', async (t) => {
+  if (!hasSymlinkSupport) return t.skip('symlinks unsupported in this environment');
+  const res = await request(app).get(`/api/projects/${SLUG}/files/tree`).query({ path: 'linked-dir' });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body.entries.map(e => e.name), ['nested', 'app.js']);
+});
+
+// ── search ────────────────────────────────────────────────────────────────────
+
+test('search: a substring match is case-insensitive', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'read' });
+  assert.strictEqual(res.status, 200);
+  const paths = res.body.matches.map(m => m.path);
+  assert.ok(paths.includes('README.md'));
+});
+
+test('search: only the first letter of an all-caps word is a matchable anchor', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'rme' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.strictEqual(paths.includes('README.md'), false, 'R is a hump start but M and E mid-word are not');
+});
+
+test('search: matches directory names too, not just files', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'nest' });
+  const match = res.body.matches.find(m => m.path === 'src/nested');
+  assert.ok(match);
+  assert.strictEqual(match.type, 'dir');
+});
+
+test('search: finds nested files by real filesystem path, ignoring tree merge display', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'deep' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.ok(paths.includes('src/nested/deep.txt'));
+  assert.ok(paths.includes('chain/a/b/c/deep.txt'));
+});
+
+test('search: "pr" matches a contiguous run regardless of case, in any position', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'pr' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.ok(paths.includes('search-cases/printer.txt'), 'pr.. — contiguous at the start');
+  assert.ok(paths.includes('search-cases/supreme.txt'), '..pr.. — contiguous in the middle');
+  assert.ok(paths.includes('search-cases/xxxpr.txt'), '..pr — contiguous at the end');
+});
+
+test('search: "pr" matches non-contiguous letters only when both land on uppercase humps', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'pr' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.ok(paths.includes('search-cases/PowerRanger.txt'), 'P..R.. — both letters are humps');
+  assert.ok(paths.includes('search-cases/P-Runner.txt'), 'P..-R.. — separator does not block the hump match');
+});
+
+test('search: "pr" is case-insensitive on the query itself', async () => {
+  const paths = {};
+  for (const q of ['pr', 'Pr', 'pR', 'PR']) {
+    const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q });
+    paths[q] = res.body.matches.map(m => m.path).sort();
+  }
+  assert.deepStrictEqual(paths.pr, paths.Pr);
+  assert.deepStrictEqual(paths.pr, paths.pR);
+  assert.deepStrictEqual(paths.pr, paths.PR);
+});
+
+test('search: "pr" does not match a non-contiguous run through any lowercase letter', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'pr' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.strictEqual(paths.includes('search-cases/pyRunner.txt'), false, 'p..R.. — p itself is lowercase');
+  assert.strictEqual(paths.includes('search-cases/Player.txt'), false, 'P..r.. — r itself is lowercase');
+  assert.strictEqual(paths.includes('search-cases/pursue.txt'), false, 'p..r — both letters are lowercase');
+});
+
+test('search: an unrelated all-caps token cannot supply an anchor for a later query letter', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'cm' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.strictEqual(
+    paths.includes('search-cases/Uncommitted_changes_before_Checkout_at_4_7_2026_10_43_AM__Changes_.xml'),
+    false,
+    'the C in "Checkout" is a real hump start, but the M in "AM" only continues that all-caps run — not a hump start of its own'
+  );
+});
+
+test('search: excludes node_modules and .git from results', async () => {
+  fs.mkdirSync(path.join(PROJ_DIR, 'node_modules', 'somepkg'), { recursive: true });
+  fs.writeFileSync(path.join(PROJ_DIR, 'node_modules', 'somepkg', 'readme.js'), 'x');
+  fs.mkdirSync(path.join(PROJ_DIR, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(PROJ_DIR, '.git', 'readme'), 'x');
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'readme' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.ok(!paths.some(p => p.startsWith('node_modules')));
+  assert.ok(!paths.some(p => p.startsWith('.git')));
+});
+
+test('search: empty query returns no matches', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: '' });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body.matches, []);
+});
+
+test('search: non-matching query returns no matches', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'zzzznomatch' });
+  assert.deepStrictEqual(res.body.matches, []);
+});
+
+test('search: path traversal in slug is rejected', async () => {
+  const res = await request(app).get('/api/projects/..bad/files/search').query({ q: 'a' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('search: finds files inside a linked directory', async (t) => {
+  if (!hasSymlinkSupport) return t.skip('symlinks unsupported in this environment');
+  const res = await request(app).get(`/api/projects/${SLUG}/files/search`).query({ q: 'app.js' });
+  const paths = res.body.matches.map(m => m.path);
+  assert.ok(paths.includes('linked-dir/app.js'));
+});
+
+test('search: unknown project returns 404', async () => {
+  const res = await request(app).get('/api/projects/no-such-project-slug-here/files/search').query({ q: 'a' });
   assert.strictEqual(res.status, 404);
 });
 

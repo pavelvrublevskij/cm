@@ -578,9 +578,15 @@
               <div class="sf-structure" id="sf-structure">
                 <div id="sf-changed"></div>
                 <div class="ctx-section sf-tree-section">
-                  <div class="sf-tree-header">
-                    <span>Project files</span>
-                    <button class="icon-btn" onclick="SessionFiles.reloadTree()" title="Reload project files" aria-label="Reload project files">&#x21bb;</button>
+                  <div class="sf-tree-toolbar">
+                    <div class="sf-tree-header">
+                      <span>Project files</span>
+                      <button class="icon-btn" onclick="SessionFiles.reloadTree()" title="Reload project files" aria-label="Reload project files">&#x21bb;</button>
+                    </div>
+                    <div class="sf-search-bar">
+                      <input type="search" id="sf-search" class="sf-search-input" placeholder="Search files..."
+                        oninput="SessionFiles.onSearchInput(this.value)">
+                    </div>
                   </div>
                   <div id="sf-tree"></div>
                 </div>

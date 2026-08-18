@@ -258,6 +258,147 @@ test('reloadTree refetches the root and every expanded folder', async () => {
   assert.ok(el('sf-tree').innerHTML.includes('added.js'));
 });
 
+// ── search ────────────────────────────────────────────────────────────────────
+
+function searchAndTreeHandler(treeMap, searchMap) {
+  return url => {
+    if (url.includes('/files/search')) {
+      const m = url.match(/[?&]q=([^&]*)/);
+      const q = m ? decodeURIComponent(m[1]) : '';
+      const matches = searchMap[q] || [];
+      return { matches, truncated: false };
+    }
+    return treeHandler(treeMap)(url);
+  };
+}
+
+test('typing into the search box schedules a debounced search', async () => {
+  harness.apiHandler = treeHandler({ '': [fileEntry('readme.md')] });
+  await SessionFiles.loadTree();
+
+  SessionFiles.onSearchInput('re');
+  assert.strictEqual(harness.timers.size, 1);
+  const timer = [...harness.timers.values()][0];
+  assert.strictEqual(timer.ms, SessionFiles.SEARCH_DEBOUNCE_MS);
+});
+
+test('typing again restarts the search debounce instead of stacking timers', async () => {
+  harness.apiHandler = treeHandler({ '': [] });
+  await SessionFiles.loadTree();
+  SessionFiles.onSearchInput('r');
+  SessionFiles.onSearchInput('re');
+  assert.strictEqual(harness.timers.size, 1);
+});
+
+test('a search filters the tree to matches and auto-expands ancestor folders', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [dirEntry('src'), fileEntry('readme.md')], 'src': [fileEntry('app.js')] },
+    { app: [{ path: 'src/app.js', type: 'file' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('app');
+
+  const html = el('sf-tree').innerHTML;
+  assert.ok(html.includes('app.js'));
+  assert.ok(html.includes('src'));
+  assert.strictEqual(html.includes('readme.md'), false);
+  assert.ok(html.includes('&#9660;'), 'the ancestor folder is force-expanded');
+});
+
+test('clearing the search restores the unfiltered tree at its prior expand state', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [dirEntry('src'), fileEntry('readme.md')], 'src': [fileEntry('app.js')] },
+    { app: [{ path: 'src/app.js', type: 'file' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('app');
+  await SessionFiles._runSearch('');
+
+  assert.strictEqual(SessionFiles.searchActive, false);
+  const html = el('sf-tree').innerHTML;
+  assert.ok(html.includes('readme.md'));
+  assert.ok(html.includes('&#9654;'), 'src collapses back since it was never manually expanded');
+});
+
+test('a directory match is shown even without a matching descendant', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [dirEntry('lib'), fileEntry('readme.md')] },
+    { lib: [{ path: 'lib', type: 'dir' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('lib');
+
+  const html = el('sf-tree').innerHTML;
+  assert.ok(html.includes('lib'));
+  assert.strictEqual(html.includes('readme.md'), false);
+});
+
+test('a contiguous substring match highlights as a single run', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('app.js')] },
+    { ap: [{ path: 'app.js', type: 'file' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('ap');
+
+  const html = el('sf-tree').innerHTML;
+  assert.ok(html.includes('<mark class="sf-search-hit">ap</mark>p.js'));
+});
+
+test('a non-contiguous acronym match highlights each matched capital separately', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('PowerRanger.js')] },
+    { pr: [{ path: 'PowerRanger.js', type: 'file' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('pr');
+
+  const html = el('sf-tree').innerHTML;
+  assert.ok(html.includes('<mark class="sf-search-hit">P</mark>ower<mark class="sf-search-hit">R</mark>anger.js'));
+});
+
+test('no matches renders a distinct empty state', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('app.js')] },
+    { zzz: [] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('zzz');
+
+  assert.ok(el('sf-tree').innerHTML.includes('No matching files'));
+});
+
+test('a search failure is shown in the tree', async () => {
+  harness.apiHandler = url => {
+    if (url.includes('/files/search')) throw new Error('boom');
+    return treeHandler({ '': [] })(url);
+  };
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('x');
+
+  assert.ok(el('sf-tree').innerHTML.includes('Search failed: boom'));
+});
+
+test('a stale search response is discarded once a newer search has started', async () => {
+  const responses = { first: null, second: null };
+  harness.apiHandler = url => {
+    if (url.includes('q=first')) return new Promise(r => { responses.first = r; });
+    if (url.includes('q=second')) return new Promise(r => { responses.second = r; });
+    return treeHandler({ '': [fileEntry('a.js'), fileEntry('b.js')] })(url);
+  };
+  await SessionFiles.loadTree();
+
+  const p1 = SessionFiles._runSearch('first');
+  const p2 = SessionFiles._runSearch('second');
+  responses.second({ matches: [{ path: 'b.js', type: 'file' }], truncated: false });
+  await p2;
+  responses.first({ matches: [{ path: 'a.js', type: 'file' }], truncated: false });
+  await p1;
+
+  assert.ok(el('sf-tree').innerHTML.includes('b.js'));
+  assert.strictEqual(el('sf-tree').innerHTML.includes('a.js'), false);
+});
+
 // ── opening files ─────────────────────────────────────────────────────────────
 
 test('openFile loads content into the pane', async () => {

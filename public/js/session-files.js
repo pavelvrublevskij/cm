@@ -18,6 +18,15 @@ const SessionFiles = {
   _saving: false,
   _savedAt: null,
 
+  SEARCH_DEBOUNCE_MS: 200,
+  searchQuery: '',
+  searchActive: false,
+  searchMatches: null,
+  searchExpand: null,
+  searchTruncated: false,
+  _searchTimer: null,
+  _searchToken: 0,
+
   // --- settings (CM Settings › Editor) ---
 
   autosaveEnabled() {
@@ -59,8 +68,16 @@ const SessionFiles = {
     SessionFiles._saving = false;
     SessionFiles._savedAt = null;
     SessionFiles._savedPath = null;
+    SessionFiles._clearSearchTimer();
+    SessionFiles.searchQuery = '';
+    SessionFiles.searchActive = false;
+    SessionFiles.searchMatches = null;
+    SessionFiles.searchExpand = null;
+    SessionFiles.searchTruncated = false;
     const tree = document.getElementById('sf-tree');
     if (tree) tree.innerHTML = '';
+    const search = document.getElementById('sf-search');
+    if (search) search.value = '';
     CodeView.applyState();
     SessionFiles.renderPane();
   },
@@ -80,7 +97,7 @@ const SessionFiles = {
 
   async reloadTree() {
     if (!SessionFiles.slug) return;
-    const wanted = ['', ...SessionFiles.expanded];
+    const wanted = ['', ...SessionFiles.expanded, ...(SessionFiles.searchExpand || [])];
     const loaded = await Promise.all(wanted.map(dir =>
       SessionFiles._fetchDir(dir).catch(() => null)
     ));
@@ -113,21 +130,29 @@ const SessionFiles = {
     const el = document.getElementById('sf-tree');
     if (!el) return;
     const rows = SessionFiles._rowsHtml('', 0);
-    el.innerHTML = rows || '<div class="ctx-empty">No files</div>';
+    if (!rows) {
+      el.innerHTML = `<div class="ctx-empty">${SessionFiles.searchActive ? 'No matching files' : 'No files'}</div>`;
+      return;
+    }
+    el.innerHTML = rows + (SessionFiles.searchTruncated
+      ? '<div class="sf-search-truncated">Showing first matches only — refine your search</div>' : '');
   },
 
   _rowsHtml(dir, depth) {
     const entries = SessionFiles.dirs[dir];
     if (!entries) return '';
+    const searching = SessionFiles.searchActive;
     let html = '';
     for (const entry of entries) {
       const relPath = dir ? dir + '/' + entry.name : entry.name;
+      if (searching && !SessionFiles._searchVisible(relPath, entry.type)) continue;
+      const label = searching ? SessionFiles._highlightMatch(entry.name, SessionFiles.searchQuery) : escapeHtml(entry.name);
       if (entry.type === 'dir') {
-        const open = SessionFiles.expanded.has(relPath);
+        const open = searching ? SessionFiles.searchExpand.has(relPath) : SessionFiles.expanded.has(relPath);
         html += `<div class="sf-row sf-row-dir" style="--sf-depth:${depth}"
           data-path="${escapeHtml(relPath)}" data-type="dir" onclick="SessionFiles.onRowClick(this)">
           <span class="sf-arrow">${open ? '&#9660;' : '&#9654;'}</span>
-          <span class="sf-name">${escapeHtml(entry.name)}</span>
+          <span class="sf-name">${label}</span>
         </div>`;
         if (open) html += SessionFiles._rowsHtml(relPath, depth + 1);
         continue;
@@ -137,7 +162,7 @@ const SessionFiles = {
       const dirty = SessionFiles.buffers[relPath] !== undefined;
       html += `<div class="sf-row sf-row-file${isOpen ? ' sf-row-active' : ''}" style="--sf-depth:${depth}"
         data-path="${escapeHtml(relPath)}" data-type="file" onclick="SessionFiles.onRowClick(this)">
-        <span class="sf-name">${escapeHtml(entry.name)}</span>
+        <span class="sf-name">${label}</span>
         <span class="sf-dirty" style="${dirty ? '' : 'display:none'}" title="Unsaved changes">&#9679;</span>
       </div>`;
     }
@@ -166,6 +191,110 @@ const SessionFiles = {
       }
     }
     SessionFiles.renderTree();
+  },
+
+  // --- search ---
+
+  onSearchInput(value) {
+    SessionFiles._clearSearchTimer();
+    SessionFiles._searchTimer = setTimeout(() => SessionFiles._runSearch(value), SessionFiles.SEARCH_DEBOUNCE_MS);
+  },
+
+  _clearSearchTimer() {
+    if (SessionFiles._searchTimer) {
+      clearTimeout(SessionFiles._searchTimer);
+      SessionFiles._searchTimer = null;
+    }
+  },
+
+  async _runSearch(rawValue) {
+    const query = (rawValue || '').trim();
+    SessionFiles.searchQuery = query;
+    if (!query) {
+      SessionFiles.searchActive = false;
+      SessionFiles.searchMatches = null;
+      SessionFiles.searchExpand = null;
+      SessionFiles.searchTruncated = false;
+      SessionFiles.renderTree();
+      return;
+    }
+    if (!SessionFiles.slug) return;
+
+    const token = ++SessionFiles._searchToken;
+    let data;
+    try {
+      data = await api(`/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/search?q=${encodeURIComponent(query)}`);
+    } catch (e) {
+      if (token !== SessionFiles._searchToken) return;
+      const el = document.getElementById('sf-tree');
+      if (el) el.innerHTML = `<div class="ctx-empty">Search failed: ${escapeHtml(e.message)}</div>`;
+      return;
+    }
+    if (token !== SessionFiles._searchToken) return;
+
+    const matches = data.matches || [];
+    const searchMatches = new Set(matches.map(m => `${m.type}:${m.path}`));
+    const searchExpand = new Set();
+    for (const m of matches) {
+      const parts = m.path.split('/');
+      for (let i = 1; i < parts.length; i++) searchExpand.add(parts.slice(0, i).join('/'));
+    }
+    await SessionFiles._ensureDirsLoaded(searchExpand);
+    if (token !== SessionFiles._searchToken) return;
+
+    SessionFiles.searchActive = true;
+    SessionFiles.searchMatches = searchMatches;
+    SessionFiles.searchExpand = searchExpand;
+    SessionFiles.searchTruncated = !!data.truncated;
+    SessionFiles.renderTree();
+  },
+
+  /** Whether relPath should be shown while filtering — a direct match, or an ancestor of one. */
+  _searchVisible(relPath, type) {
+    if (type === 'dir') return SessionFiles.searchExpand.has(relPath) || SessionFiles.searchMatches.has('dir:' + relPath);
+    return SessionFiles.searchMatches.has('file:' + relPath);
+  },
+
+  async _ensureDirsLoaded(dirPaths) {
+    const missing = [...dirPaths].filter(d => !SessionFiles.dirs[d]);
+    if (!missing.length) return;
+    const loaded = await Promise.all(missing.map(d => SessionFiles._fetchDir(d).catch(() => null)));
+    missing.forEach((d, i) => { if (loaded[i]) SessionFiles.dirs[d] = loaded[i]; });
+  },
+
+  _isUpper(ch) {
+    return ch !== ch.toLowerCase() && ch === ch.toUpperCase();
+  },
+
+  /** True if name[i] starts a new hump — see the matching isHumpStart in lib/project-files.js. */
+  _isHumpStart(name, i) {
+    return SessionFiles._isUpper(name[i]) && (i === 0 || !SessionFiles._isUpper(name[i - 1]));
+  },
+
+  /**
+   * Wrap the part of name that matched the fuzzy query, mirroring lib/project-files.js'
+   * fuzzyMatch: a contiguous substring highlights as one run, an acronym match (query letters
+   * landing on name's hump-start letters, e.g. "pr" hitting ProjectRunner) highlights each hit letter.
+   */
+  _highlightMatch(name, query) {
+    if (!query) return escapeHtml(name);
+    const lowerName = name.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const idx = lowerName.indexOf(lowerQuery);
+    if (idx !== -1) {
+      return escapeHtml(name.slice(0, idx))
+        + `<mark class="sf-search-hit">${escapeHtml(name.slice(idx, idx + query.length))}</mark>`
+        + escapeHtml(name.slice(idx + query.length));
+    }
+    let qi = 0;
+    let html = '';
+    for (let i = 0; i < name.length; i++) {
+      const ch = name[i];
+      const matched = qi < lowerQuery.length && SessionFiles._isHumpStart(name, i) && ch.toLowerCase() === lowerQuery[qi];
+      if (matched) qi++;
+      html += matched ? `<mark class="sf-search-hit">${escapeHtml(ch)}</mark>` : escapeHtml(ch);
+    }
+    return html;
   },
 
   // --- pane ---

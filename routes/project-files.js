@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const { wrapRoute } = require('../lib/file-helpers');
-const { resolveProjectPath, listDir, readFileForEditor } = require('../lib/project-files');
+const { resolveProjectPath, listDir, searchTree, readFileForEditor } = require('../lib/project-files');
 
 const router = express.Router();
 
@@ -12,6 +12,17 @@ router.get('/:slug/files/tree', wrapRoute((req, res) => {
     return res.status(404).json({ error: 'Directory not found' });
   }
   res.json({ path: resolved.rel, entries: listDir(resolved.target) });
+}));
+
+router.get('/:slug/files/search', wrapRoute((req, res) => {
+  const resolved = resolveProjectPath(req.params.slug, '');
+  if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+  if (!fs.existsSync(resolved.target) || !fs.statSync(resolved.target).isDirectory()) {
+    return res.status(404).json({ error: 'Directory not found' });
+  }
+  const q = (req.query.q || '').trim();
+  if (!q) return res.json({ matches: [], truncated: false });
+  res.json(searchTree(resolved.target, q));
 }));
 
 router.get('/:slug/files/content', wrapRoute((req, res) => {
