@@ -4272,6 +4272,7 @@ mark.search-highlight {
   flex-wrap: nowrap;
   position: relative;
   z-index: 1;
+  background: var(--bg-secondary);
 }
 
 .asb-group {
@@ -4369,7 +4370,7 @@ mark.search-highlight {
   border-radius: 0;
   cursor: pointer;
   min-width: 90px;
-  max-width: 160px;
+  max-width: 220px;
   flex-shrink: 0;
   user-select: none;
   transition: background 0.15s;
