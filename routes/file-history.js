@@ -8,11 +8,42 @@ const { openPath, revealInFileManager } = require('../lib/os-open');
 const planCache = require('../lib/plan-cache');
 const { resolveProjectPath } = require('../lib/project-files');
 const { decodeSlug } = require('../lib/slug');
+const { git, parseStatus } = require('../lib/git');
 
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 
 const router = express.Router();
 const FILE_HISTORY_DIR = path.join(CLAUDE_DIR, 'file-history');
+
+/** Local git changes with an mtime inside [from, to] — catches files a session touched via
+ *  Bash (cp, scripts, ...) rather than the Write/Edit/MultiEdit/NotebookEdit tools we scan for. */
+async function gitFilesInWindow(projectDir, from, to) {
+  if (!from) return [];
+  try {
+    await git(['rev-parse', '--git-dir'], projectDir);
+  } catch (_) {
+    return [];
+  }
+
+  let raw;
+  try {
+    raw = await git(['status', '--porcelain'], projectDir);
+  } catch (_) {
+    return [];
+  }
+
+  const BUFFER_MS = 5000;
+  const results = [];
+  for (const entry of parseStatus(raw)) {
+    if (entry.label === 'deleted') continue;
+    const relNorm = entry.path.replace(/\\/g, '/');
+    let mtime;
+    try { mtime = fs.statSync(path.join(projectDir, entry.path)).mtimeMs; } catch (_) { continue; }
+    if (mtime < from - BUFFER_MS || mtime > to + BUFFER_MS) continue;
+    results.push({ path: relNorm, isNew: entry.label === 'new' || entry.label === 'untracked' });
+  }
+  return results;
+}
 
 /**
  * Claude Code names file-history backups `<sha256(absolute path) truncated to 16 hex>@v<n>`.
@@ -35,7 +66,7 @@ function resolveProjectFile(projSlug, filePath) {
   return { target: resolved.target };
 }
 
-router.get('/:sessionId/context', wrapRoute((req, res) => {
+router.get('/:sessionId/context', wrapRoute(async (req, res) => {
   const { sessionId } = req.params;
   if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
     return res.status(400).json({ error: 'Invalid session ID' });
@@ -134,6 +165,15 @@ router.get('/:sessionId/context', wrapRoute((req, res) => {
             }
           }
         } catch (_) {}
+      }
+
+      // Second fallback: files with local git changes and an mtime inside the session's time
+      // window. Catches files a session modified via Bash (cp, a script, ...) instead of the
+      // Write/Edit/MultiEdit/NotebookEdit tools scanned for above.
+      for (const gf of await gitFilesInWindow(resolvedProjectDir, sessionFrom, sessionTo)) {
+        if (existingKeys.has(gf.path)) continue;
+        existingKeys.add(gf.path);
+        fileMap[gf.path] = { hash: null, maxVersion: 0, isNew: gf.isNew };
       }
     }
 
