@@ -4170,6 +4170,12 @@ mark.search-highlight {
   gap: 6px;
 }
 
+.git-sync-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .git-select-btn {
   background: none;
   border: none;

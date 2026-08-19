@@ -19,6 +19,8 @@ const GitPanel = {
     'commit': 'Committing…',
     'commit-push': 'Committing & pushing…',
     'push': 'Pushing…',
+    'pull': 'Pulling…',
+    'fetch': 'Fetching…',
   },
 
   BADGE_CLASS: {
@@ -287,26 +289,39 @@ const GitPanel = {
    * started it says what it is doing and every action is disabled until it finishes — otherwise the
    * only sign anything happened is the toast at the end, and a second push is easy to fire.
    */
+  _actionButton(kind, label, handler, enabled, extraClass) {
+    const running = GitPanel._busy === kind;
+    const body = running ? `<span class="btn-spinner"></span>${GitPanel.BUSY_LABEL[kind]}` : label;
+    const off = GitPanel._busy || !enabled ? ' disabled' : '';
+    return `<button class="btn btn-sm${extraClass || ''}" onclick="${handler}"${off}${running ? ' aria-busy="true"' : ''}>${body}</button>`;
+  },
+
   _actionsHtml() {
     const files = (GitPanel._info || {}).files || [];
     const unpushed = ((GitPanel._info || {}).unpushed || []).length;
-    const busy = GitPanel._busy;
 
-    const button = (kind, label, handler, enabled, extraClass) => {
-      const running = busy === kind;
-      const body = running ? `<span class="btn-spinner"></span>${GitPanel.BUSY_LABEL[kind]}` : label;
-      const off = busy || !enabled ? ' disabled' : '';
-      return `<button class="btn btn-sm${extraClass || ''}" onclick="${handler}"${off}${running ? ' aria-busy="true"' : ''}>${body}</button>`;
-    };
+    return GitPanel._actionButton('commit', 'Commit', 'GitPanel.commit(false)', files.length, ' btn-primary')
+      + GitPanel._actionButton('commit-push', 'Commit &amp; Push', 'GitPanel.commit(true)', files.length)
+      + GitPanel._actionButton('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', unpushed);
+  },
 
-    return button('commit', 'Commit', 'GitPanel.commit(false)', files.length, ' btn-primary')
-      + button('commit-push', 'Commit &amp; Push', 'GitPanel.commit(true)', files.length)
-      + button('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', unpushed);
+  /**
+   * Incoming side of the remote. Fetch is always offered when there is a remote, because fetching is
+   * how "behind" stops being stale; Pull only when there is something to fast-forward over.
+   */
+  _syncActionsHtml() {
+    const info = GitPanel._info || {};
+    const behind = info.behind || 0;
+
+    return GitPanel._actionButton('fetch', 'Fetch', 'GitPanel.fetch()', info.hasRemote)
+      + GitPanel._actionButton('pull', `Pull${behind ? ` (${behind})` : ''}`, 'GitPanel.pull()', behind);
   },
 
   _renderActions() {
-    const host = document.getElementById('git-changes-actions');
-    if (host) host.innerHTML = GitPanel._actionsHtml();
+    const commitRow = document.getElementById('git-changes-actions');
+    if (commitRow) commitRow.innerHTML = GitPanel._actionsHtml();
+    const syncRow = document.getElementById('git-sync-actions');
+    if (syncRow) syncRow.innerHTML = GitPanel._syncActionsHtml();
   },
 
   /** Show the action as running for as long as it takes, whatever its outcome. */
@@ -337,13 +352,15 @@ const GitPanel = {
     const body = `<div class="git-changes-commits">${unpushed.length ? commits : empty}</div>`;
 
     const behindNote = info.behind
-      ? `<div class="git-changes-note">${info.behind} commit${info.behind === 1 ? '' : 's'} on ${escapeHtml(info.upstream)} you do not have — pull before pushing.</div>`
+      ? `<div class="git-changes-note">${info.behind} commit${info.behind === 1 ? '' : 's'} on ${escapeHtml(info.upstream)} you do not have — Pull before pushing.</div>`
       : '';
 
     return `
       <div class="git-changes-header">
         <span class="git-changes-title">To push</span>
         ${info.ahead ? `<span class="git-sync-label">↑${info.ahead}</span>` : ''}
+        ${info.behind ? `<span class="git-sync-label">↓${info.behind}</span>` : ''}
+        <div class="git-sync-actions" id="git-sync-actions">${GitPanel._syncActionsHtml()}</div>
       </div>
       ${body}
       ${behindNote}`;
@@ -361,6 +378,14 @@ const GitPanel = {
 
   push() {
     return GitPanel._withBusy('push', () => GitActions.push());
+  },
+
+  pull() {
+    return GitPanel._withBusy('pull', () => GitActions.pull());
+  },
+
+  fetch() {
+    return GitPanel._withBusy('fetch', () => GitActions.fetch());
   },
 
   _branchLabel() {

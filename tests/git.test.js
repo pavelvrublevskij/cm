@@ -295,3 +295,67 @@ test('git/info returns no unpushed commits for a branch that is level', async ()
   const res = await request(app).get(`/api/projects/${slugForPath(PLAIN)}/git/info`);
   assert.deepStrictEqual(res.body.unpushed, []);
 });
+
+// ── remote operations ────────────────────────────────────────────────────────
+// Pull is fast-forward only and fetch prunes: the safe variants. A pull that would need a merge is
+// refused and left to the shell rather than quietly creating a merge commit.
+
+test('fetch --prune drops a remote-tracking ref whose branch is gone', async () => {
+  const branch = currentBranch(WORK);
+  run(['push', '-q', 'origin', `${branch}:doomed`], WORK);
+  run(['fetch', '-q'], WORK);
+  assert.ok(
+    execFileSync('git', ['branch', '-r'], { cwd: WORK }).toString().includes('origin/doomed'),
+    'the tracking ref exists to begin with'
+  );
+
+  run(['push', '-q', 'origin', '--delete', 'doomed'], WORK);
+  const res = await request(app).post(`/api/projects/${slugForPath(WORK)}/git/fetch`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.ok, true);
+  assert.ok(
+    !execFileSync('git', ['branch', '-r'], { cwd: WORK }).toString().includes('origin/doomed'),
+    'and is pruned afterwards'
+  );
+});
+
+test('pull fast-forwards a branch that is only behind', async () => {
+  // A clone that is purely behind: origin moved on, this one has no local commits.
+  const behind = path.join(HOME, 'git-behind-proj');
+  fs.rmSync(behind, { recursive: true, force: true });
+  run(['clone', '-q', REMOTE, behind], HOME);
+  identity(behind);
+  commit(OTHER, 'pull-me.txt', 'from the remote\n', 'commit to be pulled');
+  run(['push', '-q'], OTHER);
+
+  const res = await request(app).post(`/api/projects/${slugForPath(behind)}/git/pull`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(fs.existsSync(path.join(behind, 'pull-me.txt')), true, 'the commit arrived');
+});
+
+test('pull refuses to merge diverged history instead of creating a merge commit', async () => {
+  // WORK is one ahead and one behind, so a fast-forward is impossible.
+  const before = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: WORK }).toString().trim();
+  const res = await request(app).post(`/api/projects/${slugForPath(WORK)}/git/pull`);
+
+  assert.strictEqual(res.status, 500, 'the failure is reported, not swallowed');
+  assert.ok(res.body.error && res.body.error.length > 0);
+  const after = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: WORK }).toString().trim();
+  assert.strictEqual(after, before, 'HEAD is untouched — no merge was made');
+});
+
+test('pull and fetch reject a traversal slug', async () => {
+  for (const op of ['pull', 'fetch']) {
+    const res = await request(app).post(`/api/projects/bad..slug/git/${op}`);
+    assert.strictEqual(res.status, 400, `${op} must validate the slug`);
+    assert.strictEqual(res.body.error, 'Invalid slug');
+  }
+});
+
+test('a remote operation on a directory with no repository fails rather than hanging', async () => {
+  const res = await request(app).post(`/api/projects/${slugForPath(NOGIT)}/git/fetch`);
+  assert.strictEqual(res.status, 500);
+  assert.ok(res.body.error);
+});

@@ -41,13 +41,26 @@ router.post('/:slug/git/commit', wrapRoute(async (req, res) => {
   res.json({ ok: true, output });
 }));
 
-router.post('/:slug/git/push', wrapRoute(async (req, res) => {
-  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
-  const projectPath = decodeSlug(req.params.slug);
-  if (!projectPath) return res.status(400).json({ error: 'Cannot resolve project path' });
+/**
+ * The remote operations differ only by their argv, so they share one handler. Each is the safe
+ * variant on purpose: pull refuses to create a merge commit, fetch prunes refs deleted upstream.
+ * Anything that rewrites history stays in the shell, where the user can see and answer git.
+ */
+const REMOTE_OPS = {
+  push: ['push'],
+  pull: ['pull', '--ff-only'],
+  fetch: ['fetch', '--prune'],
+};
 
-  const output = await git(['push'], projectPath);
-  res.json({ ok: true, output });
-}));
+for (const [op, args] of Object.entries(REMOTE_OPS)) {
+  router.post(`/:slug/git/${op}`, wrapRoute(async (req, res) => {
+    if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+    const projectPath = decodeSlug(req.params.slug);
+    if (!projectPath) return res.status(400).json({ error: 'Cannot resolve project path' });
+
+    const output = await git(args, projectPath);
+    res.json({ ok: true, output });
+  }));
+}
 
 module.exports = router;

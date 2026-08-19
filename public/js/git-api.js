@@ -28,6 +28,15 @@ const GitApi = {
   push(slug) {
     return api(`${GitApi.base(slug)}/git/push`, { method: 'POST' });
   },
+
+  /** Fast-forward only: a pull that would need a merge fails and is left to the shell. */
+  pull(slug) {
+    return api(`${GitApi.base(slug)}/git/pull`, { method: 'POST' });
+  },
+
+  fetch(slug) {
+    return api(`${GitApi.base(slug)}/git/fetch`, { method: 'POST' });
+  },
 };
 
 window.GitApi = GitApi;

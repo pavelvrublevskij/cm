@@ -31,6 +31,8 @@ const harness = {
   commits: [],
   hold: null,
   pushes: 0,
+  pulls: 0,
+  fetches: 0,
   gitInfo: null,
 };
 
@@ -116,6 +118,14 @@ const context = vm.createContext({
       harness.pushes++;
       return harness.hold ? harness.hold.promise : undefined;
     },
+    pull: () => {
+      harness.pulls++;
+      return harness.hold ? harness.hold.promise : undefined;
+    },
+    fetch: () => {
+      harness.fetches++;
+      return harness.hold ? harness.hold.promise : undefined;
+    },
   },
   setTimeout: fn => fn(),
   escapeHtml: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('"').join('&quot;'),
@@ -154,6 +164,22 @@ function holdAction() {
   return () => { harness.hold.release(); return harness.hold.promise; };
 }
 
+/** Find a rendered action button by its visible label ("Commit", "Push", "Pull", "Fetch"). */
+function actionButton(label) {
+  // Once an action has repainted the rows, those elements are the live state; before that the only
+  // rendering is the card's first paint. In the browser these are the same nodes.
+  const rows = el('git-changes-actions').innerHTML + el('git-sync-actions').innerHTML;
+  const html = rows.trim() ? rows : el('git-changes').innerHTML;
+  const buttons = html.match(/<button[\s\S]*?<\/button>/g) || [];
+  const labelRe = new RegExp(`>(?:<span[^>]*></span>)?${label}(?: \\(\\d+\\))?</button>`);
+  return buttons.find(b => labelRe.test(b));
+}
+
+function isDisabled(label) {
+  const btn = actionButton(label);
+  return !!btn && btn.includes('disabled');
+}
+
 function fileCb(path) {
   return harness.checkboxes.find(c => c.kind === 'file' && c.value === path);
 }
@@ -188,9 +214,11 @@ beforeEach(() => {
   harness.hold = null;
   GitPanel._busy = null;
   harness.pushes = 0;
+  harness.pulls = 0;
+  harness.fetches = 0;
   harness.gitInfo = {
     available: true, branch: 'feature/x', detached: false, upstream: 'origin/main',
-    ahead: 0, behind: 0, unpushed: [], files: [],
+    ahead: 0, behind: 0, unpushed: [], files: [], hasRemote: true,
   };
   GitPanel._slug = 'proj';
   GitPanel._hostId = HOST;
@@ -1058,11 +1086,110 @@ test('a rejected commit message never enters the busy state', async () => {
   assert.strictEqual(harness.commits.length, 0);
 });
 
-test('buttons stay disabled when there is nothing to do, without any busy label', async () => {
+test('each action is disabled only when it has nothing to do', async () => {
   await GitPanel.mount(HOST, 'proj');
-  // the first paint comes from the card, before any action has repainted the row on its own
+  // the first paint comes from the card, before any action has repainted a row on its own
   const html = el('git-changes').innerHTML;
 
-  assert.strictEqual((html.match(/disabled/g) || []).length, 3);
-  assert.ok(!html.includes('btn-spinner'));
+  assert.ok(html.length > 0, 'the card rendered');
+  assert.ok(isDisabled('Commit'), 'nothing staged, so no commit');
+  assert.ok(isDisabled('Push'), 'nothing ahead, so no push');
+  assert.ok(isDisabled('Pull'), 'nothing behind, so no pull');
+  assert.ok(!isDisabled('Fetch'), 'fetch is how being behind stops being stale, so it stays live');
+  assert.ok(!html.includes('btn-spinner'), 'and nothing is spinning');
+});
+
+// ── pull and fetch ───────────────────────────────────────────────────────────
+// The card told you to pull before pushing and then offered no way to do it. Fetch is what makes
+// "behind" stop being stale, so it stays available whenever there is a remote at all.
+
+test('fetch is offered whenever there is a remote, even with nothing behind', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  assert.ok(actionButton('Fetch'), 'the button exists');
+  assert.strictEqual(isDisabled('Fetch'), false);
+});
+
+test('fetch is disabled for a repo with no remote', async () => {
+  harness.gitInfo.hasRemote = false;
+  harness.gitInfo.upstream = null;
+  await GitPanel.mount(HOST, 'proj');
+  assert.strictEqual(isDisabled('Fetch'), true);
+});
+
+test('pull is offered only when the branch is behind, and carries the count', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  assert.strictEqual(isDisabled('Pull'), true, 'nothing to fast-forward over');
+
+  harness.gitInfo.behind = 3;
+  await GitPanel.refreshIfMounted();
+  assert.strictEqual(isDisabled('Pull'), false);
+  assert.match(el('git-changes').innerHTML, /Pull \(3\)/);
+});
+
+test('being behind shows both arrows in the To push header', async () => {
+  harness.gitInfo.ahead = 2;
+  harness.gitInfo.behind = 3;
+  await GitPanel.mount(HOST, 'proj');
+
+  const html = el('git-changes').innerHTML;
+  assert.match(html, /↑2/);
+  assert.match(html, /↓3/);
+});
+
+test('pull runs through GitActions and reports progress on its button', async () => {
+  harness.gitInfo.behind = 2;
+  await GitPanel.mount(HOST, 'proj');
+  const release = holdAction();
+
+  const pending = GitPanel.pull();
+  assert.match(el('git-sync-actions').innerHTML, /Pulling…/);
+  assert.match(el('git-sync-actions').innerHTML, /btn-spinner/);
+
+  release();
+  await pending;
+  assert.strictEqual(harness.pulls, 1);
+  assert.ok(!el('git-sync-actions').innerHTML.includes('Pulling…'));
+});
+
+test('fetch runs through GitActions and reports progress on its button', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  const release = holdAction();
+
+  const pending = GitPanel.fetch();
+  assert.match(el('git-sync-actions').innerHTML, /Fetching…/);
+
+  release();
+  await pending;
+  assert.strictEqual(harness.fetches, 1);
+});
+
+test('a pull in flight disables the commit row too', async () => {
+  harness.gitInfo.files = [{ path: 'a.js', label: 'modified' }];
+  harness.gitInfo.behind = 1;
+  await GitPanel.mount(HOST, 'proj');
+  syncCheckboxes();
+  const release = holdAction();
+
+  const pending = GitPanel.pull();
+  assert.strictEqual(isDisabled('Commit'), true, 'no committing mid-pull');
+  assert.strictEqual(isDisabled('Fetch'), true, 'and no second remote call');
+
+  release();
+  await pending;
+  assert.strictEqual(isDisabled('Commit'), false);
+});
+
+test('a fetch while a commit runs is ignored', async () => {
+  harness.gitInfo.files = [{ path: 'a.js', label: 'modified' }];
+  await GitPanel.mount(HOST, 'proj');
+  syncCheckboxes();
+  el('git-panel-msg').value = 'a message';
+  const release = holdAction();
+
+  const pending = GitPanel.commit(false);
+  await GitPanel.fetch();
+  assert.strictEqual(harness.fetches, 0);
+
+  release();
+  await pending;
 });

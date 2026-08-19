@@ -120,29 +120,43 @@ const GitActions = {
 
   /** Commit (and optionally push), then repaint every view that shows git state. */
   async runCommit(message, files, andPush) {
-    try {
-      const result = await GitApi.commit(GitActions._slug, message, files);
-      toast(result.output || 'Committed');
-      if (andPush) await GitActions._doPush();
-    } catch (e) {
-      toast(e.message, 'error');
-    }
-    await GitActions.refresh();
-    if (typeof GitPanel !== 'undefined') await GitPanel.refreshIfMounted();
+    const committed = await GitActions._call(() => GitApi.commit(GitActions._slug, message, files), 'Committed');
+    if (committed && andPush) await GitActions._call(() => GitApi.push(GitActions._slug), 'Pushed');
+    await GitActions._repaint();
   },
 
-  async push() {
-    await GitActions._doPush();
-    await GitActions.refresh();
-    if (typeof GitPanel !== 'undefined') await GitPanel.refreshIfMounted();
+  push() {
+    return GitActions._remote(() => GitApi.push(GitActions._slug), 'Pushed');
   },
 
-  async _doPush() {
+  pull() {
+    return GitActions._remote(() => GitApi.pull(GitActions._slug), 'Pulled');
+  },
+
+  fetch() {
+    return GitActions._remote(() => GitApi.fetch(GitActions._slug), 'Fetched');
+  },
+
+  /** Run one git call and report it. Returns false when git refused, so a chain can stop. */
+  async _call(call, okMessage) {
     try {
-      const result = await GitApi.push(GitActions._slug);
-      toast(result.output || 'Pushed');
+      const result = await call();
+      toast(result.output || okMessage);
+      return true;
     } catch (e) {
       toast(e.message, 'error');
+      return false;
     }
+  },
+
+  async _remote(call, okMessage) {
+    await GitActions._call(call, okMessage);
+    await GitActions._repaint();
+  },
+
+  /** Every view showing git state, repainted once per user action. */
+  async _repaint() {
+    await GitActions.refresh();
+    if (typeof GitPanel !== 'undefined') await GitPanel.refreshIfMounted();
   }
 };
