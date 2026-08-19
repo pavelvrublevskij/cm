@@ -51,6 +51,7 @@ const CodeView = {
       });
       if (opts.onChange) cm.on('change', opts.onChange);
       if (opts.trackChanges && opts.changedLines) CodeView._applyChangeMarkers(cm, host, opts.changedLines);
+      let searchMarks = [];
       return {
         getValue: () => cm.getValue(),
         refresh: () => cm.refresh(),
@@ -63,6 +64,11 @@ const CodeView = {
           if (!state) return;
           if (state.cursor) cm.setCursor(state.cursor);
           if (typeof state.scrollTop === 'number') cm.scrollTo(null, state.scrollTop);
+        },
+        highlightMatches: query => {
+          const result = CodeView._highlightMatches(cm, searchMarks, query);
+          searchMarks = result.marks;
+          return result.count;
         }
       };
     }
@@ -88,8 +94,40 @@ const CodeView = {
         if (!state) return;
         if (typeof state.selectionStart === 'number') { ta.selectionStart = state.selectionStart; ta.selectionEnd = state.selectionEnd; }
         if (typeof state.scrollTop === 'number') ta.scrollTop = state.scrollTop;
+      },
+      /** No CodeMirror, so no in-text highlight — just count and select the first hit. */
+      highlightMatches: query => {
+        if (!query) return 0;
+        const lower = ta.value.toLowerCase();
+        const q = query.toLowerCase();
+        let count = 0, idx = 0, firstIdx = -1;
+        while ((idx = lower.indexOf(q, idx)) !== -1) {
+          if (firstIdx === -1) firstIdx = idx;
+          count++;
+          idx += q.length;
+        }
+        if (firstIdx !== -1) ta.setSelectionRange(firstIdx, firstIdx + query.length);
+        return count;
       }
     };
+  },
+
+  /** Clear any previous search marks and highlight every occurrence of query, jumping to the first. */
+  _highlightMatches(cm, prevMarks, query) {
+    prevMarks.forEach(m => m.clear());
+    if (!query) return { marks: [], count: 0 };
+    const marks = [];
+    const cursor = cm.getSearchCursor(query, { line: 0, ch: 0 }, { caseFold: true });
+    let first = null;
+    while (cursor.findNext()) {
+      marks.push(cm.markText(cursor.from(), cursor.to(), { className: 'sf-search-match' }));
+      if (!first) first = { from: cursor.from(), to: cursor.to() };
+    }
+    if (first) {
+      cm.setSelection(first.from, first.to);
+      cm.scrollIntoView(first, 100);
+    }
+    return { marks, count: marks.length };
   },
 
   /** Colour the gutter for each changed line and lay out matching ticks on an overview ruler. */

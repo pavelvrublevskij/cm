@@ -89,6 +89,9 @@ const context = vm.createContext({
       handlers: {},
       cursor: { line: 0, ch: 0 },
       scrollTop: 0,
+      marks: [],
+      selection: null,
+      scrolledTo: null,
       getValue: () => inst.value,
       on: (evt, fn) => { inst.handlers[evt] = fn; },
       refresh() {},
@@ -97,6 +100,32 @@ const context = vm.createContext({
       setCursor: c => { inst.cursor = c; },
       scrollTo: (x, top) => { inst.scrollTop = top; },
       type(text) { inst.value = text; if (inst.handlers.change) inst.handlers.change(); },
+      // Fake search cursor over the plain string value — good enough to exercise highlightMatches.
+      getSearchCursor(query) {
+        const lower = inst.value.toLowerCase();
+        const q = String(query).toLowerCase();
+        let searchIdx = 0;
+        let current = null;
+        return {
+          findNext() {
+            if (!q) return false;
+            const idx = lower.indexOf(q, searchIdx);
+            if (idx === -1) { current = null; return false; }
+            current = { from: idx, to: idx + q.length };
+            searchIdx = idx + q.length;
+            return true;
+          },
+          from: () => current.from,
+          to: () => current.to,
+        };
+      },
+      markText(from, to, opts2) {
+        const mark = { from, to, opts: opts2, clear: () => { inst.marks = inst.marks.filter(m => m !== mark); } };
+        inst.marks.push(mark);
+        return mark;
+      },
+      setSelection: (from, to) => { inst.selection = { from, to }; },
+      scrollIntoView: pos => { inst.scrolledTo = pos; },
     };
     harness.cm = inst;
     return inst;
@@ -524,6 +553,119 @@ test('the editor is created with the mode for the open file', async () => {
   assert.strictEqual(harness.cmOpts.mode, 'text/x-java');
   assert.strictEqual(harness.cmOpts.lineNumbers, true);
   assert.strictEqual(harness.cmOpts.styleActiveLine, true, 'the cursor line is highlighted');
+});
+
+// ── in-file search highlight ──────────────────────────────────────────────────
+
+test('opening a file while a project search is active highlights every match and shows the count', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('server.js')] },
+    { needle: [{ path: 'server.js', type: 'file', matchedBy: 'content' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('needle');
+
+  harness.apiHandler = () => ({ content: 'a needle\nb needle\nc', mtime: 1 });
+  await SessionFiles.openFile('server.js');
+
+  assert.strictEqual(harness.cm.marks.length, 2);
+  assert.strictEqual(el('sf-pane-search-count').textContent, '2 matches');
+  assert.strictEqual(el('sf-pane-search-count').style.display, '');
+});
+
+test('a file with no in-file matches shows a zero count instead of hiding it', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('server.js')] },
+    { pr: [{ path: 'server.js', type: 'file', matchedBy: 'name' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('pr');
+
+  harness.apiHandler = () => ({ content: 'nothing relevant here', mtime: 1 });
+  await SessionFiles.openFile('server.js');
+
+  assert.strictEqual(harness.cm.marks.length, 0);
+  assert.strictEqual(el('sf-pane-search-count').textContent, '0 matches');
+});
+
+test('the singular is used for exactly one match', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('server.js')] },
+    { needle: [{ path: 'server.js', type: 'file', matchedBy: 'content' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('needle');
+
+  harness.apiHandler = () => ({ content: 'only one needle here', mtime: 1 });
+  await SessionFiles.openFile('server.js');
+
+  assert.strictEqual(el('sf-pane-search-count').textContent, '1 match');
+});
+
+test('no active search leaves the count hidden and does not mark the editor', async () => {
+  harness.apiHandler = () => ({ content: 'a needle\nb needle', mtime: 1 });
+  await SessionFiles.openFile('server.js');
+
+  assert.strictEqual(harness.cm.marks.length, 0);
+  assert.strictEqual(el('sf-pane-search-count').style.display, 'none');
+});
+
+test('clearing the search box clears the highlight and hides the count in the open file', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('server.js')] },
+    { needle: [{ path: 'server.js', type: 'file', matchedBy: 'content' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('needle');
+  harness.apiHandler = () => ({ content: 'a needle\nb needle', mtime: 1 });
+  await SessionFiles.openFile('server.js');
+  assert.strictEqual(harness.cm.marks.length, 2);
+
+  await SessionFiles._runSearch('');
+
+  assert.strictEqual(harness.cm.marks.length, 0);
+  assert.strictEqual(el('sf-pane-search-count').style.display, 'none');
+});
+
+test('editing the search query while the file stays open refreshes its highlight and count', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('server.js')] },
+    {
+      needle: [{ path: 'server.js', type: 'file', matchedBy: 'content' }],
+      other: [{ path: 'server.js', type: 'file', matchedBy: 'content' }]
+    }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('needle');
+  harness.apiHandler = () => ({ content: 'needle needle other', mtime: 1 });
+  await SessionFiles.openFile('server.js');
+  assert.strictEqual(harness.cm.marks.length, 2);
+
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('server.js')] },
+    { other: [{ path: 'server.js', type: 'file', matchedBy: 'content' }] }
+  );
+  await SessionFiles._runSearch('other');
+
+  assert.strictEqual(harness.cm.marks.length, 1);
+  assert.strictEqual(el('sf-pane-search-count').textContent, '1 match');
+});
+
+test('a diff-mode file shows no in-file search count', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('git.js')] },
+    { needle: [{ path: 'git.js', type: 'file', matchedBy: 'content' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('needle');
+
+  harness.apiHandler = () => ({ content: 'const a = 1;', mtime: 1 });
+  await SessionFiles.openFile('git.js', {
+    mode: 'diff',
+    ctx: { session: 's1', hash: 'abc', from: '1', path: 'git.js', isNew: '', isDeleted: '' }
+  });
+
+  assert.strictEqual(el('sf-pane-search-count').style.display, 'none');
 });
 
 // ── preview mode ──────────────────────────────────────────────────────────────

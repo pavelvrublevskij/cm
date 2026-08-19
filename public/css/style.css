@@ -1943,12 +1943,6 @@ mark.search-highlight {
   padding: 4px;
 }
 
-#footer-git .action-menu-panel {
-  top: auto;
-  bottom: calc(100% + 4px);
-  z-index: 200;
-}
-
 .action-menu-panel.open {
   display: block;
 }
@@ -3471,6 +3465,19 @@ mark.search-highlight {
   font-weight: 700;
 }
 
+.sf-search-match {
+  background: var(--accent-bg);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.sf-pane-search-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 .sf-row {
   display: flex;
   align-items: center;
@@ -4059,10 +4066,57 @@ mark.search-highlight {
 
 .git-panel-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 34%) 1fr;
+  grid-template-columns: minmax(300px, 36%) minmax(0, 1fr) 260px;
   gap: 12px;
   height: calc(100vh - 320px);
   min-height: 420px;
+}
+
+/* No shell, no recipe column: the changes list takes the width instead. */
+.git-panel-layout.no-recipes {
+  grid-template-columns: minmax(340px, 44%) minmax(0, 1fr);
+}
+
+.git-panel-layout.no-recipes .git-recipes,
+.git-panel-layout.no-recipes .git-recipes-rail {
+  display: none;
+}
+
+/* Folded recipes leave a rail to bring them back, and the width goes to the file list. */
+.git-panel-layout.recipes-collapsed {
+  grid-template-columns: minmax(340px, 44%) minmax(0, 1fr) 26px;
+}
+
+.git-panel-layout.recipes-collapsed .git-recipes {
+  display: none;
+}
+
+.git-recipes-rail {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.git-panel-layout.recipes-collapsed .git-recipes-rail {
+  display: flex;
+}
+
+.git-recipes-rail:hover {
+  color: var(--accent);
+}
+
+.git-recipes-rail span {
+  writing-mode: vertical-rl;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 /* In the modal the panel gets the viewport, not the leftover of a project page. */
@@ -4081,12 +4135,189 @@ mark.search-highlight {
   line-height: 1;
 }
 
-.git-recipes {
+/* One label style for every card heading in the git panel. */
+.git-changes-title,
+.git-recipes-title,
+.git-shell-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+
+/* Left column is entirely what-to-commit and what-to-push; the file list takes the slack. */
+.git-changes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
+  padding: 8px 10px;
+}
+
+.git-changes-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 6px;
+}
+
+.git-changes-select {
+  display: flex;
+  gap: 6px;
+}
+
+.git-select-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.git-select-btn:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.git-changes-reload {
+  margin-left: auto;
+}
+
+/* Fixed height: the list scrolls inside it, so eight changed files and none look the same. */
+.git-changes-files {
+  flex: 0 0 auto;
+  height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  background: var(--bg-primary);
+}
+
+/* Rows are divs, not labels: only the checkbox toggles, so reading a path cannot deselect it. */
+.git-file-row,
+.git-tree-folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0 3px calc(var(--git-depth, 0) * 14px);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.git-file-row input,
+.git-tree-folder input {
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.git-file-path {
+  word-break: break-all;
+}
+
+.git-tree-name {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.git-tree-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.git-view-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.git-changes-msg {
+  width: 100%;
+  margin-top: 8px;
+  resize: vertical;
+  font-size: 12px;
+}
+
+.git-changes-actions {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 4px;
+  flex-wrap: wrap;
+}
+
+.git-changes-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 0 2px;
+}
+
+.git-changes-commits {
+  flex: 0 0 auto;
+  height: 140px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  background: var(--bg-primary);
+}
+
+.git-commit-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.git-commit-row code {
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.git-commit-subject {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-changes-note {
+  font-size: 11px;
+  color: var(--warning);
+  margin-top: 6px;
+}
+
+.git-recipes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
   padding: 6px;
+}
+
+.git-recipes-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-recipes-header .icon-btn {
+  margin-left: auto;
+}
+
+.git-recipes-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 4px;
 }
 
 .git-recipe-cat-header {
@@ -4179,13 +4410,6 @@ mark.search-highlight {
   padding: 6px 10px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-}
-
-.git-shell-title {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .git-shell-cwd {

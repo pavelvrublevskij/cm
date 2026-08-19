@@ -5,7 +5,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const request = require('supertest');
 const { app, HOME } = require('./helpers/app');
-const { git, gitOk, headInfo, upstreamStatus, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
+const { git, gitOk, headInfo, upstreamStatus, unpushedCommits, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
 
 function slugForPath(p) {
   const win = p.match(/^([A-Za-z]):[\\\/](.*)/);
@@ -238,4 +238,60 @@ test('git/info rejects a traversal slug', async () => {
   const res = await request(app).get('/api/projects/bad..slug/git/info');
   assert.strictEqual(res.status, 400);
   assert.strictEqual(res.body.error, 'Invalid slug');
+});
+
+// ── unpushed commits ─────────────────────────────────────────────────────────
+
+test('unpushedCommits lists what a push would send, newest first', async () => {
+  const commits = await unpushedCommits(WORK, `origin/${currentBranch(WORK)}`);
+  assert.strictEqual(commits.length, 1, 'WORK is one commit ahead');
+  assert.strictEqual(commits[0].subject, 'local-side commit');
+  assert.match(commits[0].sha, /^[0-9a-f]{7,}$/);
+});
+
+test('unpushedCommits is empty without an upstream', async () => {
+  assert.deepStrictEqual(await unpushedCommits(PLAIN, null), []);
+});
+
+test('unpushedCommits keeps a subject containing the record separator safe', async () => {
+  const dir = path.join(HOME, 'git-sep-proj');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  run(['init', '-q'], dir);
+  identity(dir);
+  commit(dir, 'a.txt', 'x\n', 'first');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString().trim();
+  commit(dir, 'a.txt', 'y\n', 'subject with a dash - and: punctuation');
+
+  const commits = await unpushedCommits(dir, base);
+  assert.strictEqual(commits.length, 1);
+  assert.strictEqual(commits[0].subject, 'subject with a dash - and: punctuation');
+});
+
+test('unpushedCommits caps the list at the requested limit', async () => {
+  const dir = path.join(HOME, 'git-many-proj');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  run(['init', '-q'], dir);
+  identity(dir);
+  commit(dir, 'a.txt', '0\n', 'base');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString().trim();
+  for (let i = 1; i <= 5; i++) commit(dir, 'a.txt', `${i}\n`, `commit ${i}`);
+
+  const commits = await unpushedCommits(dir, base, 3);
+  assert.strictEqual(commits.length, 3);
+  assert.strictEqual(commits[0].subject, 'commit 5', 'newest first');
+});
+
+test('git/info carries the unpushed commits when the branch is ahead', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(WORK)}/git/info`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.ahead, 1);
+  assert.strictEqual(res.body.unpushed.length, 1);
+  assert.strictEqual(res.body.unpushed[0].subject, 'local-side commit');
+});
+
+test('git/info returns no unpushed commits for a branch that is level', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(PLAIN)}/git/info`);
+  assert.deepStrictEqual(res.body.unpushed, []);
 });

@@ -220,6 +220,7 @@ const SessionFiles = {
       SessionFiles.searchExpand = null;
       SessionFiles.searchTruncated = false;
       SessionFiles.renderTree();
+      SessionFiles._applySearchHighlight();
       return;
     }
     if (!SessionFiles.slug) return;
@@ -253,6 +254,7 @@ const SessionFiles = {
     SessionFiles.searchExpand = searchExpand;
     SessionFiles.searchTruncated = !!data.truncated;
     SessionFiles.renderTree();
+    SessionFiles._applySearchHighlight();
   },
 
   /** Whether relPath should be shown while filtering — a direct match, or an ancestor of one. */
@@ -399,6 +401,7 @@ const SessionFiles = {
     el.innerHTML = `<div class="sf-pane-header">
         <span class="sf-pane-path" title="${escapeHtml(open.path)}">${dir ? `<span class="sf-pane-dir">${escapeHtml(dir)}</span>` : ''}${escapeHtml(name)}</span>
         <span class="sf-dirty sf-pane-dirty" id="sf-pane-dirty" style="display:none" title="Unsaved changes">&#9679;</span>
+        <span class="sf-pane-search-count" id="sf-pane-search-count" style="display:none"></span>
         <div class="sf-pane-actions">
           ${hasDiff || hasPreview ? `<div class="sf-mode-toggle">
             ${modeBtn('source', 'Source')}
@@ -450,8 +453,28 @@ const SessionFiles = {
       SessionFiles._mountEditor();
     }
 
+    SessionFiles._applySearchHighlight();
     SessionFiles.renderStatus();
     SessionFiles._updateDirtyMarkers();
+  },
+
+  /** When a project search is active, highlight its matches in the open file and show the count. */
+  _applySearchHighlight() {
+    const countEl = document.getElementById('sf-pane-search-count');
+    const open = SessionFiles.open;
+    const query = SessionFiles.searchActive ? SessionFiles.searchQuery : '';
+    if (!open || open.mode !== 'source' || !SessionFiles.editor || !SessionFiles.editor.highlightMatches) {
+      if (countEl) countEl.style.display = 'none';
+      return;
+    }
+    const count = SessionFiles.editor.highlightMatches(query);
+    if (!countEl) return;
+    if (!query) {
+      countEl.style.display = 'none';
+      return;
+    }
+    countEl.style.display = '';
+    countEl.textContent = count === 1 ? '1 match' : `${count} matches`;
   },
 
   _projSlug() {
