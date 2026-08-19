@@ -15,6 +15,12 @@ const GitPanel = {
   RECIPES_COLLAPSED_KEY: 'claude-manager-git-recipes-collapsed',
   VIEW_MODE_KEY: 'claude-manager-git-changes-view',
 
+  BUSY_LABEL: {
+    'commit': 'Committing…',
+    'commit-push': 'Committing & pushing…',
+    'push': 'Pushing…',
+  },
+
   BADGE_CLASS: {
     new: 'ctx-file-badge-new',
     modified: 'ctx-file-badge-edited',
@@ -28,6 +34,7 @@ const GitPanel = {
   _shellInfo: null,
   _view: null,
   _openCategories: null,
+  _busy: null,          // 'commit' | 'commit-push' | 'push' while that action is in flight
 
   /** Render into `hostId` for `slug`, reattaching to a shell that is already running. */
   async mount(hostId, slug) {
@@ -150,7 +157,6 @@ const GitPanel = {
          </div>`
       : '';
 
-    const disabled = files.length ? '' : ' disabled';
     return `
       <div class="git-changes-header">
         <span class="git-changes-title">To commit</span>
@@ -161,11 +167,7 @@ const GitPanel = {
       </div>
       ${filesBody}
       <textarea id="git-panel-msg" class="git-changes-msg" rows="2" placeholder="Commit message…"></textarea>
-      <div class="git-changes-actions">
-        <button class="btn btn-sm btn-primary" onclick="GitPanel.commit(false)"${disabled}>Commit</button>
-        <button class="btn btn-sm" onclick="GitPanel.commit(true)"${disabled}>Commit &amp; Push</button>
-        ${GitPanel._pushButtonHtml()}
-      </div>`;
+      <div class="git-changes-actions" id="git-changes-actions">${GitPanel._actionsHtml()}</div>`;
   },
 
   _viewToggleHtml() {
@@ -280,9 +282,44 @@ const GitPanel = {
     GitPanel.syncGroups();
   },
 
-  _pushButtonHtml() {
-    const count = ((GitPanel._info || {}).unpushed || []).length;
-    return `<button class="btn btn-sm" onclick="GitActions.push()"${count ? '' : ' disabled'}>Push${count ? ` (${count})` : ''}</button>`;
+  /**
+   * A commit or push runs a real git command against a possibly slow remote, so the button that
+   * started it says what it is doing and every action is disabled until it finishes — otherwise the
+   * only sign anything happened is the toast at the end, and a second push is easy to fire.
+   */
+  _actionsHtml() {
+    const files = (GitPanel._info || {}).files || [];
+    const unpushed = ((GitPanel._info || {}).unpushed || []).length;
+    const busy = GitPanel._busy;
+
+    const button = (kind, label, handler, enabled, extraClass) => {
+      const running = busy === kind;
+      const body = running ? `<span class="btn-spinner"></span>${GitPanel.BUSY_LABEL[kind]}` : label;
+      const off = busy || !enabled ? ' disabled' : '';
+      return `<button class="btn btn-sm${extraClass || ''}" onclick="${handler}"${off}${running ? ' aria-busy="true"' : ''}>${body}</button>`;
+    };
+
+    return button('commit', 'Commit', 'GitPanel.commit(false)', files.length, ' btn-primary')
+      + button('commit-push', 'Commit &amp; Push', 'GitPanel.commit(true)', files.length)
+      + button('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', unpushed);
+  },
+
+  _renderActions() {
+    const host = document.getElementById('git-changes-actions');
+    if (host) host.innerHTML = GitPanel._actionsHtml();
+  },
+
+  /** Show the action as running for as long as it takes, whatever its outcome. */
+  async _withBusy(kind, run) {
+    if (GitPanel._busy) return;                 // an action is already in flight
+    GitPanel._busy = kind;
+    GitPanel._renderActions();
+    try {
+      await run();
+    } finally {
+      GitPanel._busy = null;
+      GitPanel._renderActions();
+    }
   },
 
   _toPushHtml() {
@@ -312,13 +349,18 @@ const GitPanel = {
       ${behindNote}`;
   },
 
-  /** Commit the ticked files with the panel's message, reusing the footer's commit path. */
+  /** Commit the ticked files with the panel's message, reusing the shared commit path. */
   commit(andPush) {
     const message = GitPanel._draftMessage().trim();
     if (!message) { toast('Commit message is required', 'error'); return; }
     const files = GitPanel.selectedFiles();
     if (!files.length) { toast('No files selected', 'error'); return; }
-    GitActions.runCommit(message, files, andPush);
+    return GitPanel._withBusy(andPush ? 'commit-push' : 'commit',
+      () => GitActions.runCommit(message, files, andPush));
+  },
+
+  push() {
+    return GitPanel._withBusy('push', () => GitActions.push());
   },
 
   _branchLabel() {

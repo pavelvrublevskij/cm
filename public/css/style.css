@@ -4249,6 +4249,20 @@ mark.search-highlight {
   flex-wrap: wrap;
 }
 
+/* Inline spinner for a button waiting on git, reusing the page's spin animation. */
+.btn-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-right-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
 .git-changes-empty {
   font-size: 11px;
   color: var(--text-muted);

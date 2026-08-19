@@ -29,6 +29,7 @@ const harness = {
   fitted: 0,
   checkboxes: [],
   commits: [],
+  hold: null,
   pushes: 0,
   gitInfo: null,
 };
@@ -107,8 +108,14 @@ const context = vm.createContext({
   ResizeObserver: undefined,
   GitActions: {
     refreshShellState: () => { harness.shellStateRefreshes++; },
-    runCommit: (message, files, andPush) => { harness.commits.push({ message, files, andPush }); },
-    push: () => { harness.pushes++; },
+    runCommit: (message, files, andPush) => {
+      harness.commits.push({ message, files, andPush });
+      return harness.hold ? harness.hold.promise : undefined;
+    },
+    push: () => {
+      harness.pushes++;
+      return harness.hold ? harness.hold.promise : undefined;
+    },
   },
   setTimeout: fn => fn(),
   escapeHtml: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('"').join('&quot;'),
@@ -137,6 +144,14 @@ function syncCheckboxes() {
     });
   }
   return harness.checkboxes;
+}
+
+/** Make the next commit/push hang until release() is called, so mid-flight state can be asserted. */
+function holdAction() {
+  let release;
+  const promise = new Promise(resolve => { release = resolve; });
+  harness.hold = { promise, release };
+  return () => { harness.hold.release(); return harness.hold.promise; };
 }
 
 function fileCb(path) {
@@ -170,6 +185,8 @@ beforeEach(() => {
   harness.fitted = 0;
   harness.checkboxes = [];
   harness.commits = [];
+  harness.hold = null;
+  GitPanel._busy = null;
   harness.pushes = 0;
   harness.gitInfo = {
     available: true, branch: 'feature/x', detached: false, upstream: 'origin/main',
@@ -926,4 +943,126 @@ test('both boxes appear exactly once whether full or empty', async () => {
   const fullHtml = el('git-changes').innerHTML;
   assert.strictEqual((fullHtml.match(/git-changes-files/g) || []).length, 1);
   assert.strictEqual((fullHtml.match(/git-changes-commits/g) || []).length, 1);
+});
+
+// ── in-flight feedback ───────────────────────────────────────────────────────
+// A push can sit for seconds against a slow remote. Without this the only sign anything happened
+// was the toast at the end, and nothing stopped a second push being fired in the meantime.
+
+async function mountWithWork() {
+  harness.gitInfo.files = [{ path: 'a.js', label: 'modified' }];
+  harness.gitInfo.ahead = 1;
+  harness.gitInfo.unpushed = [{ sha: 'abc1234', subject: 'Something' }];
+  await GitPanel.mount(HOST, 'proj');
+  syncCheckboxes();
+  el('git-panel-msg').value = 'a message';
+}
+
+test('a push in flight says so on its own button', async () => {
+  await mountWithWork();
+  const release = holdAction();
+
+  const pending = GitPanel.push();
+  const html = el('git-changes-actions').innerHTML;
+  assert.match(html, /Pushing…/);
+  assert.match(html, /btn-spinner/, 'a spinner shows it is working');
+  assert.match(html, /aria-busy="true"/);
+
+  release();
+  await pending;
+  assert.match(el('git-changes-actions').innerHTML, /Push \(1\)/, 'the label comes back');
+  assert.ok(!el('git-changes-actions').innerHTML.includes('Pushing…'));
+});
+
+test('a commit in flight says Committing', async () => {
+  await mountWithWork();
+  const release = holdAction();
+
+  const pending = GitPanel.commit(false);
+  assert.match(el('git-changes-actions').innerHTML, /Committing…/);
+
+  release();
+  await pending;
+  assert.match(el('git-changes-actions').innerHTML, />Commit</);
+});
+
+test('commit and push names both stages while it runs', async () => {
+  await mountWithWork();
+  const release = holdAction();
+
+  const pending = GitPanel.commit(true);
+  assert.match(el('git-changes-actions').innerHTML, /Committing &amp; pushing…|Committing & pushing…/);
+
+  release();
+  await pending;
+});
+
+test('every action is disabled while one is in flight', async () => {
+  await mountWithWork();
+  const release = holdAction();
+
+  const pending = GitPanel.push();
+  const html = el('git-changes-actions').innerHTML;
+  assert.strictEqual((html.match(/disabled/g) || []).length, 3, 'all three buttons are disabled');
+
+  release();
+  await pending;
+  const after = el('git-changes-actions').innerHTML;
+  assert.ok(!after.includes('disabled'), 'and all three are usable again');
+});
+
+test('a second push while one is running is ignored', async () => {
+  await mountWithWork();
+  const release = holdAction();
+
+  const pending = GitPanel.push();
+  await GitPanel.push();
+  await GitPanel.commit(false);
+
+  assert.strictEqual(harness.pushes, 1, 'no double push');
+  assert.strictEqual(harness.commits.length, 0, 'and no commit slipped in either');
+
+  release();
+  await pending;
+});
+
+test('the buttons recover after a failing action', async () => {
+  await mountWithWork();
+  harness.hold = { promise: Promise.reject(new Error('remote rejected')), release() {} };
+
+  await assert.rejects(() => GitPanel.push(), /remote rejected/);
+  assert.strictEqual(GitPanel._busy, null, 'the panel is not stuck busy');
+  assert.ok(!el('git-changes-actions').innerHTML.includes('Pushing…'));
+  assert.ok(!el('git-changes-actions').innerHTML.includes('disabled'));
+});
+
+test('an action can be started again once the first finished', async () => {
+  await mountWithWork();
+  const release = holdAction();
+  const pending = GitPanel.push();
+  release();
+  await pending;
+
+  harness.hold = null;
+  await GitPanel.push();
+  assert.strictEqual(harness.pushes, 2);
+});
+
+test('a rejected commit message never enters the busy state', async () => {
+  await mountWithWork();
+  el('git-panel-msg').value = '   ';
+  GitPanel.commit(false);
+
+  assert.strictEqual(GitPanel._busy, null);
+  assert.ok(!el('git-changes-actions').innerHTML.includes('Committing…'));
+  assert.strictEqual(harness.commits.length, 0);
+});
+
+test('buttons stay disabled when there is nothing to do, without any busy label', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  // the first paint comes from the card, before any action has repainted the row on its own
+  const html = el('git-changes').innerHTML;
+
+  assert.strictEqual((html.match(/disabled/g) || []).length, 3);
+  assert.ok(!html.includes('btn-spinner'));
 });
