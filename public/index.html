@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CM</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <!-- CodeMirror first: its default theme is the base layer our themes override in style.css -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/dialog/dialog.min.css">
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/themes/dark.css" id="theme-stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
@@ -466,6 +469,7 @@
               <button class="tab-btn" id="skills-tab-btn" onclick="ProjectTabs.switch('proj-skills', this)">Skills</button>
               <button class="tab-btn" id="output-styles-tab-btn" onclick="ProjectTabs.switch('proj-output-styles', this)">Output Styles</button>
               <button class="tab-btn" onclick="ProjectTabs.switch('claude-md', this)">CLAUDE.md</button>
+              <button class="tab-btn" id="git-tab-btn" style="display:none" onclick="ProjectTabs.switch('git', this)">Git</button>
             </div>
             <button class="btn btn-sm" onclick="ProjectTabs.refresh()">Refresh</button>
           </div>
@@ -508,6 +512,10 @@
           </div>
           <div class="project-tab" id="tab-proj-output-styles">
             <div id="proj-output-styles-content"></div>
+          </div>
+
+          <div class="project-tab" id="tab-git">
+            <div id="git-tab-body"></div>
           </div>
 
           <div class="project-tab" id="tab-claude-md">
@@ -566,14 +574,33 @@
         <div class="view-body session-detail-body" id="session-detail-body">
           <div class="session-main-panel">
             <div class="session-tab-bar">
-              <button class="session-tab-btn active" id="tab-btn-file-changes" onclick="Sessions.switchTab('file-changes')">File Changes</button>
+              <button class="session-tab-btn active" id="tab-btn-file-changes" onclick="Sessions.switchTab('file-changes')">Files</button>
               <button class="session-tab-btn" id="tab-btn-conversation" onclick="Sessions.switchTab('conversation')">Conversation</button>
               <button class="session-tab-btn" id="tab-btn-activity" onclick="Sessions.switchTab('activity')">Activity</button>
               <button class="session-tab-btn" id="tab-btn-scratchpad" onclick="Sessions.switchTab('scratchpad')">Scratchpad</button>
             </div>
-            <div id="session-context" class="session-context" style="display:none"></div>
+            <div id="session-context" class="session-context sf-layout" style="display:none">
+              <div class="sf-structure" id="sf-structure">
+                <div id="sf-changed"></div>
+                <div class="ctx-section sf-tree-section">
+                  <div class="sf-tree-toolbar">
+                    <div class="sf-tree-header">
+                      <span>Project files</span>
+                      <button class="icon-btn" onclick="SessionFiles.reloadTree()" title="Reload project files" aria-label="Reload project files">&#x21bb;</button>
+                    </div>
+                    <div class="sf-search-bar">
+                      <input type="search" id="sf-search" class="sf-search-input" placeholder="Search files..."
+                        oninput="SessionFiles.onSearchInput(this.value)">
+                    </div>
+                  </div>
+                  <div id="sf-tree"></div>
+                </div>
+              </div>
+              <div class="sf-splitter" id="sf-splitter" title="Drag to resize, click to show/hide" onmousedown="CodeView.startDrag(event)"></div>
+              <div class="sf-pane" id="sf-pane"></div>
+            </div>
             <div id="session-activity" class="session-activity-panel" style="display:none"></div>
-            <div id="session-scratchpad" class="session-scratchpad-panel" style="display:none"></div>
+            <div id="session-scratchpad" class="sf-layout" style="display:none"></div>
             <div class="session-messages-wrap" id="session-messages-wrap" style="display:none">
             <div class="session-messages-header">
               <div class="subtitle" id="session-count" style="color:var(--text-muted)"></div>
@@ -628,6 +655,7 @@
         <div class="view-body settings-body">
           <nav class="settings-nav" id="settings-nav">
             <div class="settings-nav-item active" data-section="general">General</div>
+            <div class="settings-nav-item" data-section="editor">Editor</div>
             <div class="settings-nav-item" data-section="pricing-source">Pricing Source</div>
             <div class="settings-nav-item" data-section="pricing-history">Pricing History</div>
             <div class="settings-nav-item" data-section="model-pricing">Model Pricing</div>
@@ -648,6 +676,28 @@
                 <span style="color:var(--text-muted)">seconds</span>
                 <button class="btn btn-sm" onclick="ManagerSettings.saveRefreshRate()">Save</button>
                 <button class="btn btn-sm" onclick="ManagerSettings.resetRefreshRate()">Reset Default (5s)</button>
+              </div>
+            </section>
+
+            <section class="settings-panel" data-section="editor">
+              <h3>Autosave</h3>
+              <div class="subtitle" style="margin:0 0 12px">
+                Applies to the source editor in a session's Files tab. With autosave off, edits stay in the editor
+                and are marked unsaved (&#9679;) until you press Save or Ctrl+S.
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <label class="session-tool-toggle" for="editor-autosave-enabled" style="margin:0">
+                  <input type="checkbox" id="editor-autosave-enabled" onchange="ManagerSettings.saveAutosaveEnabled(this.checked)">
+                  Autosave edits
+                </label>
+                <span style="color:var(--text-muted)">after</span>
+                <input type="number" id="editor-autosave-delay" min="0.5" step="0.5" style="width:100px">
+                <span style="color:var(--text-muted)">seconds idle</span>
+                <button class="btn btn-sm" onclick="ManagerSettings.saveAutosaveDelay()">Save</button>
+                <button class="btn btn-sm" onclick="ManagerSettings.resetAutosaveDelay()">Reset Default (2s)</button>
+              </div>
+              <div class="info-note" style="margin-top:12px">
+                Saves write straight to the file on disk — the same file Claude may be editing in this session.
               </div>
             </section>
 
@@ -725,7 +775,38 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/css/css.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/xml/xml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/yaml/yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/shell/shell.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/python/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/clike/clike.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/groovy/groovy.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/sql/sql.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/go/go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/rust/rust.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/swift/swift.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/php/php.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/ruby/ruby.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/lua/lua.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/powershell/powershell.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/dockerfile/dockerfile.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/properties/properties.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/toml/toml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/diff/diff.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/matchbrackets.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/selection/active-line.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/runmode/runmode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/dialog/dialog.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/search/searchcursor.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/search/search.min.js"></script>
   <script src="/js/utils.js"></script>
+  <script src="/js/code-view.js"></script>
+  <script src="/js/file-view-cache.js"></script>
   <script src="/js/modal.js"></script>
   <script src="/js/dashboard.js"></script>
   <script src="/js/settings.js"></script>
@@ -737,6 +818,7 @@
   <script src="/js/session-context.js"></script>
   <script src="/js/session-activity.js"></script>
   <script src="/js/session-scratchpad.js"></script>
+  <script src="/js/session-files.js"></script>
   <script src="/js/crud-frontmatter.js"></script>
   <script src="/js/project-settings-tab.js"></script>
   <script src="/js/project-mcp-tab.js"></script>
@@ -749,11 +831,15 @@
   <script src="/js/date-filter.js"></script>
   <script src="/js/usage.js"></script>
   <script src="/js/usage-charts.js"></script>
+  <script src="/js/term-view.js"></script>
   <script src="/js/terminal.js"></script>
   <script src="/js/manager-settings.js"></script>
   <script src="/js/file-history.js"></script>
   <script src="/js/tour.js"></script>
+  <script src="/js/git-api.js"></script>
   <script src="/js/git.js"></script>
+  <script src="/js/git-recipes.js"></script>
+  <script src="/js/git-panel.js"></script>
   <script src="/js/active-sessions-bar.js"></script>
   <script src="/js/app.js"></script>
 </body>

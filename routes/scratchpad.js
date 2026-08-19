@@ -1,37 +1,14 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
 const { wrapRoute } = require('../lib/file-helpers');
+const { openPath, revealInFileManager } = require('../lib/os-open');
+const { readFileForEditor } = require('../lib/project-files');
 const { safeScratchpadDir, listFiles } = require('../lib/scratchpad');
 
 const router = express.Router({ mergeParams: true });
 
 const PREVIEW_MAX_BYTES = 200 * 1024;
-
-/** Open a file or folder with the OS default association (Explorer/Finder/xdg-open). */
-function openPath(targetPath) {
-  const platform = process.platform;
-  if (platform === 'win32') {
-    spawn('explorer.exe', [targetPath], { detached: true, stdio: 'ignore' }).unref();
-  } else if (platform === 'darwin') {
-    execFile('open', [targetPath]);
-  } else {
-    execFile('xdg-open', [targetPath]);
-  }
-}
-
-/** Reveal a file in the OS file explorer, selecting it (Linux falls back to opening the containing folder). */
-function revealInFileManager(targetPath) {
-  const platform = process.platform;
-  if (platform === 'win32') {
-    spawn('explorer.exe', ['/select,' + targetPath], { detached: true, stdio: 'ignore' }).unref();
-  } else if (platform === 'darwin') {
-    execFile('open', ['-R', targetPath]);
-  } else {
-    execFile('xdg-open', [path.dirname(targetPath)]);
-  }
-}
 
 /** Resolve a relative path against a scratchpad dir, guarding against traversal. Returns null if unsafe. */
 function resolveScratchpadFile(dir, rel) {
@@ -61,15 +38,7 @@ router.get('/:slug/sessions/:sessionId/scratchpad/file', wrapRoute((req, res) =>
     return res.status(404).json({ error: 'File not found' });
   }
 
-  const stat = fs.statSync(target);
-  if (stat.size > PREVIEW_MAX_BYTES) {
-    return res.json({ binary: false, tooLarge: true, size: stat.size });
-  }
-
-  const buffer = fs.readFileSync(target);
-  const isBinary = buffer.subarray(0, 8000).includes(0);
-  if (isBinary) return res.json({ binary: true, size: stat.size });
-  res.json({ binary: false, content: buffer.toString('utf-8'), size: stat.size });
+  res.json(readFileForEditor(target, PREVIEW_MAX_BYTES));
 }));
 
 router.post('/:slug/sessions/:sessionId/scratchpad/open-folder', wrapRoute((req, res) => {

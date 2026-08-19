@@ -1,63 +1,69 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
+const crypto = require('crypto');
 const { CLAUDE_DIR, PROJECTS_DIR } = require('../lib/paths');
 const { wrapRoute } = require('../lib/file-helpers');
+const { openPath, revealInFileManager } = require('../lib/os-open');
 const planCache = require('../lib/plan-cache');
+const { resolveProjectPath } = require('../lib/project-files');
 const { decodeSlug } = require('../lib/slug');
+const { computeDiff } = require('../lib/diff');
+const { git, gitOk, parseStatus } = require('../lib/git');
 
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 
 const router = express.Router();
 const FILE_HISTORY_DIR = path.join(CLAUDE_DIR, 'file-history');
 
-/** Open a file with the OS default association (Explorer/Finder/xdg-open). */
-function openPath(targetPath) {
-  const platform = process.platform;
-  if (platform === 'win32') {
-    spawn('explorer.exe', [targetPath], { detached: true, stdio: 'ignore' }).unref();
-  } else if (platform === 'darwin') {
-    execFile('open', [targetPath]);
-  } else {
-    execFile('xdg-open', [targetPath]);
+/** Local git changes with an mtime inside [from, to] — catches files a session touched via
+ *  Bash (cp, scripts, ...) rather than the Write/Edit/MultiEdit/NotebookEdit tools we scan for. */
+async function gitFilesInWindow(projectDir, from, to) {
+  if (!from) return [];
+  if (!(await gitOk(projectDir))) return [];
+
+  let raw;
+  try {
+    raw = await git(['status', '--porcelain'], projectDir);
+  } catch (_) {
+    return [];
   }
+
+  const BUFFER_MS = 5000;
+  const results = [];
+  for (const entry of parseStatus(raw)) {
+    if (entry.label === 'deleted') continue;
+    const relNorm = entry.path.replace(/\\/g, '/');
+    let mtime;
+    try { mtime = fs.statSync(path.join(projectDir, entry.path)).mtimeMs; } catch (_) { continue; }
+    if (mtime < from - BUFFER_MS || mtime > to + BUFFER_MS) continue;
+    results.push({ path: relNorm, isNew: entry.label === 'new' || entry.label === 'untracked' });
+  }
+  return results;
 }
 
-/** Reveal a file in the OS file explorer, selecting it (Linux falls back to opening the containing folder). */
-function revealInFileManager(targetPath) {
-  const platform = process.platform;
-  if (platform === 'win32') {
-    spawn('explorer.exe', ['/select,' + targetPath], { detached: true, stdio: 'ignore' }).unref();
-  } else if (platform === 'darwin') {
-    execFile('open', ['-R', targetPath]);
-  } else {
-    execFile('xdg-open', [path.dirname(targetPath)]);
-  }
+/**
+ * Claude Code names file-history backups `<sha256(absolute path) truncated to 16 hex>@v<n>`.
+ * Recomputing it recovers the path -> backup mapping for sessions whose transcript carries no
+ * file-history-snapshot records (newer Claude Code versions omit them).
+ */
+function backupHash(absPath) {
+  return crypto.createHash('sha256').update(absPath, 'utf8').digest('hex').slice(0, 16);
 }
 
 /** Resolve+validate a projSlug/filePath pair against the project dir. Returns { error, status } or { target }. */
 function resolveProjectFile(projSlug, filePath) {
-  if (!projSlug || projSlug.includes('..') || projSlug.includes('/') || projSlug.includes('\\')) {
-    return { status: 400, error: 'Invalid projSlug' };
-  }
   if (!filePath) return { status: 400, error: 'Invalid file path' };
 
-  const projectDir = decodeSlug(projSlug);
-  if (!projectDir) return { status: 404, error: 'Project not found' };
-
-  const target = path.resolve(projectDir, filePath);
-  const rel = path.relative(path.resolve(projectDir), target);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    return { status: 400, error: 'Invalid file path' };
-  }
-  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+  const resolved = resolveProjectPath(projSlug, filePath);
+  if (resolved.error) return resolved;
+  if (!fs.existsSync(resolved.target) || !fs.statSync(resolved.target).isFile()) {
     return { status: 404, error: 'File not found' };
   }
-  return { target };
+  return { target: resolved.target };
 }
 
-router.get('/:sessionId/context', wrapRoute((req, res) => {
+router.get('/:sessionId/context', wrapRoute(async (req, res) => {
   const { sessionId } = req.params;
   if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
     return res.status(400).json({ error: 'Invalid session ID' });
@@ -157,9 +163,28 @@ router.get('/:sessionId/context', wrapRoute((req, res) => {
           }
         } catch (_) {}
       }
+
+      // Second fallback: files with local git changes and an mtime inside the session's time
+      // window. Catches files a session modified via Bash (cp, a script, ...) instead of the
+      // Write/Edit/MultiEdit/NotebookEdit tools scanned for above.
+      for (const gf of await gitFilesInWindow(resolvedProjectDir, sessionFrom, sessionTo)) {
+        if (existingKeys.has(gf.path)) continue;
+        existingKeys.add(gf.path);
+        fileMap[gf.path] = { hash: null, maxVersion: 0, isNew: gf.isNew };
+      }
     }
 
     const histFiles = fs.existsSync(histDir) ? fs.readdirSync(histDir) : [];
+
+    // Files found via tool calls carry no backup name; recover it from the path so their diffs work.
+    if (projectDir && histFiles.length) {
+      for (const [filePath, info] of Object.entries(fileMap)) {
+        if (info.hash || info.isNew) continue;
+        const candidate = backupHash(path.resolve(projectDir, filePath));
+        if (histFiles.some(f => f.startsWith(candidate + '@v'))) info.hash = candidate;
+      }
+    }
+
     files = Object.entries(fileMap).map(([filePath, info]) => {
       const versions = info.hash ? histFiles
         .filter(f => f.startsWith(info.hash + '@v'))
@@ -177,7 +202,10 @@ router.get('/:sessionId/context', wrapRoute((req, res) => {
         }
       }
       return { path: filePath, hash: info.hash, versions, isNew: info.isNew, isDeleted, mtime };
-    }).filter(f => f.versions.length > 0 || f.isNew || f.hash !== null);
+    });
+    // Every entry came from a snapshot backup or a Write/Edit/MultiEdit/NotebookEdit call, so all of
+    // them were touched by this session. Files without a recorded snapshot have no diff, but their
+    // current source is still viewable in the Files tab — they used to be filtered out here.
   }
 
   // Plans linked to this session via ExitPlanMode planFilePath
@@ -248,18 +276,11 @@ router.get('/:sessionId/:hash/diff-current', wrapRoute((req, res) => {
   if (!isNew && (hash.includes('..') || hash.includes('/') || hash.includes('\\'))) {
     return res.status(400).json({ error: 'Invalid parameters' });
   }
-  if (!projSlug || projSlug.includes('..') || projSlug.includes('/') || projSlug.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid projSlug' });
-  }
 
-  const projectDir = decodeSlug(projSlug);
-  if (!projectDir) return res.status(404).json({ error: 'Project not found' });
+  const resolved = resolveProjectPath(projSlug, filePath);
+  if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
 
-  const currentFile = path.resolve(projectDir, filePath);
-  const rel = path.relative(path.resolve(projectDir), currentFile);
-  if (rel.startsWith('..')) {
-    return res.status(400).json({ error: 'Invalid file path' });
-  }
+  const currentFile = resolved.target;
   const currentExists = fs.existsSync(currentFile);
 
   let oldText = '';
@@ -271,84 +292,7 @@ router.get('/:sessionId/:hash/diff-current', wrapRoute((req, res) => {
   }
 
   const newText = currentExists ? fs.readFileSync(currentFile, 'utf-8') : '';
-  res.json({ ...computeDiff(oldText, newText), currentText: newText });
+  res.json(computeDiff(oldText, newText));
 }));
-
-function computeDiff(oldText, newText) {
-  const a = oldText.split('\n');
-  const b = newText.split('\n');
-  const m = a.length, n = b.length;
-
-  if (m > 5000 || n > 5000) {
-    return { hunks: [], stats: { added: 0, removed: 0 }, tooLarge: true };
-  }
-
-  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i-1] === b[j-1]
-        ? dp[i-1][j-1] + 1
-        : Math.max(dp[i-1][j], dp[i][j-1]);
-    }
-  }
-
-  const ops = [];
-  let i = m, j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
-      ops.push({ t: '=', c: a[i-1] });
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-      ops.push({ t: '+', c: b[j-1] });
-      j--;
-    } else {
-      ops.push({ t: '-', c: a[i-1] });
-      i--;
-    }
-  }
-  ops.reverse();
-
-  const CTX = 3;
-  const inHunk = new Set();
-  let added = 0, removed = 0;
-  ops.forEach((op, idx) => {
-    if (op.t !== '=') {
-      for (let k = Math.max(0, idx - CTX); k <= Math.min(ops.length - 1, idx + CTX); k++) {
-        inHunk.add(k);
-      }
-      if (op.t === '+') added++;
-      else removed++;
-    }
-  });
-
-  if (!inHunk.size) return { hunks: [], stats: { added: 0, removed: 0 } };
-
-  const ranges = [];
-  let rs = -1;
-  for (let k = 0; k < ops.length; k++) {
-    if (inHunk.has(k)) {
-      if (rs === -1) rs = k;
-    } else if (rs !== -1) {
-      ranges.push([rs, k - 1]);
-      rs = -1;
-    }
-  }
-  if (rs !== -1) ranges.push([rs, ops.length - 1]);
-
-  const hunks = ranges.map(([start, end]) => {
-    let oldLine = 1, newLine = 1;
-    for (let k = 0; k < start; k++) {
-      if (ops[k].t !== '+') oldLine++;
-      if (ops[k].t !== '-') newLine++;
-    }
-    const lines = [];
-    for (let k = start; k <= end; k++) {
-      lines.push({ type: ops[k].t, content: ops[k].c });
-    }
-    return { oldStart: oldLine, newStart: newLine, lines };
-  });
-
-  return { hunks, stats: { added, removed } };
-}
 
 module.exports = router;

@@ -1,12 +1,14 @@
 {
   "name": "cm",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Local web UI for managing Claude Code settings and memory. Not affiliated with or endorsed by Anthropic.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test --test-concurrency=1"
+    "pretest": "node tests/helpers/clean-tmp.js",
+    "test": "node --test --test-concurrency=1",
+    "posttest": "node tests/helpers/clean-tmp.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",

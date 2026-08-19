@@ -22,6 +22,7 @@ const ManagerSettings = {
       ManagerSettings.renderHistory();
       ManagerSettings.renderTable();
       ManagerSettings.loadRefreshRate();
+      ManagerSettings.loadAutosave();
     } catch (e) {
       toast('Failed to load manager settings: ' + e.message, 'error');
     }
@@ -283,5 +284,38 @@ const ManagerSettings = {
     if (typeof Sessions !== 'undefined') Sessions.setRefreshIntervalMs(Sessions.REFRESH_INTERVAL_DEFAULT_MS);
     input.value = String(Math.round((typeof Sessions !== 'undefined' ? Sessions.REFRESH_INTERVAL_DEFAULT_MS : 5000) / 1000));
     toast('Refresh rate reset to default');
+  },
+
+  loadAutosave() {
+    const toggle = document.getElementById('editor-autosave-enabled');
+    const delay = document.getElementById('editor-autosave-delay');
+    if (!toggle || !delay || typeof SessionFiles === 'undefined') return;
+    toggle.checked = SessionFiles.autosaveEnabled();
+    delay.value = String(SessionFiles.autosaveDelayMs() / 1000);
+  },
+
+  saveAutosaveEnabled(on) {
+    if (typeof SessionFiles === 'undefined') return;
+    SessionFiles.setAutosaveEnabled(on);
+    toast(on ? 'Autosave enabled' : 'Autosave disabled');
+  },
+
+  saveAutosaveDelay() {
+    const input = document.getElementById('editor-autosave-delay');
+    if (!input || typeof SessionFiles === 'undefined') return;
+    const ms = Math.round(parseFloat(input.value) * 1000);
+    if (!SessionFiles.setAutosaveDelayMs(ms)) {
+      toast('Autosave delay must be at least 0.5 seconds', 'error');
+      return;
+    }
+    toast('Autosave delay saved');
+  },
+
+  resetAutosaveDelay() {
+    const input = document.getElementById('editor-autosave-delay');
+    if (!input || typeof SessionFiles === 'undefined') return;
+    SessionFiles.setAutosaveDelayMs(SessionFiles.AUTOSAVE_DEFAULT_DELAY_MS);
+    input.value = String(SessionFiles.AUTOSAVE_DEFAULT_DELAY_MS / 1000);
+    toast('Autosave delay reset to default');
   }
 };

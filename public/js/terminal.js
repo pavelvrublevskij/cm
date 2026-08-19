@@ -1,5 +1,6 @@
 // --- TerminalPanel ---
-// In-page terminal panel for a session, backed by xterm.js + WebSocket bridge.
+// In-page terminal panel for a session: a TermView (shared with the git panel's shell) plus the
+// session-specific parts — the split-pane drag, the leave prompt and the auto-open preference.
 // Named TerminalPanel (not Terminal) because xterm.js owns window.Terminal.
 
 const TerminalPanel = {
@@ -7,6 +8,7 @@ const TerminalPanel = {
   AUTOOPEN_KEY: 'claude-manager-terminal-autoopen',
   MIN_WIDTH_PCT: 25,
   MAX_WIDTH_PCT: 80,
+  DEFAULT_WIDTH_PCT: 35,        // 35% terminal / 40% source / 25% file structure
   COLLAPSE_THRESHOLD_PCT: 92,
   CLICK_THRESHOLD_PX: 3,
 
@@ -24,11 +26,7 @@ const TerminalPanel = {
     open: false,
     slug: null,
     sessionId: null,
-    term: null,
-    fitAddon: null,
-    ws: null,
-    resizeObserver: null,
-    dataDisposable: null,
+    view: null,
   },
 
   isOpen() { return this.state.open; },
@@ -52,8 +50,8 @@ const TerminalPanel = {
   },
 
   hasAttachedPty() {
-    const ws = this.state && this.state.ws;
-    return !!(ws && ws.readyState === WebSocket.OPEN);
+    const view = this.state && this.state.view;
+    return !!(view && view.isConnected());
   },
 
   // Decide whether to prompt, kill silently, or just continue when the user wants to leave the
@@ -86,106 +84,47 @@ const TerminalPanel = {
   },
 
   _sendWs(payload) {
-    const ws = this.state && this.state.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    try { ws.send(JSON.stringify(payload)); return true; }
-    catch (_) { return false; }
+    const view = this.state && this.state.view;
+    return !!view && view.send(payload);
   },
 
   open(slug, sessionId) {
-    const XtermCls = window.Terminal;
-    const FitCls = window.FitAddon && window.FitAddon.FitAddon;
-    if (typeof XtermCls !== 'function' || typeof FitCls !== 'function') {
+    if (!TermView.librariesLoaded()) {
       toast('Terminal libraries failed to load', 'error');
       return;
     }
 
     const pane = document.getElementById('terminal-pane');
     const body = document.getElementById('session-detail-body');
-    const host = document.getElementById('terminal-host');
-    if (!pane || !host || !body) return;
+    if (!pane || !body) return;
 
-    const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || 50;
+    const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || this.DEFAULT_WIDTH_PCT;
     body.style.setProperty('--terminal-width', savedWidth + '%');
-
     pane.classList.add('connected');
 
-    host.innerHTML = '';
-    const term = new XtermCls({
-      cursorBlink: true,
-      fontFamily: 'Menlo, Consolas, "DejaVu Sans Mono", monospace',
-      fontSize: 12,
-      theme: { background: '#000000', foreground: '#e6edf3' },
-      scrollback: 5000,
-      convertEol: false,
+    const view = TermView.create({
+      hostId: 'terminal-host',
+      url: this._wsUrl(slug, sessionId),
+      onStatus: (text, cls) => this._setStatus(text, cls),
+      onOpen: () => {
+        if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
+        if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.poll();
+      },
     });
-    const fit = new FitCls();
-    term.loadAddon(fit);
-    term.open(host);
-    setTimeout(() => { try { fit.fit(); } catch (_) {} }, 0);
+    if (!view) return;
 
-    this.state = {
-      open: true,
-      slug,
-      sessionId: sessionId || null,
-      term,
-      fitAddon: fit,
-      ws: null,
-      resizeObserver: null,
-      dataDisposable: null,
-    };
-
-    this._connect();
-    this._observeResize();
+    this.state = { open: true, slug, sessionId: sessionId || null, view };
   },
 
-  _connect() {
-    const { slug, sessionId, term } = this.state;
+  _wsUrl(slug, sessionId) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
-    const wsUrl = `${proto}//${location.host}/api/projects/${encodeURIComponent(slug)}/terminal${qs}`;
-    this._setStatus('connecting...', '');
-
-    let ws;
-    try { ws = new WebSocket(wsUrl); }
-    catch (e) {
-      this._setStatus('connection failed', 'error');
-      term.write(`\r\n\x1b[31mFailed to open WebSocket: ${e.message}\x1b[0m\r\n`);
-      return;
-    }
-    this.state.ws = ws;
-
-    ws.onopen = () => {
-      this._setStatus('connected', 'connected');
-      this._sendResize();
-      if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
-      if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.poll();
-    };
-    ws.onmessage = ev => { term.write(typeof ev.data === 'string' ? ev.data : ''); };
-    ws.onclose = () => { this._setStatus('disconnected', 'error'); };
-    ws.onerror = () => { this._setStatus('error', 'error'); };
-
-    if (this.state.dataDisposable) { try { this.state.dataDisposable.dispose(); } catch (_) {} }
-    this.state.dataDisposable = term.onData(d => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'i', d }));
-    });
-
-    term.attachCustomKeyEventHandler(ev => {
-      if (ev.type !== 'keydown' || !ev.ctrlKey || ev.shiftKey || ev.altKey || ev.metaKey) return true;
-      if (ev.key === 'c' && term.hasSelection()) {
-        navigator.clipboard.writeText(term.getSelection()).then(() => toast('Copied')).catch(() => {});
-        return false;
-      }
-      if (ev.key === 'v') return false;
-      return true;
-    });
+    return `${proto}//${location.host}/api/projects/${encodeURIComponent(slug)}/terminal${qs}`;
   },
 
   reconnect() {
-    if (!this.state.term) return;
-    if (this.state.ws) { try { this.state.ws.close(); } catch (_) {} }
-    this.state.term.write('\r\n\x1b[33m[restarting]\x1b[0m\r\n');
-    this._connect();
+    if (!this.state.view) return;
+    this.state.view.reconnect('[restarting]');
   },
 
   _setStatus(text, cls) {
@@ -197,32 +136,17 @@ const TerminalPanel = {
   },
 
   _sendResize() {
-    const { ws, term, fitAddon } = this.state;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !term || !fitAddon) return;
-    try { fitAddon.fit(); } catch (_) {}
-    const cols = term.cols, rows = term.rows;
-    if (cols > 0 && rows > 0) ws.send(JSON.stringify({ t: 'r', c: cols, r: rows }));
-  },
-
-  _observeResize() {
-    const host = document.getElementById('terminal-host');
-    if (!host || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => this._sendResize());
-    ro.observe(host);
-    this.state.resizeObserver = ro;
+    if (this.state.view) this.state.view.resize();
   },
 
   close() {
-    if (this.state.resizeObserver) { try { this.state.resizeObserver.disconnect(); } catch (_) {} }
-    if (this.state.dataDisposable) { try { this.state.dataDisposable.dispose(); } catch (_) {} }
-    if (this.state.ws) { try { this.state.ws.close(); } catch (_) {} }
-    if (this.state.term) { try { this.state.term.dispose(); } catch (_) {} }
+    if (this.state.view) this.state.view.dispose();
 
     const pane = document.getElementById('terminal-pane');
     if (pane) pane.classList.remove('connected');
     this._setStatus('disconnected', '');
 
-    this.state = { open: false, slug: null, sessionId: null, term: null, fitAddon: null, ws: null, resizeObserver: null, dataDisposable: null };
+    this.state = { open: false, slug: null, sessionId: null, view: null };
   },
 
   _setConversationHidden(hidden, instantPoll) {
@@ -283,7 +207,7 @@ const TerminalPanel = {
       if (collapse) {
         this._setConversationHidden(true);
       } else {
-        const saved = isNaN(finalPct) ? 50 : Math.max(this.MIN_WIDTH_PCT, Math.min(this.MAX_WIDTH_PCT, finalPct));
+        const saved = isNaN(finalPct) ? this.DEFAULT_WIDTH_PCT : Math.max(this.MIN_WIDTH_PCT, Math.min(this.MAX_WIDTH_PCT, finalPct));
         body.style.setProperty('--terminal-width', saved + '%');
         localStorage.setItem(this.WIDTH_KEY, String(saved));
         if (wasHidden) this._setConversationHidden(false, true);

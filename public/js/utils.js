@@ -7,6 +7,14 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+/**
+ * Escape for use inside a double-quoted HTML attribute. escapeHtml goes through textContent, which
+ * does not touch quotes, so a value containing one would end the attribute early.
+ */
+function escapeAttr(str) {
+  return escapeHtml(str).split('"').join('&quot;').split("'").join('&#39;');
+}
+
 /** Fetch JSON from the API. Throws on non-OK responses. */
 async function api(url, opts = {}) {
   const res = await fetch(url, {
@@ -95,7 +103,7 @@ async function copyToClipboard(text, label = 'Copied') {
 
 /** Add a hover "Copy" button to each code block within a container. */
 function addCodeCopyButtons(container) {
-  container.querySelectorAll('.chat-text pre:not(.has-copy-btn)').forEach(pre => {
+  container.querySelectorAll('.chat-text pre:not(.has-copy-btn), .markdown-body pre:not(.has-copy-btn)').forEach(pre => {
     pre.classList.add('has-copy-btn');
     const btn = document.createElement('button');
     btn.className = 'code-copy-btn';
@@ -236,6 +244,63 @@ function matchPricing(modelId, pricingMap) {
     if (modelId.startsWith(key) && key.length > bestLen) { best = key; bestLen = key.length; }
   }
   return best ? pricingMap[best] : null;
+}
+
+// --- Code highlighting (CodeMirror modes, shared by the editor pane and diff views) ---
+
+const CODE_MODES = {
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+  ts: 'javascript', tsx: 'javascript', json: 'application/json',
+  css: 'css', scss: 'css', less: 'css',
+  html: 'htmlmixed', htm: 'htmlmixed', vue: 'htmlmixed',
+  xml: 'xml', svg: 'xml', xsd: 'xml', xsl: 'xml',
+  md: 'markdown', markdown: 'markdown',
+  yml: 'yaml', yaml: 'yaml',
+  sh: 'shell', bash: 'shell', zsh: 'shell',
+  py: 'python',
+  java: 'text/x-java', kt: 'text/x-kotlin', kts: 'text/x-kotlin', scala: 'text/x-scala',
+  c: 'text/x-csrc', h: 'text/x-csrc',
+  cpp: 'text/x-c++src', cc: 'text/x-c++src', cxx: 'text/x-c++src', hpp: 'text/x-c++src',
+  cs: 'text/x-csharp', m: 'text/x-objectivec',
+  groovy: 'groovy', gradle: 'groovy',
+  sql: 'sql', go: 'go', rs: 'rust', swift: 'swift',
+  php: 'php', rb: 'ruby', lua: 'lua',
+  ps1: 'powershell', psm1: 'powershell',
+  dockerfile: 'dockerfile',
+  properties: 'properties', ini: 'properties', env: 'properties', cfg: 'properties', conf: 'properties',
+  toml: 'toml',
+  diff: 'diff', patch: 'diff'
+};
+
+/** CodeMirror mode for a file path, or null when the extension has none. */
+function codeModeFor(filePath) {
+  if (!filePath) return null;
+  const ext = filePath.split('.').pop().toLowerCase();
+  return CODE_MODES[ext] || null;
+}
+
+/**
+ * Tokenize one snippet into CodeMirror `cm-*` spans for static (non-editor) views.
+ * Falls back to plain escaped text when CodeMirror or the mode is unavailable.
+ * Each call starts in the mode's initial state, so constructs spanning lines
+ * (block comments, template literals) are highlighted per line, not per file.
+ */
+function highlightCode(text, mode) {
+  if (!mode || typeof CodeMirror === 'undefined' || !CodeMirror.runMode) return escapeHtml(text);
+  let html = '';
+  CodeMirror.runMode(text, mode, (token, style) => {
+    const escaped = escapeHtml(token);
+    html += style ? `<span class="cm-${style.split(' ').join(' cm-')}">${escaped}</span>` : escaped;
+  });
+  return html;
+}
+
+/** Format a byte count to human-readable (e.g. 512 B, 1.4 KB, 2.3 MB). */
+function formatBytes(n) {
+  if (n == null) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 /** Format a token count to human-readable (e.g. 1.2B, 1.2M, 3.5K). */

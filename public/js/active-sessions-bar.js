@@ -208,6 +208,43 @@ const ActiveSessionsBar = {
     ActiveSessionsBar._render();
     ActiveSessionsBar._renderSidebar();
     if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
+    ActiveSessionsBar._clearActiveState(slug, sessionId);
+  },
+
+  // A closed session must stop looking active everywhere, not just in the bar: drop the cached
+  // active flags, strip rendered dots, and leave the session view it was closed from.
+  _clearActiveState(slug, sessionId) {
+    if (typeof Sessions !== 'undefined' && Sessions.cache && Sessions.cache[slug]) {
+      const cached = Sessions.cache[slug].find(s => s.sessionId === sessionId);
+      if (cached) { cached.active = false; cached.activeKind = null; }
+    }
+
+    if (typeof Dashboard !== 'undefined') {
+      (Dashboard._sessions || []).forEach(s => {
+        if (s.slug === slug && s.sessionId === sessionId) { s.active = false; s.activeKind = null; }
+      });
+      if (Dashboard._activeSessions) {
+        Dashboard._activeSessions = Dashboard._activeSessions.filter(
+          s => !(s.slug === slug && s.sessionId === sessionId)
+        );
+        Dashboard.renderActiveSessions(Dashboard._activeSessions);
+      }
+    }
+
+    document.querySelectorAll(`.session-card[data-session-id="${sessionId}"] .session-active-dot`)
+      .forEach(dot => dot.remove());
+
+    const inSession = typeof App !== 'undefined' && App.currentView === 'session-detail'
+      && typeof Sessions !== 'undefined'
+      && Sessions.detailState.slug === slug && Sessions.detailState.sessionId === sessionId;
+    if (!inSession) return;
+
+    Sessions.stopAutoRefresh();
+    if (typeof TerminalPanel !== 'undefined' && TerminalPanel.isOpen()
+      && TerminalPanel.state.slug === slug && TerminalPanel.state.sessionId === sessionId) {
+      TerminalPanel.close();
+    }
+    App.navigate('project-detail', { slug });
   },
 
   open(slug, sessionId) {

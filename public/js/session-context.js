@@ -1,6 +1,8 @@
 Object.assign(Sessions, {
+  _ctxCollapsed: new Set(),
+
   async pollContext(slug, sessionId) {
-    const el = document.getElementById('session-context');
+    const el = document.getElementById('sf-changed');
     if (!el) return;
 
     const info = Sessions._detailInfo;
@@ -34,6 +36,11 @@ Object.assign(Sessions, {
       if (savedSort !== 'default') Sessions.sortCtxFiles(savedSort);
 
       Sessions._flashItems(el, changedPaths);
+
+      // New/removed files change what the browsable tree's cached directory listings should show.
+      if ((changedPaths.size || filesDropped) && typeof SessionFiles !== 'undefined' && SessionFiles.treeLoaded) {
+        SessionFiles.reloadTree();
+      }
     } catch (_) {}
   },
 
@@ -62,7 +69,7 @@ Object.assign(Sessions, {
   },
 
   async loadContext(sessionId, info) {
-    const el = document.getElementById('session-context');
+    const el = document.getElementById('sf-changed');
     if (!el) return;
 
     const from = info && info.created ? new Date(info.created).toISOString() : '';
@@ -84,6 +91,8 @@ Object.assign(Sessions, {
     const hasPlans = data.plans && data.plans.length > 0;
     if (!hasFiles && !hasPlans) {
       Sessions._ctx = { sessionId, projSlug: data.projSlug || '', files: [], plans: [], sort: 'default' };
+      el.innerHTML = '';
+      Sessions._syncFilesTree();
       Sessions.switchTab('conversation');
       return;
     }
@@ -102,7 +111,7 @@ Object.assign(Sessions, {
 
       html += `<div class="ctx-section" id="ctx-files-section">
         <button class="ctx-toggle" onclick="Sessions.toggleCtx('ctx-files-section')">
-          <span class="ctx-arrow">&#9660;</span> Files edited (${data.files.length})
+          <span class="ctx-arrow">&#9660;</span> Changed in this session (${data.files.length})
         </button>
         <div class="ctx-body">
           ${sortHtml}
@@ -128,54 +137,99 @@ Object.assign(Sessions, {
     }
 
     el.innerHTML = html;
+    Sessions._syncFilesTree();
   },
 
+  /** Session-changed files with normalized separators, minus the .claude/ entries the panel hides. */
+  _ctxVisibleFiles() {
+    const files = (Sessions._ctx && Sessions._ctx.files) || [];
+    return files
+      .map(f => ({ ...f, path: f.path.replace(/\\/g, '/') }))
+      .filter(f => !f.path.includes('/.claude/') && !f.path.startsWith('.claude/'));
+  },
+
+  /** Changed files are pinned above the tree, so the tree leaves them out. */
+  _syncFilesTree() {
+    if (typeof SessionFiles === 'undefined') return;
+    SessionFiles.setChangedPaths(Sessions._ctxVisibleFiles().map(f => f.path));
+  },
+
+  /** Changed files render as a tree, same row pattern as the project structure below, plus status badges. */
   _renderCtxFileList() {
-    const { sessionId, files, sort } = Sessions._ctx;
+    const files = Sessions._ctxVisibleFiles();
     if (!files.length) return '<div class="ctx-empty">No files changed</div>';
+    return Sessions._ctxTreeHtml(Sessions._buildCtxTree(files, Sessions._ctx.sort), '', 0);
+  },
 
-    const groups = new Map();
-    files.forEach(f => {
-      const normalized = f.path.replace(/\\/g, '/');
-      if (normalized.includes('/.claude/') || normalized.startsWith('.claude/')) return;
-      const lastSlash = normalized.lastIndexOf('/');
-      const dir = lastSlash >= 0 ? normalized.slice(0, lastSlash + 1) : '';
-      const name = lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
-      if (!groups.has(dir)) groups.set(dir, []);
-      groups.get(dir).push({ ...f, name });
+  _buildCtxTree(files, sort) {
+    const root = { dirs: new Map(), files: [] };
+    for (const f of files) {
+      const parts = f.path.split('/');
+      const name = parts.pop();
+      let node = root;
+      for (const part of parts) {
+        if (!node.dirs.has(part)) node.dirs.set(part, { dirs: new Map(), files: [] });
+        node = node.dirs.get(part);
+      }
+      node.files.push({ ...f, name });
+    }
+    if (sort === 'asc' || sort === 'desc') Sessions._sortCtxTree(root, sort);
+    return root;
+  },
+
+  _sortCtxTree(node, sort) {
+    const cmp = (a, b) => (sort === 'desc' ? b.localeCompare(a) : a.localeCompare(b));
+    node.dirs = new Map([...node.dirs.entries()].sort((a, b) => cmp(a[0], b[0])));
+    node.files.sort((a, b) => cmp(a.name, b.name));
+    node.dirs.forEach(child => Sessions._sortCtxTree(child, sort));
+  },
+
+  _ctxTreeHtml(node, prefix, depth) {
+    const sessionId = Sessions._ctx.sessionId;
+    let html = '';
+    node.dirs.forEach((child, name) => {
+      // Folders holding nothing but a single folder collapse into one row: public/js
+      let label = name;
+      let dirPath = prefix ? prefix + '/' + name : name;
+      let target = child;
+      while (!target.files.length && target.dirs.size === 1) {
+        const [childName, grandChild] = [...target.dirs.entries()][0];
+        label += '/' + childName;
+        dirPath += '/' + childName;
+        target = grandChild;
+      }
+      const collapsed = Sessions._ctxCollapsed.has(dirPath);
+      html += `<div class="sf-row sf-row-dir" style="--sf-depth:${depth}"
+        data-path="${escapeHtml(dirPath)}" onclick="Sessions.toggleCtxDir(this.dataset.path)">
+        <span class="sf-arrow">${collapsed ? '&#9654;' : '&#9660;'}</span>
+        <span class="sf-name">${escapeHtml(label)}</span>
+      </div>`;
+      if (!collapsed) html += Sessions._ctxTreeHtml(target, dirPath, depth + 1);
     });
+    const openPath = typeof SessionFiles !== 'undefined' && SessionFiles.open ? SessionFiles.open.path : null;
+    node.files.forEach(f => {
+      const status = f.isNew ? 'new' : (f.isDeleted ? 'deleted' : 'edited');
+      html += `<div class="sf-row sf-row-file ctx-file-item ctx-file-${status}${f.path === openPath ? ' sf-row-active' : ''}" style="--sf-depth:${depth}"
+        data-session="${escapeHtml(sessionId)}"
+        data-hash="${escapeHtml(f.hash || '')}"
+        data-from="${f.versions[0] || ''}"
+        data-path="${escapeHtml(f.path)}"
+        data-is-new="${f.isNew ? '1' : ''}"
+        data-is-deleted="${f.isDeleted ? '1' : ''}"
+        onclick="Sessions._openCtxRow(this)">
+        <span class="sf-name">${escapeHtml(f.name)}</span>
+        <span class="sf-dirty" style="display:none" title="Unsaved changes">&#9679;</span>
+        <span class="ctx-file-badge ctx-file-badge-${status}">${status}</span>
+      </div>`;
+    });
+    return html;
+  },
 
-    let dirs = [...groups.keys()];
-    if (sort === 'asc') dirs.sort((a, b) => a.localeCompare(b));
-    else if (sort === 'desc') dirs.sort((a, b) => b.localeCompare(a));
-
-    return dirs.map(dir => {
-      let groupFiles = groups.get(dir);
-      if (sort === 'asc') groupFiles = groupFiles.slice().sort((a, b) => a.name.localeCompare(b.name));
-      else if (sort === 'desc') groupFiles = groupFiles.slice().sort((a, b) => b.name.localeCompare(a.name));
-
-      const header = `<div class="ctx-file-group-header">${escapeHtml(dir || '/')}</div>`;
-      const items = groupFiles.map(f => {
-        const status = f.isNew ? 'new' : (f.isDeleted ? 'deleted' : 'edited');
-        const badge = `<span class="ctx-file-badge ctx-file-badge-${status}">${status}</span>`;
-        const openBtns = f.isDeleted ? '' : `<div class="action-menu" data-path="${escapeHtml(f.path)}">
-          <button class="btn btn-sm action-menu-btn" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)" aria-label="File actions">&#8942;</button>
-          <div class="action-menu-panel">
-            <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openCtxFile(this.closest('.action-menu').dataset.path)">Open in editor</button>
-            <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.revealCtxFile(this.closest('.action-menu').dataset.path)">Show in file explorer</button>
-          </div>
-        </div>`;
-        return `<div class="ctx-file-item ctx-file-${status}"
-          data-session="${escapeHtml(sessionId)}"
-          data-hash="${escapeHtml(f.hash || '')}"
-          data-from="${f.versions[0] || ''}"
-          data-path="${escapeHtml(f.path)}"
-          data-is-new="${f.isNew ? '1' : ''}"
-          data-is-deleted="${f.isDeleted ? '1' : ''}"
-          onclick="Sessions._openCtxDiff(this)">${badge}<span class="ctx-file-name">${escapeHtml(f.name)}</span>${openBtns}</div>`;
-      }).join('');
-      return `<div class="ctx-file-group">${header}${items}</div>`;
-    }).join('');
+  toggleCtxDir(dirPath) {
+    if (Sessions._ctxCollapsed.has(dirPath)) Sessions._ctxCollapsed.delete(dirPath);
+    else Sessions._ctxCollapsed.add(dirPath);
+    const list = document.getElementById('ctx-file-list');
+    if (list) list.innerHTML = Sessions._renderCtxFileList();
   },
 
   _flashItems(el, pathSet) {
@@ -204,16 +258,9 @@ Object.assign(Sessions, {
     if (list) list.innerHTML = Sessions._renderCtxFileList();
   },
 
-  _openCtxDiff(el) {
-    const { session, hash, from, path, isNew, isDeleted } = el.dataset;
-    const allItems = [...document.querySelectorAll('#ctx-file-list .ctx-file-item')];
-    const index = allItems.indexOf(el);
-    FileHistory.showDiffCurrent(session, hash, parseInt(from, 10), Sessions._ctx.projSlug, path, {
-      isNew: isNew === '1',
-      isDeleted: isDeleted === '1',
-      allItems,
-      index
-    });
+  /** A changed file opens on its diff by default — source is a toggle away. */
+  _openCtxRow(el) {
+    SessionFiles.openFile(el.dataset.path, { mode: 'diff', ctx: { ...el.dataset } });
   },
 
   async openCtxFile(filePath) {

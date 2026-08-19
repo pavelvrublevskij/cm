@@ -2,6 +2,8 @@ const { test, before } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { execSync } = require('child_process');
 const request = require('supertest');
 const { app, paths, HOME } = require('./helpers/app');
 const { decodeSlug } = require('../lib/slug');
@@ -397,12 +399,123 @@ test('context: session without file-history dir returns projSlug correctly', asy
   assert.strictEqual(res.body.projSlug, PROJ_SLUG);
 });
 
-test('context: Edit-tool files without snapshot are excluded (no diff available)', async () => {
+test('context: Edit-tool files without a snapshot still appear', async () => {
   const res = await request(app).get(`/api/file-history/${NO_HISTDIR_SESSION_ID}/context`);
   assert.strictEqual(res.status, 200);
-  // Edit-only files have isNew=false, hash=null, versions=[] → filtered out since no diff can be shown
+  // No snapshot means no diff, but the file was still modified by the session and its current
+  // source is viewable in the Files tab, so it must be listed (it used to be filtered out).
   const editFile = res.body.files.find(f => f.path === 'specs/existing.md');
-  assert.ok(!editFile, 'Edit-only file without snapshot should not appear (no diff data available)');
+  assert.ok(editFile, 'Edit-detected file must appear even with no snapshot to diff against');
+  assert.strictEqual(editFile.isNew, false, 'an edit is not a creation');
+  assert.strictEqual(editFile.hash, null);
+  assert.deepStrictEqual(editFile.versions, []);
+});
+
+// ── backup mapping recovered when the transcript has no snapshot records ─────
+// Newer Claude Code versions write the backups but no file-history-snapshot records, so the
+// path -> backup mapping has to be recomputed as sha256(absolute path)[0..16].
+
+// A project directory that really exists on disk, so recomputed backup names can be checked.
+const RECOVER_PROJ_DIR = path.join(HOME, 'recover-proj');
+const RECOVER_SLUG = slugForPath(RECOVER_PROJ_DIR);
+
+test('context: edited file picks up its snapshot when the transcript lost the mapping', async () => {
+  const sessionId = 'nosnaprec-8888-8888-8888-888888888888';
+  const projDir = path.join(paths.PROJECTS_DIR, RECOVER_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.mkdirSync(RECOVER_PROJ_DIR, { recursive: true });
+  const target = path.join(RECOVER_PROJ_DIR, 'recovered.js');
+  const hash = crypto.createHash('sha256').update(target, 'utf8').digest('hex').slice(0, 16);
+
+  fs.writeFileSync(target, 'current content\n');
+  const histDir = path.join(FILE_HISTORY_DIR, sessionId);
+  fs.mkdirSync(histDir, { recursive: true });
+  fs.writeFileSync(path.join(histDir, `${hash}@v1`), 'original content\n');
+  fs.writeFileSync(path.join(histDir, `${hash}@v2`), 'later content\n');
+
+  fs.writeFileSync(
+    path.join(projDir, sessionId + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-06-01T10:00:00.000Z', message: { content: 'edit it' } },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'r1', name: 'Edit', input: { file_path: target, old_string: 'a', new_string: 'b' } }] }
+      }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+
+  const res = await request(app).get(`/api/file-history/${sessionId}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'recovered.js');
+  assert.ok(f, 'the edited file must be listed');
+  assert.strictEqual(f.hash, hash, 'the backup name is recomputed from the absolute path');
+  assert.deepStrictEqual(f.versions, [1, 2], 'both recorded versions are found');
+
+  // The recovered hash must be usable by the diff endpoint the UI calls.
+  const diff = await request(app)
+    .get(`/api/file-history/${sessionId}/${hash}/diff-current`)
+    .query({ version: 1, projSlug: RECOVER_SLUG, filePath: 'recovered.js' });
+  assert.strictEqual(diff.status, 200);
+  assert.ok(diff.body.stats.added > 0, 'a real diff comes back');
+  assert.ok(diff.body.hunks.length > 0);
+});
+
+test('context: a file created by Write keeps isNew and is not given a snapshot hash', async () => {
+  const sessionId = 'writenohash-9999-9999-9999-999999999999';
+  const projDir = path.join(paths.PROJECTS_DIR, RECOVER_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.mkdirSync(RECOVER_PROJ_DIR, { recursive: true });
+  const target = path.join(RECOVER_PROJ_DIR, 'written.js');
+  const hash = crypto.createHash('sha256').update(target, 'utf8').digest('hex').slice(0, 16);
+
+  const histDir = path.join(FILE_HISTORY_DIR, sessionId);
+  fs.mkdirSync(histDir, { recursive: true });
+  fs.writeFileSync(path.join(histDir, `${hash}@v1`), 'stale backup\n');
+
+  fs.writeFileSync(
+    path.join(projDir, sessionId + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-06-02T10:00:00.000Z', message: { content: 'write it' } },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'w1', name: 'Write', input: { file_path: target, content: 'x' } }] }
+      }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+
+  const res = await request(app).get(`/api/file-history/${sessionId}/context`);
+  const f = res.body.files.find(f => f.path === 'written.js');
+  assert.ok(f);
+  assert.strictEqual(f.isNew, true);
+  assert.strictEqual(f.hash, null, 'a created file is diffed as all-new, not against a backup');
+});
+
+test('context: a session that only edited files still lists them all', async () => {
+  const editOnlySession = 'editonly7-7777-7777-7777-777777777777';
+  const projDir = path.join(paths.PROJECTS_DIR, PROJ_SLUG);
+  const target = path.resolve(decodeSlug(PROJ_SLUG));
+  fs.writeFileSync(
+    path.join(projDir, editOnlySession + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-05-01T10:00:00.000Z', message: { content: 'edit things' } },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: path.join(target, 'one.js'), old_string: 'a', new_string: 'b' } },
+            { type: 'tool_use', id: 'e2', name: 'MultiEdit', input: { file_path: path.join(target, 'two.js'), edits: [] } },
+            { type: 'tool_use', id: 'e3', name: 'NotebookEdit', input: { notebook_path: path.join(target, 'three.ipynb') } }
+          ]
+        }
+      }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+
+  const res = await request(app).get(`/api/file-history/${editOnlySession}/context`);
+  assert.strictEqual(res.status, 200);
+  const paths_ = res.body.files.map(f => f.path).sort();
+  assert.deepStrictEqual(paths_, ['one.js', 'three.ipynb', 'two.js']);
+  assert.ok(res.body.files.every(f => f.isNew === false), 'edits are not creations');
 });
 
 test('context: session with no file-history dir and no tool writes returns empty files', async () => {
@@ -421,6 +534,73 @@ test('context: session with no file-history dir and no tool writes returns empty
   assert.deepStrictEqual(res.body.files, []);
 });
 
+// ── git-status fallback: files changed via Bash instead of Edit/Write/... ───
+// A session can land real changes via a Bash command (`cp`, a script, ...) rather than the
+// Write/Edit/MultiEdit/NotebookEdit tools scanned above. When the project is a git repo, a
+// locally-changed file whose mtime falls inside the session's time window is picked up too.
+
+const GIT_PROJ_DIR = path.join(HOME, 'git-fallback-proj');
+const GIT_SLUG = slugForPath(GIT_PROJ_DIR);
+const GIT_IN_RANGE_SESSION = 'gitfallbk-1111-1111-1111-111111111111';
+const GIT_OUT_RANGE_SESSION = 'gitoutwin-2222-2222-2222-222222222222';
+const GIT_NEW_FILE_SESSION = 'gitnewfil-3333-3333-3333-333333333333';
+
+before(() => {
+  fs.mkdirSync(GIT_PROJ_DIR, { recursive: true });
+  execSync('git init -q', { cwd: GIT_PROJ_DIR });
+  execSync('git config user.email test@example.com', { cwd: GIT_PROJ_DIR });
+  execSync('git config user.name test', { cwd: GIT_PROJ_DIR });
+  fs.writeFileSync(path.join(GIT_PROJ_DIR, 'report.prpt'), 'original\n');
+  execSync('git add report.prpt', { cwd: GIT_PROJ_DIR });
+  execSync('git commit -q -m baseline', { cwd: GIT_PROJ_DIR });
+
+  // Modified by a simulated Bash `cp`, mtime inside the in-range session's window
+  fs.writeFileSync(path.join(GIT_PROJ_DIR, 'report.prpt'), 'copied over by a script\n');
+  const inRange = new Date('2026-07-01T10:00:30.000Z');
+  fs.utimesSync(path.join(GIT_PROJ_DIR, 'report.prpt'), inRange, inRange);
+
+  // A new, untracked file also written by a script, mtime inside a different session's window
+  fs.writeFileSync(path.join(GIT_PROJ_DIR, 'new-from-bash.txt'), 'created by a script\n');
+  const inRange2 = new Date('2026-08-01T10:00:30.000Z');
+  fs.utimesSync(path.join(GIT_PROJ_DIR, 'new-from-bash.txt'), inRange2, inRange2);
+
+  const projDir = path.join(paths.PROJECTS_DIR, GIT_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+
+  const session = (from, to) => [
+    { type: 'user', timestamp: from, message: { content: 'do the thing' } },
+    { type: 'user', timestamp: to, message: { content: 'tool result' } }
+  ].map(e => JSON.stringify(e)).join('\n');
+
+  fs.writeFileSync(path.join(projDir, GIT_IN_RANGE_SESSION + '.jsonl'), session('2026-07-01T10:00:00.000Z', '2026-07-01T10:01:00.000Z'));
+  fs.writeFileSync(path.join(projDir, GIT_OUT_RANGE_SESSION + '.jsonl'), session('2020-01-01T00:00:00.000Z', '2020-01-01T00:01:00.000Z'));
+  fs.writeFileSync(path.join(projDir, GIT_NEW_FILE_SESSION + '.jsonl'), session('2026-08-01T10:00:00.000Z', '2026-08-01T10:01:00.000Z'));
+});
+
+test('context: file changed via Bash (git-detected, not Edit/Write) appears when mtime is inside the session window', async () => {
+  const res = await request(app).get(`/api/file-history/${GIT_IN_RANGE_SESSION}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'report.prpt');
+  assert.ok(f, 'a file changed via Bash and detected via git status must appear');
+  assert.strictEqual(f.isNew, false);
+  assert.strictEqual(f.hash, null, 'no snapshot backup exists for a Bash-driven change');
+});
+
+test('context: git-detected file with mtime outside the session window is not included', async () => {
+  const res = await request(app).get(`/api/file-history/${GIT_OUT_RANGE_SESSION}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'report.prpt');
+  assert.ok(!f, 'a git change with mtime outside this session window must not be attributed to it');
+});
+
+test('context: git-detected untracked file is flagged isNew', async () => {
+  const res = await request(app).get(`/api/file-history/${GIT_NEW_FILE_SESSION}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'new-from-bash.txt');
+  assert.ok(f, 'an untracked file created via a Bash-run script must appear');
+  assert.strictEqual(f.isNew, true);
+});
+
 // ── /diff-current additional cases ───────────────────────────────────────────
 
 test('diff-current: stored version vs on-disk current file returns 200 with non-empty hunks and stats', async () => {
@@ -435,12 +615,13 @@ test('diff-current: stored version vs on-disk current file returns 200 with non-
   assert.strictEqual(typeof res.body.stats.removed, 'number');
 });
 
-test('diff-current: deleted file (current absent) returns 200 with currentText empty string', async () => {
+test('diff-current: deleted file (current absent) returns 200 diffing against empty content', async () => {
   const res = await request(app)
     .get(`/api/file-history/${SESSION_ID}/${HASH}/diff-current`)
     .query({ version: 1, projSlug: PROJ_SLUG, filePath: 'deleted-file.txt' });
   assert.strictEqual(res.status, 200);
-  assert.strictEqual(res.body.currentText, '');
+  assert.strictEqual(res.body.stats.added, 0, 'nothing was added — the file is gone');
+  assert.ok(res.body.stats.removed > 0, 'the recorded content shows as removed');
 });
 
 test('diff-current: missing projSlug returns 400', async () => {

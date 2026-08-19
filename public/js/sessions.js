@@ -808,11 +808,13 @@ const Sessions = {
 
     Sessions._pendingFlash = undefined;
     Sessions._ctx = null;
+    Sessions._ctxCollapsed = new Set();
     Sessions._clearDetailArchivedUI();
     Sessions._activityLoaded = false;
     Sessions._activityItems = [];
     Sessions._activityFilter = null;
     Sessions._scratchpadLoaded = false;
+    if (typeof SessionFiles !== 'undefined') SessionFiles.reset(slug);
     container.innerHTML = '';
 
     // Reset search
@@ -825,7 +827,7 @@ const Sessions = {
     if (!sessionId) {
       Sessions.switchTab('conversation');
       container.innerHTML = '<div class="empty-state"><p>Waiting for session to start...</p></div>';
-      const ctxEl = document.getElementById('session-context');
+      const ctxEl = document.getElementById('sf-changed');
       if (ctxEl) ctxEl.innerHTML = '';
       const spEl = document.getElementById('session-scratchpad');
       if (spEl) spEl.innerHTML = '';
@@ -839,9 +841,9 @@ const Sessions = {
       return;
     }
 
-    // Start on File Changes tab; loadContext will switch to Conversation if empty
+    // Start on the Files tab; loadContext will switch to Conversation if nothing changed
     Sessions.switchTab('file-changes');
-    const ctxEl = document.getElementById('session-context');
+    const ctxEl = document.getElementById('sf-changed');
     if (ctxEl) { ctxEl.innerHTML = ''; }
     const spEl = document.getElementById('session-scratchpad');
     if (spEl) { spEl.innerHTML = ''; }
@@ -874,7 +876,9 @@ const Sessions = {
     Sessions.stopCtxPolling();
     Sessions._ctxTimer = setInterval(() => {
       const { slug, sessionId } = Sessions.detailState;
-      if (slug && sessionId) Sessions.pollContext(slug, sessionId);
+      if (!slug || !sessionId) return;
+      Sessions.pollContext(slug, sessionId);
+      Sessions.pollScratchpad();
     }, Sessions.refreshIntervalMs());
   },
 
@@ -938,6 +942,8 @@ const Sessions = {
     if (Sessions._detailSearchQuery) return; // don't disturb active filter
     const slugAtStart = state.slug;
     const sessionAtStart = state.sessionId;
+
+    Sessions.refreshOpenAgentConvs();
 
     try {
       const data = await api(`/api/projects/${slugAtStart}/sessions/${sessionAtStart}?offset=0&limit=20`);
@@ -1236,7 +1242,7 @@ const Sessions = {
     const isFC = tab === 'file-changes';
     const isAct = tab === 'activity';
     const isSP = tab === 'scratchpad';
-    ctx.style.display = isFC ? 'block' : 'none';
+    ctx.style.display = isFC ? 'flex' : 'none';
     msgs.style.display = isAct || isFC || isSP ? 'none' : '';
     if (act) act.style.display = isAct ? 'flex' : 'none';
     if (sp) sp.style.display = isSP ? 'flex' : 'none';
@@ -1248,6 +1254,10 @@ const Sessions = {
       const pending = Sessions._pendingFlash;
       Sessions._pendingFlash = undefined;
       Sessions._flashItems(ctx, pending);
+    }
+    if (isFC && typeof SessionFiles !== 'undefined') {
+      if (!SessionFiles.treeLoaded) SessionFiles.loadTree();
+      if (SessionFiles.editor) SessionFiles.editor.refresh();
     }
     if (isAct && !Sessions._activityLoaded) Sessions.loadActivity();
     if (isSP && !Sessions._scratchpadLoaded) Sessions.loadScratchpad();

@@ -1,154 +1,162 @@
 const GitActions = {
   _slug: null,
   _info: null,
+  _shellRunning: false,
 
   async init(slug) {
     GitActions._slug = slug;
     GitActions._info = null;
+    GitActions._shellRunning = false;
     GitActions._clearContainers();
-    try {
-      GitActions._info = await api(`/api/projects/${encodeURIComponent(slug)}/git/info`);
-    } catch (_) {
-      GitActions._info = { available: false };
-    }
+    await GitActions._fetchInfo();
     GitActions._render();
   },
 
   async refresh() {
     if (!GitActions._slug) return;
-    try {
-      GitActions._info = await api(`/api/projects/${encodeURIComponent(GitActions._slug)}/git/info`);
-    } catch (_) {
-      GitActions._info = { available: false };
-    }
+    await GitActions._fetchInfo();
+    GitActions._render();
+  },
+
+  async _fetchInfo() {
+    GitActions._info = await GitApi.info(GitActions._slug) || { available: false };
+    if (!GitActions._info.available) { GitActions._shellRunning = false; return; }
+    await GitActions._fetchShellState();
+  },
+
+  async _fetchShellState() {
+    const shell = await GitApi.shellInfo(GitActions._slug);
+    GitActions._shellRunning = !!(shell && shell.running);
+  },
+
+  /** Re-check whether a shell is alive and repaint the footer dot. */
+  async refreshShellState() {
+    if (!GitActions._slug || !GitActions._info || !GitActions._info.available) return;
+    await GitActions._fetchShellState();
     GitActions._render();
   },
 
   reset() {
     GitActions._slug = null;
     GitActions._info = null;
+    GitActions._shellRunning = false;
     GitActions._clearContainers();
   },
 
   _clearContainers() {
     const footer = document.getElementById('footer-git');
     if (footer) { footer.innerHTML = ''; footer.style.display = 'none'; }
+    GitActions._setTabVisible(false);
   },
 
-  _menuHtml(branch) {
-    const count = (GitActions._info.files || []).length;
+  /** The Git tab only exists for projects that are git repositories. */
+  _setTabVisible(on) {
+    const btn = document.getElementById('git-tab-btn');
+    if (btn) btn.style.display = on ? '' : 'none';
+  },
+
+  _syncHtml() {
+    const info = GitActions._info || {};
+    const parts = [];
+    if (info.ahead) parts.push(`↑${info.ahead}`);
+    if (info.behind) parts.push(`↓${info.behind}`);
+    if (!parts.length) return '';
+    const title = `${info.ahead || 0} ahead / ${info.behind || 0} behind ${escapeHtml(info.upstream || 'upstream')}`;
+    return `<span class="git-sync-label" title="${title}">${parts.join(' ')}</span>`;
+  },
+
+  _buttonHtml(branch) {
+    const info = GitActions._info;
+    const count = (info.files || []).length;
     const countBadge = count > 0 ? `<span class="git-count-badge">${count}</span>` : '';
-    const branchLabel = branch ? `<span>${escapeHtml(branch)}</span>` : '';
+    const shellDot = GitActions._shellRunning
+      ? '<span class="git-shell-dot" title="A shell is running for this project">&#9679;</span>'
+      : '';
+    const branchLabel = branch
+      ? (info.detached
+        ? `<span class="git-detached-label" title="Detached HEAD">detached @ ${escapeHtml(branch)}</span>`
+        : `<span>${escapeHtml(branch)}</span>`)
+      : '';
     const icon = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="display:inline-block;vertical-align:middle"><path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm0 2.122a2.25 2.25 0 1 0-1.5 0v.878A2.25 2.25 0 0 0 5.75 8.5h1.5v2.128a2.251 2.251 0 1 0 1.5 0V8.5h1.5a2.25 2.25 0 0 0 2.25-2.25v-.878a2.25 2.25 0 1 0-1.5 0v.878a.75.75 0 0 1-.75.75h-4.5A.75.75 0 0 1 5 6.25v-.878zm3.75 7.378a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zm3-8.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z"/></svg>`;
-    return `<div class="action-menu">
-        <button class="btn btn-sm git-icon-btn" title="Git actions" onclick="event.stopPropagation(); GitActions.toggleMenu(this)">${icon}${branchLabel}${countBadge}</button>
-        <div class="action-menu-panel">
-          <button class="action-menu-item" onclick="event.stopPropagation(); GitActions.openCommitModal(false)">Commit</button>
-          <button class="action-menu-item" onclick="event.stopPropagation(); GitActions.push()">Push</button>
-          <button class="action-menu-item" onclick="event.stopPropagation(); GitActions.openCommitModal(true)">Commit and Push</button>
-        </div>
-      </div>`;
+    return `<button class="btn btn-sm git-icon-btn" title="Open git: changes, recipes and a shell"
+        onclick="event.stopPropagation(); GitActions.openGitPanel()">${icon}${branchLabel}${shellDot}${GitActions._syncHtml()}${countBadge}</button>`;
   },
 
   _render() {
     if (!GitActions._info || !GitActions._info.available) return;
+    GitActions._setTabVisible(true);
     const branch = GitActions._info.branch;
-    const menu = GitActions._menuHtml(branch);
     const footer = document.getElementById('footer-git');
     if (footer) {
-      footer.innerHTML = menu;
+      footer.innerHTML = GitActions._buttonHtml(branch);
       footer.style.display = 'flex';
     }
   },
 
-  toggleMenu(btn) {
-    const panel = btn.nextElementSibling;
-    if (!panel) return;
-    const isOpen = panel.classList.contains('open');
-    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
-    if (!isOpen) panel.classList.add('open');
-  },
-
-  async openCommitModal(andPush) {
-    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
-
-    try {
-      GitActions._info = await api(`/api/projects/${encodeURIComponent(GitActions._slug)}/git/info`);
-    } catch (_) {}
-    GitActions._render();
-
-    const info = GitActions._info;
-    if (!info || !info.available) { toast('Git not available in this project', 'error'); return; }
-
-    const files = info.files || [];
-    const branchHtml = info.branch
-      ? `<div style="margin-bottom:12px;font-size:13px;color:var(--text-muted)">Branch: <strong>${escapeHtml(info.branch)}</strong></div>`
-      : '';
-
-    let filesHtml;
-    if (files.length === 0) {
-      filesHtml = `<div style="color:var(--text-muted);font-size:13px;margin-bottom:12px">No changed files.</div>`;
-    } else {
-      const badgeClass = { new: 'ctx-file-badge-new', modified: 'ctx-file-badge-edited', deleted: 'ctx-file-badge-deleted', untracked: 'ctx-file-badge-new' };
-      const rows = files.map(f => `
-        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;text-transform:none;letter-spacing:normal;font-weight:normal;color:var(--text-primary);margin-bottom:0">
-          <input type="checkbox" class="git-file-cb" value="${escapeHtml(f.path)}" checked>
-          <span class="ctx-file-badge git-file-badge ${escapeHtml(badgeClass[f.label] || 'ctx-file-badge-edited')}">${escapeHtml(f.label)}</span>
-          <span style="word-break:break-all">${escapeHtml(f.path)}</span>
-        </label>`).join('');
-      filesHtml = `<div style="max-height:240px;overflow-y:auto;margin-bottom:12px;border:1px solid var(--border);border-radius:4px;padding:4px 8px">${rows}</div>`;
+  /** Every git action lives in the panel, so the footer button opens it rather than duplicating
+   *  commit and push in a dropdown. In the project view the Git tab is right there, so use it;
+   *  anywhere else (a session) the same panel opens in a modal, leaving the session in place. */
+  openGitPanel() {
+    if (!GitActions._info || !GitActions._info.available) {
+      toast('Git not available in this project', 'error');
+      return;
     }
 
-    const msgHtml = formGroup('Commit message',
-      '<textarea id="git-commit-msg" rows="4" style="width:100%;resize:vertical" placeholder="Enter commit message…"></textarea>');
+    const tabBtn = document.getElementById('git-tab-btn');
+    if (typeof App !== 'undefined' && App.currentView === 'project-detail' && tabBtn) {
+      ProjectTabs.switch('git', tabBtn);
+      return;
+    }
 
-    const title = andPush ? 'Commit and Push' : 'Commit';
     openModal({
-      title,
-      width: 640,
-      body: branchHtml + filesHtml + msgHtml,
-      buttons: [
-        { label: title, primary: true, onClick: () => GitActions._executeCommit(andPush) }
-      ]
+      title: 'Git',
+      cls: 'git-panel-modal',
+      cancelLabel: 'Close',
+      body: '<div id="git-panel-modal-host"></div>',
+      onClose: () => GitPanel.unmount()
     });
-
-    setTimeout(() => { document.getElementById('git-commit-msg')?.focus(); }, 50);
+    GitPanel.mount('git-panel-modal-host', GitActions._slug);
   },
 
-  _executeCommit(andPush) {
-    const msg = (document.getElementById('git-commit-msg')?.value || '').trim();
-    if (!msg) { toast('Commit message is required', 'error'); return false; }
-    const files = Array.from(document.querySelectorAll('.git-file-cb:checked')).map(cb => cb.value);
-    if (!files.length) { toast('No files selected', 'error'); return false; }
-    GitActions._doCommit(msg, files, andPush);
+  /** Commit (and optionally push), then repaint every view that shows git state. */
+  async runCommit(message, files, andPush) {
+    const committed = await GitActions._call(() => GitApi.commit(GitActions._slug, message, files), 'Committed');
+    if (committed && andPush) await GitActions._call(() => GitApi.push(GitActions._slug), 'Pushed');
+    await GitActions._repaint();
   },
 
-  async _doCommit(message, files, andPush) {
+  push() {
+    return GitActions._remote(() => GitApi.push(GitActions._slug), 'Pushed');
+  },
+
+  pull() {
+    return GitActions._remote(() => GitApi.pull(GitActions._slug), 'Pulled');
+  },
+
+  fetch() {
+    return GitActions._remote(() => GitApi.fetch(GitActions._slug), 'Fetched');
+  },
+
+  /** Run one git call and report it. Returns false when git refused, so a chain can stop. */
+  async _call(call, okMessage) {
     try {
-      const result = await api(`/api/projects/${encodeURIComponent(GitActions._slug)}/git/commit`, {
-        method: 'POST',
-        body: { message, files }
-      });
-      toast(result.output || 'Committed');
-      if (andPush) await GitActions._doPush();
-      GitActions.init(GitActions._slug);
+      const result = await call();
+      toast(result.output || okMessage);
+      return true;
     } catch (e) {
       toast(e.message, 'error');
+      return false;
     }
   },
 
-  async push() {
-    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
-    await GitActions._doPush();
-    GitActions.init(GitActions._slug);
+  async _remote(call, okMessage) {
+    await GitActions._call(call, okMessage);
+    await GitActions._repaint();
   },
 
-  async _doPush() {
-    try {
-      const result = await api(`/api/projects/${encodeURIComponent(GitActions._slug)}/git/push`, { method: 'POST' });
-      toast(result.output || 'Pushed');
-    } catch (e) {
-      toast(e.message, 'error');
-    }
+  /** Every view showing git state, repainted once per user action. */
+  async _repaint() {
+    await GitActions.refresh();
+    if (typeof GitPanel !== 'undefined') await GitPanel.refreshIfMounted();
   }
 };
