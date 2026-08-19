@@ -15,6 +15,8 @@
 // dialog: the panel already has the room, and the shell stays alive behind the switch.
 
 const GitPanel = {
+  LOG_PAGE: 50,
+
   RECIPES_COLLAPSED_KEY: 'claude-manager-git-recipes-collapsed',
   VIEW_MODE_KEY: 'claude-manager-git-changes-view',
 
@@ -25,6 +27,16 @@ const GitPanel = {
     'pull': 'Pulling…',
     'fetch': 'Fetching…',
   },
+
+  STATUS_BADGE: {
+    A: 'ctx-file-badge-new',
+    M: 'ctx-file-badge-edited',
+    D: 'ctx-file-badge-deleted',
+    R: 'ctx-file-badge-edited',
+    C: 'ctx-file-badge-new',
+  },
+
+  STATUS_LABEL: { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied' },
 
   BADGE_CLASS: {
     new: 'ctx-file-badge-new',
@@ -38,9 +50,13 @@ const GitPanel = {
   _info: null,
   _shellInfo: null,
   _view: null,
+  _commitDetail: null,
   _openCategories: null,
-  _pane: 'shell',       // 'shell' | 'diff' — which half of the middle column is showing
+  _pane: 'shell',       // 'shell' | 'diff' | 'history' — which pane of the middle column shows
   _diffPath: null,
+  _diffSha: null,
+  _log: null,           // { commits, offset, done } once history has been read
+  _openSha: null,
   _busy: null,          // 'commit' | 'commit-push' | 'push' while that action is in flight
 
   /** Render into `hostId` for `slug`, reattaching to a shell that is already running. */
@@ -72,7 +88,7 @@ const GitPanel = {
     if (!el) return;
 
     if (!GitPanel._info || !GitPanel._info.available) {
-      el.innerHTML = '<div class="empty-state">This project is not a git repository.</div>';
+      el.innerHTML = `<div class="empty-state">${GitPanel._unavailableText()}</div>`;
       return;
     }
 
@@ -87,13 +103,21 @@ const GitPanel = {
     GitPanel._renderRecipes();
     GitPanel._showShell(GitPanel.shellOpen());
     GitPanel._applyPaneState();
-    if (GitPanel._pane === 'diff' && GitPanel._diffPath) GitPanel.openDiff(GitPanel._diffPath);
+    if (GitPanel._pane === 'diff' && GitPanel._diffPath) GitPanel.openDiff(GitPanel._diffPath, GitPanel._diffSha);
+    if (GitPanel._pane === 'history') GitPanel._renderHistory();
+  },
+
+  /** Two different problems, told apart so the user is not sent looking for the wrong one. */
+  _unavailableText() {
+    return (GitPanel._info || {}).reason === 'git-missing'
+      ? 'Git is not installed on this machine.'
+      : 'This project is not a git repository.';
   },
 
   /**
-   * Middle column. Shell and diff are both mounted and swapped with a class, never re-created: a
-   * diff must not tear down a live terminal, and the terminal must not lose its scrollback to a
-   * glance at a file.
+   * Middle column. Shell, diff and history are all mounted and swapped with a class, never
+   * re-created: a diff must not tear down a live terminal, and the terminal must not lose its
+   * scrollback to a glance at a file.
    */
   _shellHtml() {
     const ptyMissing = GitPanel._shellInfo && GitPanel._shellInfo.available === false;
@@ -107,6 +131,7 @@ const GitPanel = {
           <div class="git-pane-tabs">
             <button class="sf-mode-btn" id="git-pane-tab-shell" onclick="GitPanel.showPane('shell')">Shell</button>
             <button class="sf-mode-btn" id="git-pane-tab-diff" onclick="GitPanel.showPane('diff')">Diff</button>
+            <button class="sf-mode-btn" id="git-pane-tab-history" onclick="GitPanel.showPane('history')">History</button>
           </div>
           <span class="git-shell-cwd" id="git-pane-subject">${escapeHtml(GitPanel._branchLabel())}</span>
           <span class="terminal-pane-status" id="git-shell-status">disconnected</span>
@@ -124,43 +149,60 @@ const GitPanel = {
             <div class="git-changes-empty">Click a changed file to see what committing it would record.</div>
           </div>
         </div>
+        <div class="git-pane git-pane-history" id="git-pane-history">
+          <div class="git-history-body" id="git-history-body"></div>
+        </div>
       </div>`;
   },
 
-  /** Swap which pane is visible. The shell needs a refit after being hidden. */
+  PANES: ['shell', 'diff', 'history'],
+
+  /** Swap which pane is visible. The shell needs a refit after having been hidden. */
   showPane(pane) {
-    GitPanel._pane = pane === 'diff' ? 'diff' : 'shell';
+    GitPanel._pane = GitPanel.PANES.includes(pane) ? pane : 'shell';
     GitPanel._applyPaneState();
     if (GitPanel._pane === 'shell') GitPanel._sendResize();
+    if (GitPanel._pane === 'history' && !GitPanel._log) GitPanel.loadLog();
   },
 
   _applyPaneState() {
     const workspace = document.getElementById('git-workspace');
-    if (workspace && workspace.classList) workspace.classList.toggle('showing-diff', GitPanel._pane === 'diff');
+    if (workspace && workspace.classList) {
+      for (const pane of GitPanel.PANES) {
+        workspace.classList.toggle(`showing-${pane}`, GitPanel._pane === pane);
+      }
+    }
 
-    const shellTab = document.getElementById('git-pane-tab-shell');
-    const diffTab = document.getElementById('git-pane-tab-diff');
-    if (shellTab && shellTab.classList) shellTab.classList.toggle('active', GitPanel._pane === 'shell');
-    if (diffTab && diffTab.classList) diffTab.classList.toggle('active', GitPanel._pane === 'diff');
+    for (const pane of GitPanel.PANES) {
+      const tab = document.getElementById(`git-pane-tab-${pane}`);
+      if (tab && tab.classList) tab.classList.toggle('active', GitPanel._pane === pane);
+    }
 
     const subject = document.getElementById('git-pane-subject');
-    if (subject) {
-      subject.textContent = GitPanel._pane === 'diff' && GitPanel._diffPath
-        ? GitPanel._diffPath
-        : GitPanel._branchLabel();
-    }
+    if (subject) subject.textContent = GitPanel._paneSubject();
   },
 
-  /** Show one file's diff in the middle column — no dialog, the panel already has the room. */
-  async openDiff(filePath) {
+  _paneSubject() {
+    if (GitPanel._pane === 'diff' && GitPanel._diffPath) {
+      return GitPanel._diffSha ? `${GitPanel._diffSha} · ${GitPanel._diffPath}` : GitPanel._diffPath;
+    }
+    return GitPanel._branchLabel();
+  },
+
+  /**
+   * Show one file's diff in the middle column — no dialog, the panel already has the room. With a
+   * sha it is that commit's change to the file; without, what committing it now would record.
+   */
+  async openDiff(filePath, sha) {
     GitPanel._diffPath = filePath;
+    GitPanel._diffSha = sha || null;
     GitPanel.showPane('diff');
 
     const body = document.getElementById('git-diff-body');
     if (body) showLoading(body, `Diffing ${filePath}…`);
 
-    const result = await GitApi.diff(GitPanel._slug, filePath).catch(e => ({ error: e.message }));
-    if (GitPanel._diffPath !== filePath) return;      // a newer file was clicked meanwhile
+    const result = await GitApi.diff(GitPanel._slug, filePath, sha).catch(e => ({ error: e.message }));
+    if (GitPanel._diffPath !== filePath || GitPanel._diffSha !== (sha || null)) return;   // superseded
     GitPanel._renderDiff(result, filePath);
   },
 
@@ -200,6 +242,7 @@ const GitPanel = {
     if (!info) return;                       // transient failure: keep showing what we had
     GitPanel._info = info;
     GitPanel._renderChanges();
+    GitPanel.invalidateLog();
     if (draft) {
       const box = document.getElementById('git-panel-msg');
       if (box) box.value = draft;
@@ -461,6 +504,111 @@ const GitPanel = {
 
   fetch() {
     return GitPanel._withBusy('fetch', () => GitActions.fetch());
+  },
+
+  /** Read the next page of history. Called on first view of the tab, and by Load more. */
+  async loadLog(more) {
+    const offset = more && GitPanel._log ? GitPanel._log.commits.length : 0;
+    const body = document.getElementById('git-history-body');
+    if (body && !offset) showLoading(body, 'Reading history…');
+
+    let page;
+    try {
+      page = await GitApi.log(GitPanel._slug, GitPanel.LOG_PAGE, offset);
+    } catch (e) {
+      if (body) body.innerHTML = `<div class="git-changes-empty">Could not read history: ${escapeHtml(e.message)}</div>`;
+      return;
+    }
+
+    const commits = offset && GitPanel._log ? GitPanel._log.commits.concat(page.commits) : page.commits;
+    GitPanel._log = { commits, done: page.done };
+    GitPanel._renderHistory();
+  },
+
+  /** History is stale the moment a commit is made, so it is re-read on next view rather than kept. */
+  invalidateLog() {
+    GitPanel._log = null;
+    GitPanel._openSha = null;
+    if (GitPanel._pane === 'history') GitPanel.loadLog();
+  },
+
+  _renderHistory() {
+    const body = document.getElementById('git-history-body');
+    if (!body) return;
+    const log = GitPanel._log;
+    if (!log) return;
+    if (!log.commits.length) {
+      body.innerHTML = '<div class="git-changes-empty">No commits yet.</div>';
+      return;
+    }
+
+    const rows = log.commits.map(c => GitPanel._commitRowHtml(c)).join('');
+    const more = log.done
+      ? ''
+      : `<button class="btn btn-sm git-history-more" onclick="GitPanel.loadLog(true)">Load more</button>`;
+    body.innerHTML = rows + more;
+  },
+
+  _commitRowHtml(commit) {
+    const open = GitPanel._openSha === commit.sha;
+    const refs = commit.refs.map(r => `<span class="git-commit-ref">${escapeHtml(r)}</span>`).join('');
+    const merge = commit.isMerge ? '<span class="git-commit-merge" title="Merge commit">merge</span>' : '';
+    return `
+      <div class="git-commit${open ? ' open' : ''}">
+        <button class="git-commit-head" data-sha="${escapeAttr(commit.sha)}"
+          onclick="GitPanel.openCommit(this.getAttribute('data-sha'))">
+          <code>${escapeHtml(commit.sha)}</code>
+          <span class="git-commit-subject">${escapeHtml(commit.subject)}</span>
+          ${merge}${refs}
+          <span class="git-commit-meta">${escapeHtml(commit.author)} · ${escapeHtml(commit.when)}</span>
+        </button>
+        ${open ? GitPanel._commitDetailHtml() : ''}
+      </div>`;
+  },
+
+  /** Files of the open commit, each a link into the diff pane. */
+  _commitDetailHtml() {
+    const detail = GitPanel._commitDetail;
+    if (!detail) return '<div class="git-changes-empty">Loading…</div>';
+    if (detail.error) return `<div class="git-changes-empty">${escapeHtml(detail.error)}</div>`;
+
+    const body = detail.body
+      ? `<pre class="git-commit-body">${escapeHtml(detail.body)}</pre>`
+      : '';
+    const files = detail.files.length
+      ? detail.files.map(f => `
+          <div class="git-file-row">
+            <span class="ctx-file-badge git-file-badge ${escapeAttr(GitPanel.STATUS_BADGE[f.status] || 'ctx-file-badge-edited')}">${escapeHtml(GitPanel.STATUS_LABEL[f.status] || f.status)}</span>
+            <button class="git-file-path git-file-link" data-path="${escapeAttr(f.path)}" data-sha="${escapeAttr(detail.sha)}"
+              onclick="GitPanel.openDiff(this.getAttribute('data-path'), this.getAttribute('data-sha'))"
+              title="Show this commit's change to ${escapeAttr(f.path)}">${escapeHtml(f.path)}</button>
+          </div>`).join('')
+      : '<div class="git-changes-empty">No file changes (a merge, or an empty commit).</div>';
+
+    return `<div class="git-commit-detail">${body}${files}</div>`;
+  },
+
+  /** Expand a commit, or collapse it when it is already open. */
+  async openCommit(sha) {
+    if (GitPanel._openSha === sha) {
+      GitPanel._openSha = null;
+      GitPanel._commitDetail = null;
+      GitPanel._renderHistory();
+      return;
+    }
+    GitPanel._openSha = sha;
+    GitPanel._commitDetail = null;
+    GitPanel._renderHistory();
+
+    let detail;
+    try {
+      detail = await GitApi.commitDetail(GitPanel._slug, sha);
+    } catch (e) {
+      detail = { error: `Could not read ${sha}: ${e.message}` };
+    }
+    if (GitPanel._openSha !== sha) return;            // collapsed or another commit opened meanwhile
+    GitPanel._commitDetail = detail;
+    GitPanel._renderHistory();
   },
 
   _branchLabel() {

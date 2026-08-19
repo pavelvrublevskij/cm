@@ -5,7 +5,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const request = require('supertest');
 const { app, HOME } = require('./helpers/app');
-const { git, gitRaw, gitOk, headInfo, upstreamStatus, unpushedCommits, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
+const { git, gitRaw, gitOk, gitInstalled, headInfo, upstreamStatus, unpushedCommits, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
 
 function slugForPath(p) {
   const win = p.match(/^([A-Za-z]):[\\\/](.*)/);
@@ -354,10 +354,10 @@ test('pull and fetch reject a traversal slug', async () => {
   }
 });
 
-test('a remote operation on a directory with no repository fails rather than hanging', async () => {
+test('a remote operation on a directory with no repository is refused, not attempted', async () => {
   const res = await request(app).post(`/api/projects/${slugForPath(NOGIT)}/git/fetch`);
-  assert.strictEqual(res.status, 500);
-  assert.ok(res.body.error);
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Git is not available for this project');
 });
 
 // ── file diff ────────────────────────────────────────────────────────────────
@@ -444,7 +444,7 @@ test('diff refuses a path that escapes the project', async () => {
 test('diff refuses a project that is not a repository', async () => {
   const res = await diffOf(slugForPath(NOGIT), 'readme.txt');
   assert.strictEqual(res.status, 400);
-  assert.strictEqual(res.body.error, 'Not a git repository');
+  assert.strictEqual(res.body.error, 'Git is not available for this project');
 });
 
 test('gitRaw keeps file bytes while git trims values', async () => {
@@ -453,4 +453,230 @@ test('gitRaw keeps file bytes while git trims values', async () => {
 
   assert.strictEqual(raw, 'unchanged\n');
   assert.strictEqual(trimmed, 'unchanged', 'which is why the diff route uses the raw form');
+});
+
+// ── history ──────────────────────────────────────────────────────────────────
+// A sha is the one piece of user input that reaches git as a revision, so it is validated hard:
+// anything that is not a hex sha is refused rather than handed to git as an argument.
+
+const HISTPROJ = path.join(HOME, 'git-hist-proj');
+
+before(() => {
+  fs.rmSync(HISTPROJ, { recursive: true, force: true });
+  fs.mkdirSync(path.join(HISTPROJ, 'src'), { recursive: true });
+  run(['init', '-q'], HISTPROJ);
+  identity(HISTPROJ);
+  for (let i = 1; i <= 4; i++) {
+    fs.writeFileSync(path.join(HISTPROJ, 'src', 'a.txt'), `version ${i}\n`);
+    run(['add', '-A'], HISTPROJ);
+    run(['commit', '-q', '-m', `commit ${i}`], HISTPROJ);
+  }
+  run(['tag', 'v1'], HISTPROJ);
+});
+
+test('log returns commits newest first with author, age and refs', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(HISTPROJ)}/git/log`).query({ limit: 10 });
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.commits.length, 4);
+  assert.strictEqual(res.body.commits[0].subject, 'commit 4', 'newest first');
+  assert.strictEqual(res.body.commits[0].author, 'test');
+  assert.match(res.body.commits[0].when, /ago|second|minute/);
+  assert.ok(res.body.commits[0].refs.some(r => r.includes('v1')), 'tags and branches are reported');
+  assert.strictEqual(res.body.commits[0].isMerge, false);
+  assert.strictEqual(res.body.done, true, 'fewer than a page means the end');
+});
+
+test('log pages with limit and offset', async () => {
+  const slug = slugForPath(HISTPROJ);
+  const first = await request(app).get(`/api/projects/${slug}/git/log`).query({ limit: 2, offset: 0 });
+  const second = await request(app).get(`/api/projects/${slug}/git/log`).query({ limit: 2, offset: 2 });
+
+  assert.deepStrictEqual(first.body.commits.map(c => c.subject), ['commit 4', 'commit 3']);
+  assert.deepStrictEqual(second.body.commits.map(c => c.subject), ['commit 2', 'commit 1']);
+  assert.strictEqual(first.body.done, false, 'a full page means there may be more');
+});
+
+test('log clamps a silly limit instead of trusting it', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(HISTPROJ)}/git/log`).query({ limit: 100000 });
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.limit <= 200);
+});
+
+test('log on a repo with no commits is empty, not an error', async () => {
+  const unborn = path.join(HOME, 'git-unborn-proj');
+  fs.rmSync(unborn, { recursive: true, force: true });
+  fs.mkdirSync(unborn, { recursive: true });
+  run(['init', '-q'], unborn);
+
+  const res = await request(app).get(`/api/projects/${slugForPath(unborn)}/git/log`);
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body.commits, []);
+});
+
+test('commit detail reports the message body and the files touched', async () => {
+  const slug = slugForPath(HISTPROJ);
+  const log = await request(app).get(`/api/projects/${slug}/git/log`).query({ limit: 1 });
+  const sha = log.body.commits[0].sha;
+
+  const res = await request(app).get(`/api/projects/${slug}/git/commit/${sha}`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.subject, 'commit 4');
+  assert.strictEqual(res.body.author, 'test');
+  assert.strictEqual(res.body.email, 'test@example.com');
+  assert.deepStrictEqual(res.body.files, [{ status: 'M', path: 'src/a.txt' }]);
+  assert.ok(res.body.sha.startsWith(sha), 'the full sha is returned');
+});
+
+test('the first commit reports its files as added', async () => {
+  const slug = slugForPath(HISTPROJ);
+  const log = await request(app).get(`/api/projects/${slug}/git/log`).query({ limit: 10 });
+  const first = log.body.commits[log.body.commits.length - 1];
+
+  const res = await request(app).get(`/api/projects/${slug}/git/commit/${first.sha}`);
+  assert.deepStrictEqual(res.body.files, [{ status: 'A', path: 'src/a.txt' }]);
+});
+
+test('a commit sha that is not a sha is refused, not passed to git', async () => {
+  const slug = slugForPath(HISTPROJ);
+  for (const bad of ['HEAD', '--upload-pack=evil', 'v1', '../../etc', 'zzzz']) {
+    const res = await request(app).get(`/api/projects/${slug}/git/commit/${encodeURIComponent(bad)}`);
+    assert.strictEqual(res.status, 400, `${bad} must be refused`);
+    assert.strictEqual(res.body.error, 'Invalid commit');
+  }
+});
+
+test('diff of a file at a commit compares it against its parent', async () => {
+  const slug = slugForPath(HISTPROJ);
+  const log = await request(app).get(`/api/projects/${slug}/git/log`).query({ limit: 1 });
+  const sha = log.body.commits[0].sha;
+
+  const res = await request(app).get(`/api/projects/${slug}/git/diff`)
+    .query({ path: 'src/a.txt', sha });
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.sha, sha);
+  const lines = res.body.hunks[0].lines.map(l => l.type + l.content);
+  assert.ok(lines.includes('-version 3'), 'the parent version is the old side');
+  assert.ok(lines.includes('+version 4'), 'and this commit is the new side');
+});
+
+test('diff at the first commit reads as all added, with no parent to compare', async () => {
+  const slug = slugForPath(HISTPROJ);
+  const log = await request(app).get(`/api/projects/${slug}/git/log`).query({ limit: 10 });
+  const first = log.body.commits[log.body.commits.length - 1];
+
+  const res = await request(app).get(`/api/projects/${slug}/git/diff`)
+    .query({ path: 'src/a.txt', sha: first.sha });
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.stats.removed, 0);
+  assert.strictEqual(res.body.stats.added, 1);
+});
+
+test('diff refuses a sha-shaped argument that is not hex', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(HISTPROJ)}/git/diff`)
+    .query({ path: 'src/a.txt', sha: 'HEAD~1' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Invalid commit');
+});
+
+test('a merge commit is flagged and reports no files of its own', async () => {
+  const slug = slugForPath(HISTPROJ);
+  const main = currentBranch(HISTPROJ);
+  run(['checkout', '-q', '-b', 'side', 'HEAD~2'], HISTPROJ);
+  fs.writeFileSync(path.join(HISTPROJ, 'side.txt'), 'from the side\n');
+  run(['add', '-A'], HISTPROJ);
+  run(['commit', '-q', '-m', 'side commit'], HISTPROJ);
+  run(['checkout', '-q', main], HISTPROJ);
+  run(['merge', '-q', '--no-ff', '-m', 'merge side', 'side'], HISTPROJ);
+
+  const log = await request(app).get(`/api/projects/${slug}/git/log`).query({ limit: 1 });
+  const merge = log.body.commits[0];
+  assert.strictEqual(merge.isMerge, true);
+  assert.strictEqual(merge.subject, 'merge side');
+
+  const detail = await request(app).get(`/api/projects/${slug}/git/commit/${merge.sha}`);
+  assert.deepStrictEqual(detail.body.files, [], 'diff-tree reports nothing for a merge, rather than one side');
+});
+
+// ── git absent from the machine ──────────────────────────────────────────────
+// The app must work on a PC with no git at all. PATH is emptied so nothing named git can be found,
+// which is what execFile sees on such a machine: every route must answer the same way, and none may
+// leak a raw "spawn git ENOENT" to the user.
+
+function withoutGit(fn) {
+  const saved = { PATH: process.env.PATH, Path: process.env.Path };
+  process.env.PATH = '';
+  process.env.Path = '';
+  return Promise.resolve().then(fn).finally(() => {
+    process.env.PATH = saved.PATH;
+    if (saved.Path === undefined) delete process.env.Path; else process.env.Path = saved.Path;
+  });
+}
+
+test('gitOk and gitInstalled are both false when git cannot be found', async () => {
+  await withoutGit(async () => {
+    assert.strictEqual(await gitOk(PLAIN), false, 'a real repo is still unusable without the binary');
+    assert.strictEqual(await gitInstalled(), false);
+  });
+});
+
+test('gitInstalled is true on a machine that has git, in any directory', async () => {
+  assert.strictEqual(await gitInstalled(), true);
+});
+
+test('git/info reports git-missing rather than blaming the project', async () => {
+  await withoutGit(async () => {
+    const res = await request(app).get(`/api/projects/${slugForPath(PLAIN)}/git/info`);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.available, false);
+    assert.strictEqual(res.body.reason, 'git-missing');
+  });
+});
+
+test('git/info reports not-a-repo when git exists but the directory is not one', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(NOGIT)}/git/info`);
+  assert.strictEqual(res.body.available, false);
+  assert.strictEqual(res.body.reason, 'not-a-repo');
+});
+
+test('every git route refuses cleanly with no git installed', async () => {
+  await withoutGit(async () => {
+    const slug = slugForPath(PLAIN);
+    const calls = [
+      request(app).get(`/api/projects/${slug}/git/log`),
+      request(app).get(`/api/projects/${slug}/git/diff`).query({ path: 'a.txt' }),
+      request(app).get(`/api/projects/${slug}/git/commit/abc1234`),
+      request(app).post(`/api/projects/${slug}/git/commit`).send({ message: 'x', files: ['a.txt'] }),
+      request(app).post(`/api/projects/${slug}/git/push`),
+      request(app).post(`/api/projects/${slug}/git/pull`),
+      request(app).post(`/api/projects/${slug}/git/fetch`),
+    ];
+
+    for (const res of await Promise.all(calls)) {
+      assert.strictEqual(res.status, 400, 'a refusal, not a server error');
+      assert.strictEqual(res.body.error, 'Git is not available for this project');
+      assert.ok(!/ENOENT|spawn/.test(res.body.error), 'no raw spawn failure reaches the user');
+    }
+  });
+});
+
+test('a commit is not attempted at all when git is missing', async () => {
+  await withoutGit(async () => {
+    const res = await request(app).post(`/api/projects/${slugForPath(PLAIN)}/git/commit`)
+      .send({ message: 'should not happen', files: ['a.txt'] });
+    assert.strictEqual(res.status, 400);
+  });
+  const log = await git(['log', '--format=%s', '-n', '1'], PLAIN);
+  assert.strictEqual(log, 'baseline', 'history is untouched');
+});
+
+test('the rest of the app is unaffected by git being missing', async () => {
+  await withoutGit(async () => {
+    for (const url of ['/api/settings', '/api/version', '/api/mcp']) {
+      const res = await request(app).get(url);
+      assert.strictEqual(res.status, 200, `${url} must not depend on git`);
+    }
+  });
 });

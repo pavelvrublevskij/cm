@@ -34,6 +34,13 @@ const harness = {
   diffRequests: [],
   diffResult: null,
   diffError: null,
+  diffShas: [],
+  logRequests: [],
+  logPages: null,
+  logError: null,
+  detailRequests: [],
+  detailError: null,
+  commitDetail: null,
   pushes: 0,
   pulls: 0,
   fetches: 0,
@@ -147,9 +154,25 @@ const context = vm.createContext({
     if (harness.apiHandler) return harness.apiHandler(url);
     if (url.includes('terminal/info')) return { available: true, running: harness.shellRunning === true, mode: 'shell' };
     if (url.includes('/git/diff')) {
-      harness.diffRequests.push(decodeURIComponent(url.split('path=')[1] || ''));
+      const [, query] = url.split('path=');
+      const [rawPath, rawSha] = (query || '').split('&sha=');
+      harness.diffRequests.push(decodeURIComponent(rawPath || ''));
+      harness.diffShas.push(rawSha ? decodeURIComponent(rawSha) : undefined);
       if (harness.diffError) throw new Error(harness.diffError);
       return harness.diffResult;
+    }
+    if (url.includes('/git/log')) {
+      const limit = Number((url.match(/limit=(\d+)/) || [])[1]);
+      const offset = Number((url.match(/offset=(\d+)/) || [])[1]);
+      harness.logRequests.push({ limit, offset });
+      if (harness.logError) throw new Error(harness.logError);
+      return harness.logPages[Math.min(harness.logRequests.length - 1, harness.logPages.length - 1)];
+    }
+    if (url.includes('/git/commit/')) {
+      const sha = url.split('/git/commit/')[1];
+      harness.detailRequests.push(sha);
+      if (harness.detailError) throw new Error(harness.detailError);
+      return harness.commitDetail;
     }
     return harness.gitInfo;
   },
@@ -238,9 +261,30 @@ beforeEach(() => {
     hunks: [{ oldStart: 1, newStart: 1, lines: [{ type: '=', content: 'a' }, { type: '+', content: 'b' }] }],
     stats: { added: 1, removed: 0 },
   };
+  harness.diffShas = [];
+  harness.logRequests = [];
+  harness.logError = null;
+  harness.detailRequests = [];
+  harness.detailError = null;
+  harness.logPages = [{
+    commits: [
+      { sha: 'abc1234', subject: 'Add a thing', author: 'Pavel', when: '2 hours ago', refs: ['HEAD -> main', 'origin/main'], isMerge: false },
+      { sha: 'def5678', subject: 'Merge branch side', author: 'Pavel', when: '3 hours ago', refs: [], isMerge: true },
+    ],
+    done: true,
+  }];
+  harness.commitDetail = {
+    sha: 'abc1234full', author: 'Pavel', email: 'p@example.com', date: 'Tue Aug 19 2026',
+    when: '2 hours ago', subject: 'Add a thing', body: 'the body of the message',
+    files: [{ status: 'M', path: 'lib/git.js' }, { status: 'A', path: 'lib/new.js' }],
+  };
   GitPanel._busy = null;
   GitPanel._pane = 'shell';
   GitPanel._diffPath = null;
+  GitPanel._diffSha = null;
+  GitPanel._log = null;
+  GitPanel._openSha = null;
+  GitPanel._commitDetail = null;
   harness.pushes = 0;
   harness.pulls = 0;
   harness.fetches = 0;
@@ -1358,4 +1402,227 @@ test('a recipe containing quotes keeps them inside its attribute', async () => {
 
   assert.match(html, /data-cmd="git commit -m &quot;[^"]*&quot;"/,
     'git commit -m "<message>" must survive as one attribute value');
+});
+
+// ── history pane ─────────────────────────────────────────────────────────────
+// The third pane of the middle column. Reading history costs a git call, so it is fetched on first
+// view rather than on mount, and dropped after a commit rather than kept stale.
+
+test('history is not read until the tab is opened', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  assert.strictEqual(harness.logRequests.length, 0, 'mounting reads no history');
+
+  GitPanel.showPane('history');
+  await Promise.resolve();
+  assert.deepStrictEqual(harness.logRequests, [{ limit: GitPanel.LOG_PAGE, offset: 0 }]);
+});
+
+test('opening the tab twice does not re-read what is already loaded', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+  GitPanel.showPane('shell');
+  GitPanel.showPane('history');
+
+  assert.strictEqual(harness.logRequests.length, 1);
+});
+
+test('commits render with their sha, subject, author and age', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+
+  const html = el('git-history-body').innerHTML;
+  assert.match(html, /abc1234/);
+  assert.match(html, /Add a thing/);
+  assert.match(html, /Pavel/);
+  assert.match(html, /2 hours ago/);
+});
+
+test('refs and merges are marked', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+
+  const html = el('git-history-body').innerHTML;
+  assert.match(html, /git-commit-ref">HEAD -&gt; main/, 'branch and tag names are shown');
+  assert.match(html, /git-commit-merge/, 'a merge is flagged without ASCII art');
+});
+
+test('an empty repository says so', async () => {
+  harness.logPages = [{ commits: [], done: true }];
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+
+  assert.match(el('git-history-body').innerHTML, /No commits yet/);
+});
+
+test('a failed history read is reported in the pane', async () => {
+  harness.logError = 'fatal: not a git repository';
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+
+  assert.match(el('git-history-body').innerHTML, /Could not read history/);
+  assert.match(el('git-history-body').innerHTML, /not a git repository/);
+});
+
+test('Load more appends the next page and disappears at the end', async () => {
+  harness.logPages = [
+    { commits: [{ sha: 'aaa1111', subject: 'first page', author: 'p', when: '1 day ago', refs: [], isMerge: false }], done: false },
+    { commits: [{ sha: 'bbb2222', subject: 'second page', author: 'p', when: '2 days ago', refs: [], isMerge: false }], done: true },
+  ];
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+  assert.match(el('git-history-body').innerHTML, /Load more/);
+
+  await GitPanel.loadLog(true);
+
+  const html = el('git-history-body').innerHTML;
+  assert.match(html, /first page/);
+  assert.match(html, /second page/);
+  assert.ok(!html.includes('Load more'), 'nothing left to load');
+  assert.deepStrictEqual(harness.logRequests[1], { limit: GitPanel.LOG_PAGE, offset: 1 }, 'paged from what it has');
+});
+
+test('clicking a commit loads its detail and lists the files it touched', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+  await GitPanel.openCommit('abc1234');
+
+  assert.deepStrictEqual(harness.detailRequests, ['abc1234']);
+  const html = el('git-history-body').innerHTML;
+  assert.match(html, /git-commit-detail/);
+  assert.match(html, /lib\/git\.js/);
+  assert.match(html, />modified</);
+  assert.match(html, /the body of the message/);
+});
+
+test('clicking the open commit again collapses it', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+  await GitPanel.openCommit('abc1234');
+  await GitPanel.openCommit('abc1234');
+
+  assert.strictEqual(GitPanel._openSha, null);
+  assert.ok(!el('git-history-body').innerHTML.includes('git-commit-detail'));
+});
+
+test('a commit whose detail fails to load says so in place', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+  harness.detailError = 'bad object';
+  await GitPanel.openCommit('abc1234');
+
+  assert.match(el('git-history-body').innerHTML, /Could not read abc1234/);
+});
+
+test('a detail that lands after another commit was opened is discarded', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+  const pending = GitPanel.openCommit('abc1234');
+  GitPanel._openSha = 'def5678';
+  await pending;
+
+  assert.strictEqual(GitPanel._commitDetail, null, 'the stale detail is not shown');
+});
+
+test('a file in a commit opens that commit’s diff, not the working tree', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+  await GitPanel.openCommit('abc1234');
+  await GitPanel.openDiff('lib/git.js', 'abc1234full');
+
+  assert.deepStrictEqual(harness.diffRequests, ['lib/git.js']);
+  assert.deepStrictEqual(harness.diffShas, ['abc1234full']);
+  assert.strictEqual(GitPanel._pane, 'diff');
+  assert.strictEqual(el('git-pane-subject').textContent, 'abc1234full · lib/git.js');
+});
+
+test('a working-tree diff carries no sha and titles itself with the path alone', async () => {
+  harness.gitInfo.files = [{ path: 'lib/git.js', label: 'modified' }];
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.openDiff('lib/git.js');
+
+  assert.deepStrictEqual(harness.diffShas, [undefined]);
+  assert.strictEqual(el('git-pane-subject').textContent, 'lib/git.js');
+});
+
+test('committing drops the loaded history so it cannot go stale', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  await GitPanel.loadLog();
+  await GitPanel.openCommit('abc1234');
+
+  await GitPanel.refreshIfMounted();
+
+  assert.strictEqual(GitPanel._log, null, 'history is dropped');
+  assert.strictEqual(GitPanel._openSha, null, 'and so is the expanded commit');
+});
+
+test('history is re-read immediately when it is the visible pane', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  GitPanel.showPane('history');
+  await GitPanel.loadLog();
+  harness.logRequests = [];
+
+  await GitPanel.refreshIfMounted();
+  await Promise.resolve();
+
+  assert.strictEqual(harness.logRequests.length, 1, 'the visible pane is refilled at once');
+});
+
+test('only one pane is marked active at a time', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  for (const pane of ['shell', 'diff', 'history']) {
+    GitPanel.showPane(pane);
+    const active = ['shell', 'diff', 'history'].filter(p => el(`git-pane-tab-${p}`).classList.contains('active'));
+    assert.deepStrictEqual(active, [pane]);
+    assert.ok(el('git-workspace').classList.contains(`showing-${pane}`));
+  }
+});
+
+test('an unknown pane name falls back to the shell', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  GitPanel.showPane('nonsense');
+  assert.strictEqual(GitPanel._pane, 'shell');
+});
+
+// ── git unavailable ──────────────────────────────────────────────────────────
+// Two different problems: no git on the machine, or a directory that is not a repository. Telling
+// the user the wrong one sends them looking in the wrong place.
+
+test('a project that is not a repository says exactly that', async () => {
+  harness.apiHandler = url => (url.includes('terminal/info')
+    ? { available: true, running: false }
+    : { available: false, reason: 'not-a-repo' });
+  await GitPanel.mount(HOST, 'proj');
+
+  assert.match(el(HOST).innerHTML, /not a git repository/);
+  assert.ok(!el(HOST).innerHTML.includes('not installed'));
+});
+
+test('a machine without git says so instead of blaming the project', async () => {
+  harness.apiHandler = url => (url.includes('terminal/info')
+    ? { available: true, running: false }
+    : { available: false, reason: 'git-missing' });
+  await GitPanel.mount(HOST, 'proj');
+
+  assert.match(el(HOST).innerHTML, /Git is not installed on this machine/);
+});
+
+test('an unavailable project offers no shell, recipes or actions at all', async () => {
+  harness.apiHandler = url => (url.includes('terminal/info')
+    ? { available: true, running: false }
+    : { available: false, reason: 'git-missing' });
+  await GitPanel.mount(HOST, 'proj');
+
+  const html = el(HOST).innerHTML;
+  for (const absent of ['git-shell-host', 'git-recipes', 'git-changes-actions', 'Open Shell']) {
+    assert.ok(!html.includes(absent), `${absent} must not be offered`);
+  }
+});
+
+test('a missing reason still renders a sensible message', async () => {
+  harness.apiHandler = url => (url.includes('terminal/info')
+    ? { available: true, running: false }
+    : { available: false });
+  await GitPanel.mount(HOST, 'proj');
+
+  assert.match(el(HOST).innerHTML, /not a git repository/, 'the older shape of the response still works');
 });

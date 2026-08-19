@@ -21,9 +21,21 @@ const GitApi = {
     catch (_) { return null; }
   },
 
-  /** Hunks for one changed file: what committing it would record. */
-  diff(slug, filePath) {
-    return api(`${GitApi.base(slug)}/git/diff?path=${encodeURIComponent(filePath)}`);
+  /**
+   * Hunks for one file. With a sha, the commit against its parent; without, HEAD against the
+   * working tree — what committing it would record.
+   */
+  diff(slug, filePath, sha) {
+    const shaParam = sha ? `&sha=${encodeURIComponent(sha)}` : '';
+    return api(`${GitApi.base(slug)}/git/diff?path=${encodeURIComponent(filePath)}${shaParam}`);
+  },
+
+  log(slug, limit, offset) {
+    return api(`${GitApi.base(slug)}/git/log?limit=${limit}&offset=${offset}`);
+  },
+
+  commitDetail(slug, sha) {
+    return api(`${GitApi.base(slug)}/git/commit/${encodeURIComponent(sha)}`);
   },
 
   commit(slug, message, files) {

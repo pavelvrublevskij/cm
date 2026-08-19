@@ -1,19 +1,34 @@
 const { Router } = require('express');
 const { safeSlug, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
-const { git, gitRaw, gitOk, headInfo, upstreamStatus, unpushedCommits, parseStatus } = require('../lib/git');
+const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, logCommits, commitDetail, parseStatus } = require('../lib/git');
 const { computeDiff } = require('../lib/diff');
 const { resolveProjectPath } = require('../lib/project-files');
 const fs = require('fs');
 
 const router = Router();
 
+// Every route answers the same way when git cannot be used, so an action never surfaces a raw
+// spawn error like "spawn git ENOENT" to the user.
+const GIT_UNAVAILABLE = 'Git is not available for this project';
+
+/** Text read out of git or the working tree that is not text at all. */
+function looksBinary(text) {
+  return text.indexOf('\u0000') !== -1;
+}
+
+/** Why git cannot be used here: no binary on this machine, or a directory that is not a repository. */
+async function unavailable(res) {
+  const reason = (await gitInstalled()) ? 'not-a-repo' : 'git-missing';
+  return res.json({ available: false, reason });
+}
+
 router.get('/:slug/git/info', wrapRoute(async (req, res) => {
   if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
   const projectPath = decodeSlug(req.params.slug);
-  if (!projectPath) return res.json({ available: false });
+  if (!projectPath) return unavailable(res);
 
-  if (!(await gitOk(projectPath))) return res.json({ available: false });
+  if (!(await gitOk(projectPath))) return unavailable(res);
 
   const { branch, detached } = await headInfo(projectPath);
   const { upstream, ahead, behind } = await upstreamStatus(projectPath);
@@ -38,6 +53,7 @@ router.post('/:slug/git/commit', wrapRoute(async (req, res) => {
   if (!Array.isArray(files) || !files.length) return res.status(400).json({ error: 'No files selected' });
   const projectPath = decodeSlug(req.params.slug);
   if (!projectPath) return res.status(400).json({ error: 'Cannot resolve project path' });
+  if (!(await gitOk(projectPath))) return res.status(400).json({ error: GIT_UNAVAILABLE });
 
   await git(['add', '--', ...files], projectPath);
   const output = await git(['commit', '-m', message.trim()], projectPath);
@@ -55,21 +71,49 @@ router.get('/:slug/git/diff', wrapRoute(async (req, res) => {
 
   const resolved = resolveProjectPath(req.params.slug, filePath);
   if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
-  if (!(await gitOk(resolved.root))) return res.status(400).json({ error: 'Not a git repository' });
+  if (!(await gitOk(resolved.root))) return res.status(400).json({ error: GIT_UNAVAILABLE });
 
-  let head = '';
-  try { head = await gitRaw(['show', `HEAD:${resolved.rel}`], resolved.root); } catch (_) { /* untracked */ }
+  const sha = (req.query.sha || '').toString();
+  if (sha && !isSha(sha)) return res.status(400).json({ error: 'Invalid commit' });
 
-  let working = '';
-  if (fs.existsSync(resolved.target) && fs.statSync(resolved.target).isFile()) {
-    const buffer = fs.readFileSync(resolved.target);
-    if (buffer.subarray(0, 8000).includes(0)) {
-      return res.json({ path: resolved.rel, binary: true, hunks: [], stats: { added: 0, removed: 0 } });
-    }
-    working = buffer.toString('utf-8');
+  // A commit diffs against its parent; the working tree diffs against HEAD.
+  const before = sha ? `${sha}^:${resolved.rel}` : `HEAD:${resolved.rel}`;
+  let oldText = '';
+  try { oldText = await gitRaw(['show', before], resolved.root); } catch (_) { /* added in this commit */ }
+
+  let newText = '';
+  if (sha) {
+    try { newText = await gitRaw(['show', `${sha}:${resolved.rel}`], resolved.root); } catch (_) { /* deleted */ }
+  } else if (fs.existsSync(resolved.target) && fs.statSync(resolved.target).isFile()) {
+    newText = fs.readFileSync(resolved.target).toString('utf-8');
   }
 
-  res.json(Object.assign({ path: resolved.rel }, computeDiff(head, working)));
+  if (looksBinary(oldText) || looksBinary(newText)) {
+    return res.json({ path: resolved.rel, binary: true, hunks: [], stats: { added: 0, removed: 0 } });
+  }
+
+  res.json(Object.assign({ path: resolved.rel, sha: sha || null }, computeDiff(oldText, newText)));
+}));
+
+router.get('/:slug/git/log', wrapRoute(async (req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const projectPath = decodeSlug(req.params.slug);
+  if (!projectPath || !(await gitOk(projectPath))) return res.status(400).json({ error: GIT_UNAVAILABLE });
+
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const commits = await logCommits(projectPath, limit, offset);
+
+  res.json({ commits, offset, limit, done: commits.length < limit });
+}));
+
+router.get('/:slug/git/commit/:sha', wrapRoute(async (req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  if (!isSha(req.params.sha)) return res.status(400).json({ error: 'Invalid commit' });
+  const projectPath = decodeSlug(req.params.slug);
+  if (!projectPath || !(await gitOk(projectPath))) return res.status(400).json({ error: GIT_UNAVAILABLE });
+
+  res.json(await commitDetail(projectPath, req.params.sha));
 }));
 
 /**
@@ -88,6 +132,7 @@ for (const [op, args] of Object.entries(REMOTE_OPS)) {
     if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
     const projectPath = decodeSlug(req.params.slug);
     if (!projectPath) return res.status(400).json({ error: 'Cannot resolve project path' });
+    if (!(await gitOk(projectPath))) return res.status(400).json({ error: GIT_UNAVAILABLE });
 
     const output = await git(args, projectPath);
     res.json({ ok: true, output });
