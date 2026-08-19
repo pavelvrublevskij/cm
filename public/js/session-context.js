@@ -258,9 +258,9 @@ Object.assign(Sessions, {
     if (list) list.innerHTML = Sessions._renderCtxFileList();
   },
 
-  /** A changed file opens like any project file — source in the pane, diff a toggle away. */
+  /** A changed file opens on its diff by default — source is a toggle away. */
   _openCtxRow(el) {
-    SessionFiles.openFile(el.dataset.path, { ctx: { ...el.dataset } });
+    SessionFiles.openFile(el.dataset.path, { mode: 'diff', ctx: { ...el.dataset } });
   },
 
   async openCtxFile(filePath) {

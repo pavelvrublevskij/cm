@@ -416,12 +416,12 @@ test('sorting reorders each level of the tree', () => {
   assert.ok(desc.indexOf('b.js') < desc.indexOf('a.js'));
 });
 
-test('clicking a changed file opens it in the pane like any project file', () => {
+test('clicking a changed file opens it on its diff by default', () => {
   Sessions._ctx = { sessionId: 's1', projSlug: 'proj', files: [file('routes/git.js', 100)], plans: [], sort: 'default' };
   Sessions._openCtxRow({ dataset: { path: 'routes/git.js', session: 's1', hash: 'abc', from: '1', isNew: '', isDeleted: '' } });
 
   assert.strictEqual(harness.opened.path, 'routes/git.js');
-  assert.strictEqual(harness.opened.opts.mode, undefined, 'no forced mode — source, with diff a toggle away');
+  assert.strictEqual(harness.opened.opts.mode, 'diff', 'changed files default to diff, with source a toggle away');
   assert.strictEqual(harness.opened.opts.ctx.hash, 'abc');
 });
 

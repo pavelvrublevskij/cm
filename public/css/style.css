@@ -4633,6 +4633,16 @@ mark.search-highlight {
 .diff-line-add { background: rgba(63, 185, 80, 0.1); }
 .diff-line-del { background: rgba(248, 81, 73, 0.1); }
 
+.diff-linenum {
+  width: 36px;
+  text-align: right;
+  padding-right: 6px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  user-select: none;
+  opacity: 0.6;
+}
+
 .diff-prefix {
   width: 20px;
   text-align: center;

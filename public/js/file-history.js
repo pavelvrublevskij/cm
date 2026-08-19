@@ -83,7 +83,7 @@ const FileHistory = {
       let newLine = hunk.newStart;
       for (const l of hunk.lines) {
         if (l.type === '+') lines.add(newLine++);
-        else if (l.type === ' ') newLine++;
+        else if (l.type === '=') newLine++;
       }
     }
     return lines;
@@ -177,14 +177,20 @@ const FileHistory = {
       <span class="diff-removed">-${result.stats.removed} removed</span>
     </div>`;
 
-    const hunks = result.hunks.map(hunk =>
-      `<div class="diff-hunk-header">@@ -${hunk.oldStart} +${hunk.newStart} @@</div>`
-      + hunk.lines.map(l => {
-          const cls = l.type === '+' ? 'diff-line-add' : l.type === '-' ? 'diff-line-del' : 'diff-line-ctx';
-          const prefix = l.type === '+' ? '+' : l.type === '-' ? '-' : ' ';
-          return `<div class="diff-line ${cls}"><span class="diff-prefix">${prefix}</span><span class="diff-content">${highlightCode(l.content, mode)}</span></div>`;
-        }).join('')
-    ).join('<div class="diff-separator"></div>');
+    const hunks = result.hunks.map(hunk => {
+      let oldLine = hunk.oldStart, newLine = hunk.newStart;
+      const lines = hunk.lines.map(l => {
+        const cls = l.type === '+' ? 'diff-line-add' : l.type === '-' ? 'diff-line-del' : 'diff-line-ctx';
+        const prefix = l.type === '+' ? '+' : l.type === '-' ? '-' : ' ';
+        const oldNum = l.type === '+' ? '' : oldLine++;
+        const newNum = l.type === '-' ? '' : newLine++;
+        return `<div class="diff-line ${cls}">`
+          + `<span class="diff-linenum diff-linenum-old">${oldNum}</span>`
+          + `<span class="diff-linenum diff-linenum-new">${newNum}</span>`
+          + `<span class="diff-prefix">${prefix}</span><span class="diff-content">${highlightCode(l.content, mode)}</span></div>`;
+      }).join('');
+      return `<div class="diff-hunk-header">@@ -${hunk.oldStart} +${hunk.newStart} @@</div>` + lines;
+    }).join('<div class="diff-separator"></div>');
 
     container.innerHTML = stats + `<div class="diff-view code-colors">${hunks}</div>`;
   }
