@@ -10,6 +10,9 @@
 //
 // Recipes are typed into the shell without a trailing newline — nothing runs until the user hits
 // Enter. Closing the panel detaches: the pty keeps running and reattaches with its scrollback.
+//
+// Clicking a changed file shows its diff in the middle column beside the shell rather than in a
+// dialog: the panel already has the room, and the shell stays alive behind the switch.
 
 const GitPanel = {
   RECIPES_COLLAPSED_KEY: 'claude-manager-git-recipes-collapsed',
@@ -36,6 +39,8 @@ const GitPanel = {
   _shellInfo: null,
   _view: null,
   _openCategories: null,
+  _pane: 'shell',       // 'shell' | 'diff' — which half of the middle column is showing
+  _diffPath: null,
   _busy: null,          // 'commit' | 'commit-push' | 'push' while that action is in flight
 
   /** Render into `hostId` for `slug`, reattaching to a shell that is already running. */
@@ -81,8 +86,15 @@ const GitPanel = {
     GitPanel._renderChanges();
     GitPanel._renderRecipes();
     GitPanel._showShell(GitPanel.shellOpen());
+    GitPanel._applyPaneState();
+    if (GitPanel._pane === 'diff' && GitPanel._diffPath) GitPanel.openDiff(GitPanel._diffPath);
   },
 
+  /**
+   * Middle column. Shell and diff are both mounted and swapped with a class, never re-created: a
+   * diff must not tear down a live terminal, and the terminal must not lose its scrollback to a
+   * glance at a file.
+   */
   _shellHtml() {
     const ptyMissing = GitPanel._shellInfo && GitPanel._shellInfo.available === false;
     const idleBody = ptyMissing
@@ -90,19 +102,80 @@ const GitPanel = {
       : `<button class="btn btn-primary" onclick="GitPanel.openShell()">Open Shell</button>
          <div class="git-shell-hint">Runs in the project directory. Clicked recipes are typed here, not executed.</div>`;
 
-    return `<div class="git-shell">
+    return `<div class="git-shell" id="git-workspace">
         <div class="git-shell-header">
-          <span class="git-shell-title">Shell</span>
-          <span class="git-shell-cwd">${escapeHtml(GitPanel._branchLabel())}</span>
+          <div class="git-pane-tabs">
+            <button class="sf-mode-btn" id="git-pane-tab-shell" onclick="GitPanel.showPane('shell')">Shell</button>
+            <button class="sf-mode-btn" id="git-pane-tab-diff" onclick="GitPanel.showPane('diff')">Diff</button>
+          </div>
+          <span class="git-shell-cwd" id="git-pane-subject">${escapeHtml(GitPanel._branchLabel())}</span>
           <span class="terminal-pane-status" id="git-shell-status">disconnected</span>
           <div class="git-shell-actions">
             <button class="icon-btn" onclick="GitPanel.reconnect()" title="Restart shell" aria-label="Restart shell">&#x21bb;</button>
             <button class="icon-btn" onclick="GitPanel.killShell()" title="End this shell" aria-label="End this shell">&#x2715;</button>
           </div>
         </div>
-        <div class="git-shell-idle" id="git-shell-idle">${idleBody}</div>
-        <div class="git-shell-host" id="git-shell-host"></div>
+        <div class="git-pane git-pane-shell" id="git-pane-shell">
+          <div class="git-shell-idle" id="git-shell-idle">${idleBody}</div>
+          <div class="git-shell-host" id="git-shell-host"></div>
+        </div>
+        <div class="git-pane git-pane-diff" id="git-pane-diff">
+          <div class="git-diff-body" id="git-diff-body">
+            <div class="git-changes-empty">Click a changed file to see what committing it would record.</div>
+          </div>
+        </div>
       </div>`;
+  },
+
+  /** Swap which pane is visible. The shell needs a refit after being hidden. */
+  showPane(pane) {
+    GitPanel._pane = pane === 'diff' ? 'diff' : 'shell';
+    GitPanel._applyPaneState();
+    if (GitPanel._pane === 'shell') GitPanel._sendResize();
+  },
+
+  _applyPaneState() {
+    const workspace = document.getElementById('git-workspace');
+    if (workspace && workspace.classList) workspace.classList.toggle('showing-diff', GitPanel._pane === 'diff');
+
+    const shellTab = document.getElementById('git-pane-tab-shell');
+    const diffTab = document.getElementById('git-pane-tab-diff');
+    if (shellTab && shellTab.classList) shellTab.classList.toggle('active', GitPanel._pane === 'shell');
+    if (diffTab && diffTab.classList) diffTab.classList.toggle('active', GitPanel._pane === 'diff');
+
+    const subject = document.getElementById('git-pane-subject');
+    if (subject) {
+      subject.textContent = GitPanel._pane === 'diff' && GitPanel._diffPath
+        ? GitPanel._diffPath
+        : GitPanel._branchLabel();
+    }
+  },
+
+  /** Show one file's diff in the middle column — no dialog, the panel already has the room. */
+  async openDiff(filePath) {
+    GitPanel._diffPath = filePath;
+    GitPanel.showPane('diff');
+
+    const body = document.getElementById('git-diff-body');
+    if (body) showLoading(body, `Diffing ${filePath}…`);
+
+    const result = await GitApi.diff(GitPanel._slug, filePath).catch(e => ({ error: e.message }));
+    if (GitPanel._diffPath !== filePath) return;      // a newer file was clicked meanwhile
+    GitPanel._renderDiff(result, filePath);
+  },
+
+  _renderDiff(result, filePath) {
+    const body = document.getElementById('git-diff-body');
+    if (!body) return;
+    if (result.error) {
+      body.innerHTML = `<div class="git-changes-empty">Could not diff ${escapeHtml(filePath)}: ${escapeHtml(result.error)}</div>`;
+      return;
+    }
+    if (result.binary) {
+      body.innerHTML = `<div class="git-changes-empty">${escapeHtml(filePath)} is a binary file.</div>`;
+      return;
+    }
+    FileHistory.renderDiff(body, result, filePath);
   },
 
   /** The column, plus the rail that brings it back once folded. */
@@ -204,10 +277,12 @@ const GitPanel = {
     const name = GitPanel.viewMode() === 'tree' ? file.path.split('/').pop() : file.path;
     return `
       <div class="git-file-row" style="--git-depth:${depth}">
-        <input type="checkbox" class="git-file-cb" value="${escapeHtml(file.path)}" checked
+        <input type="checkbox" class="git-file-cb" value="${escapeAttr(file.path)}" checked
           onchange="GitPanel.syncGroups()" title="Include in the commit">
         <span class="ctx-file-badge git-file-badge ${escapeHtml(badge)}">${escapeHtml(file.label)}</span>
-        <span class="git-file-path" title="${escapeHtml(file.path)}">${escapeHtml(name)}</span>
+        <button class="git-file-path git-file-link" data-path="${escapeAttr(file.path)}"
+          onclick="GitPanel.openDiff(this.getAttribute('data-path'))"
+          title="Show what committing ${escapeAttr(file.path)} would record">${escapeHtml(name)}</button>
       </div>`;
   },
 
@@ -234,7 +309,7 @@ const GitPanel = {
       for (const [name, dir] of node.dirs) {
         html += `
           <div class="git-tree-folder" style="--git-depth:${depth}">
-            <input type="checkbox" class="git-group-cb" data-prefix="${escapeHtml(dir.prefix)}" checked
+            <input type="checkbox" class="git-group-cb" data-prefix="${escapeAttr(dir.prefix)}" checked
               onchange="GitPanel.toggleGroup(this)" title="Include this folder in the commit">
             <span class="git-tree-name">${escapeHtml(name)}/</span>
             <span class="git-tree-count">${GitPanel._countFiles(dir)}</span>
@@ -402,7 +477,7 @@ const GitPanel = {
       const items = cat.items.map(item => {
         const cmd = GitRecipes.substitute(item.cmd, GitPanel._info);
         return `<button class="git-recipe${item.danger ? ' git-recipe-danger' : ''}"
-            onclick="GitPanel.useRecipe(this)" data-cmd="${escapeHtml(cmd)}" title="Type into the shell">
+            onclick="GitPanel.useRecipe(this)" data-cmd="${escapeAttr(cmd)}" title="Type into the shell">
             <code>${escapeHtml(cmd)}</code>
             <span class="git-recipe-explain">${escapeHtml(item.explain)}</span>
           </button>`;

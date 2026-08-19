@@ -7,6 +7,14 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+/**
+ * Escape for use inside a double-quoted HTML attribute. escapeHtml goes through textContent, which
+ * does not touch quotes, so a value containing one would end the attribute early.
+ */
+function escapeAttr(str) {
+  return escapeHtml(str).split('"').join('&quot;').split("'").join('&#39;');
+}
+
 /** Fetch JSON from the API. Throws on non-OK responses. */
 async function api(url, opts = {}) {
   const res = await fetch(url, {

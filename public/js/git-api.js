@@ -21,6 +21,11 @@ const GitApi = {
     catch (_) { return null; }
   },
 
+  /** Hunks for one changed file: what committing it would record. */
+  diff(slug, filePath) {
+    return api(`${GitApi.base(slug)}/git/diff?path=${encodeURIComponent(filePath)}`);
+  },
+
   commit(slug, message, files) {
     return api(`${GitApi.base(slug)}/git/commit`, { method: 'POST', body: { message, files } });
   },

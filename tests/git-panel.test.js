@@ -30,6 +30,10 @@ const harness = {
   checkboxes: [],
   commits: [],
   hold: null,
+  diffRenders: [],
+  diffRequests: [],
+  diffResult: null,
+  diffError: null,
   pushes: 0,
   pulls: 0,
   fetches: 0,
@@ -128,11 +132,25 @@ const context = vm.createContext({
     },
   },
   setTimeout: fn => fn(),
-  escapeHtml: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('"').join('&quot;'),
+  escapeHtml: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;'),
+  escapeAttr: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;')
+    .split('"').join('&quot;').split("'").join('&#39;'),
+  showLoading: (container, text) => { container.innerHTML = text; },
+  FileHistory: {
+    renderDiff: (container, result, filePath) => {
+      harness.diffRenders.push({ result, filePath });
+      container.innerHTML = `DIFF:${filePath}:+${result.stats.added}-${result.stats.removed}`;
+    },
+  },
   toast: (msg, type) => { harness.toasts.push({ msg, type }); },
   api: async url => {
     if (harness.apiHandler) return harness.apiHandler(url);
     if (url.includes('terminal/info')) return { available: true, running: harness.shellRunning === true, mode: 'shell' };
+    if (url.includes('/git/diff')) {
+      harness.diffRequests.push(decodeURIComponent(url.split('path=')[1] || ''));
+      if (harness.diffError) throw new Error(harness.diffError);
+      return harness.diffResult;
+    }
     return harness.gitInfo;
   },
 });
@@ -212,7 +230,17 @@ beforeEach(() => {
   harness.checkboxes = [];
   harness.commits = [];
   harness.hold = null;
+  harness.diffRenders = [];
+  harness.diffRequests = [];
+  harness.diffError = null;
+  harness.diffResult = {
+    path: 'lib/git.js',
+    hunks: [{ oldStart: 1, newStart: 1, lines: [{ type: '=', content: 'a' }, { type: '+', content: 'b' }] }],
+    stats: { added: 1, removed: 0 },
+  };
   GitPanel._busy = null;
+  GitPanel._pane = 'shell';
+  GitPanel._diffPath = null;
   harness.pushes = 0;
   harness.pulls = 0;
   harness.fetches = 0;
@@ -769,7 +797,8 @@ test('tree view nests folders and shows only the file name', async () => {
   assert.match(html, /data-prefix="public\/"/);
   assert.match(html, /data-prefix="public\/js\/"/);
   assert.match(html, /data-prefix="lib\/"/);
-  assert.match(html, /title="public\/js\/git\.js">git\.js</, 'basename shown, full path in the tooltip');
+  assert.match(html, /data-path="public\/js\/git\.js"/, 'the row knows the full path');
+  assert.match(html, />git\.js<\/button>/, 'but shows only the basename');
   assert.match(html, /--git-depth:2/, 'files nest under their folders');
 });
 
@@ -1192,4 +1221,141 @@ test('a fetch while a commit runs is ignored', async () => {
 
   release();
   await pending;
+});
+
+// ── diff in the middle column ─────────────────────────────────────────────────
+// No dialog: the diff shares the middle column with the shell, and switching between them must not
+// destroy either. Clicking a file name opens it; the checkbox beside it still only ticks.
+
+async function mountWithFiles() {
+  harness.gitInfo.files = [
+    { path: 'lib/git.js', label: 'modified' },
+    { path: 'new.js', label: 'untracked' },
+  ];
+  await GitPanel.mount(HOST, 'proj');
+}
+
+test('the panel opens on the shell, not the diff', async () => {
+  await mountWithFiles();
+  assert.strictEqual(GitPanel._pane, 'shell');
+  assert.ok(!el('git-workspace').classList.contains('showing-diff'));
+  assert.match(el(HOST).innerHTML, /Click a changed file/, 'the diff pane explains itself');
+});
+
+test('clicking a file name asks for that file and renders its diff', async () => {
+  await mountWithFiles();
+  await GitPanel.openDiff('lib/git.js');
+
+  assert.deepStrictEqual(harness.diffRequests, ['lib/git.js']);
+  assert.strictEqual(harness.diffRenders.length, 1);
+  assert.strictEqual(harness.diffRenders[0].filePath, 'lib/git.js');
+  assert.strictEqual(el('git-diff-body').innerHTML, 'DIFF:lib/git.js:+1-0');
+});
+
+test('opening a diff switches the pane and names the file in the header', async () => {
+  await mountWithFiles();
+  await GitPanel.openDiff('lib/git.js');
+
+  assert.strictEqual(GitPanel._pane, 'diff');
+  assert.ok(el('git-workspace').classList.contains('showing-diff'));
+  assert.strictEqual(el('git-pane-subject').textContent, 'lib/git.js');
+  assert.ok(el('git-pane-tab-diff').classList.contains('active'));
+  assert.ok(!el('git-pane-tab-shell').classList.contains('active'));
+});
+
+test('a diff never disposes the terminal behind it', async () => {
+  await mountWithFiles();
+  GitPanel.openShell();
+  await GitPanel.openDiff('lib/git.js');
+
+  assert.strictEqual(harness.termDisposed, 0, 'the shell survives');
+  assert.strictEqual(GitPanel.shellOpen(), true);
+});
+
+test('switching back to the shell restores it and refits the pty', async () => {
+  await mountWithFiles();
+  GitPanel.openShell();
+  harness.ws.readyState = 1;
+  await GitPanel.openDiff('lib/git.js');
+  harness.sent.length = 0;
+
+  GitPanel.showPane('shell');
+
+  assert.strictEqual(GitPanel._pane, 'shell');
+  assert.ok(!el('git-workspace').classList.contains('showing-diff'));
+  assert.deepStrictEqual(harness.sent, [{ t: 'r', c: 80, r: 24 }], 'the pty learns its size again');
+  assert.strictEqual(el('git-pane-subject').textContent, 'feature/x', 'the header goes back to the branch');
+});
+
+test('the shell pane needs no resize when there is no shell', async () => {
+  await mountWithFiles();
+  GitPanel.showPane('shell');
+  assert.deepStrictEqual(harness.sent, []);
+});
+
+test('a failed diff is reported in the pane, not thrown away', async () => {
+  await mountWithFiles();
+  harness.diffError = 'fatal: bad object';
+  await GitPanel.openDiff('lib/git.js');
+
+  assert.match(el('git-diff-body').innerHTML, /Could not diff lib\/git\.js/);
+  assert.match(el('git-diff-body').innerHTML, /bad object/);
+  assert.strictEqual(harness.diffRenders.length, 0, 'the renderer is not handed an error');
+});
+
+test('a binary file says so instead of rendering bytes', async () => {
+  await mountWithFiles();
+  harness.diffResult = { path: 'logo.png', binary: true, hunks: [], stats: { added: 0, removed: 0 } };
+  await GitPanel.openDiff('logo.png');
+
+  assert.match(el('git-diff-body').innerHTML, /logo\.png is a binary file/);
+  assert.strictEqual(harness.diffRenders.length, 0);
+});
+
+test('a slow diff that lands after a newer click is discarded', async () => {
+  await mountWithFiles();
+  const first = GitPanel.openDiff('lib/git.js');
+  GitPanel._diffPath = 'new.js';           // as if the user clicked the other file meanwhile
+  await first;
+
+  assert.strictEqual(harness.diffRenders.length, 0, 'the stale result is dropped');
+});
+
+test('the diff pane survives a panel re-render', async () => {
+  await mountWithFiles();
+  await GitPanel.openDiff('lib/git.js');
+  harness.diffRenders = [];
+  harness.diffRequests = [];
+
+  await GitPanel.mount(HOST, 'proj');
+
+  assert.strictEqual(GitPanel._pane, 'diff');
+  assert.deepStrictEqual(harness.diffRequests, ['lib/git.js'], 'the open file is re-diffed');
+});
+
+test('a file name is a button, and the checkbox is still the only toggle', async () => {
+  await mountWithFiles();
+  const html = el('git-changes').innerHTML;
+
+  assert.match(html, /<button class="git-file-path git-file-link"/);
+  assert.ok(!html.includes('<label'), 'no label anywhere in the list');
+  assert.match(html, /class="git-file-cb"[^>]*checked/);
+});
+
+test('a path containing quotes stays intact in every attribute', async () => {
+  harness.gitInfo.files = [{ path: `od'd "quoted".js`, label: 'modified' }];
+  await GitPanel.mount(HOST, 'proj');
+  const html = el('git-changes').innerHTML;
+
+  assert.match(html, /data-path="od&#39;d &quot;quoted&quot;\.js"/, 'quotes are escaped, not left to end the attribute');
+  assert.ok(!/data-path="[^"]*"[^>]*"quoted"/.test(html), 'the attribute is not broken open');
+});
+
+test('a recipe containing quotes keeps them inside its attribute', async () => {
+  await mountWithFiles();
+  GitPanel.openShell();
+  const html = el('git-recipes').innerHTML;
+
+  assert.match(html, /data-cmd="git commit -m &quot;[^"]*&quot;"/,
+    'git commit -m "<message>" must survive as one attribute value');
 });

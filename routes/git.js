@@ -1,7 +1,10 @@
 const { Router } = require('express');
 const { safeSlug, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
-const { git, gitOk, headInfo, upstreamStatus, unpushedCommits, parseStatus } = require('../lib/git');
+const { git, gitRaw, gitOk, headInfo, upstreamStatus, unpushedCommits, parseStatus } = require('../lib/git');
+const { computeDiff } = require('../lib/diff');
+const { resolveProjectPath } = require('../lib/project-files');
+const fs = require('fs');
 
 const router = Router();
 
@@ -39,6 +42,34 @@ router.post('/:slug/git/commit', wrapRoute(async (req, res) => {
   await git(['add', '--', ...files], projectPath);
   const output = await git(['commit', '-m', message.trim()], projectPath);
   res.json({ ok: true, output });
+}));
+
+/**
+ * What committing this file would record: HEAD versus the working tree, which is what the panel
+ * stages. An untracked file has no HEAD side and reads as all added; a deleted one has no working
+ * side and reads as all removed. Binary content is reported rather than rendered as garbage.
+ */
+router.get('/:slug/git/diff', wrapRoute(async (req, res) => {
+  const filePath = (req.query.path || '').toString();
+  if (!filePath) return res.status(400).json({ error: 'Invalid file path' });
+
+  const resolved = resolveProjectPath(req.params.slug, filePath);
+  if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+  if (!(await gitOk(resolved.root))) return res.status(400).json({ error: 'Not a git repository' });
+
+  let head = '';
+  try { head = await gitRaw(['show', `HEAD:${resolved.rel}`], resolved.root); } catch (_) { /* untracked */ }
+
+  let working = '';
+  if (fs.existsSync(resolved.target) && fs.statSync(resolved.target).isFile()) {
+    const buffer = fs.readFileSync(resolved.target);
+    if (buffer.subarray(0, 8000).includes(0)) {
+      return res.json({ path: resolved.rel, binary: true, hunks: [], stats: { added: 0, removed: 0 } });
+    }
+    working = buffer.toString('utf-8');
+  }
+
+  res.json(Object.assign({ path: resolved.rel }, computeDiff(head, working)));
 }));
 
 /**

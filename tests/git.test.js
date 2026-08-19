@@ -5,7 +5,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const request = require('supertest');
 const { app, HOME } = require('./helpers/app');
-const { git, gitOk, headInfo, upstreamStatus, unpushedCommits, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
+const { git, gitRaw, gitOk, headInfo, upstreamStatus, unpushedCommits, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
 
 function slugForPath(p) {
   const win = p.match(/^([A-Za-z]):[\\\/](.*)/);
@@ -358,4 +358,99 @@ test('a remote operation on a directory with no repository fails rather than han
   const res = await request(app).post(`/api/projects/${slugForPath(NOGIT)}/git/fetch`);
   assert.strictEqual(res.status, 500);
   assert.ok(res.body.error);
+});
+
+// ── file diff ────────────────────────────────────────────────────────────────
+// HEAD versus the working tree: exactly what committing the file would record.
+
+const DIFFPROJ = path.join(HOME, 'git-diff-proj');
+
+function diffOf(slug, filePath) {
+  return request(app).get(`/api/projects/${slug}/git/diff`).query({ path: filePath });
+}
+
+before(() => {
+  fs.rmSync(DIFFPROJ, { recursive: true, force: true });
+  fs.mkdirSync(path.join(DIFFPROJ, 'lib'), { recursive: true });
+  run(['init', '-q'], DIFFPROJ);
+  identity(DIFFPROJ);
+  fs.writeFileSync(path.join(DIFFPROJ, 'lib', 'a.txt'), 'one\ntwo\nthree\n');
+  fs.writeFileSync(path.join(DIFFPROJ, 'gone.txt'), 'delete me\n');
+  fs.writeFileSync(path.join(DIFFPROJ, 'same.txt'), 'unchanged\n');
+  fs.writeFileSync(path.join(DIFFPROJ, 'binary.bin'), Buffer.from([0x41, 0x00, 0x42, 0x00]));
+  run(['add', '-A'], DIFFPROJ);
+  run(['commit', '-q', '-m', 'baseline'], DIFFPROJ);
+
+  fs.writeFileSync(path.join(DIFFPROJ, 'lib', 'a.txt'), 'one\nTWO\nthree\n');
+  fs.writeFileSync(path.join(DIFFPROJ, 'fresh.txt'), 'brand new\nsecond line\n');
+  fs.rmSync(path.join(DIFFPROJ, 'gone.txt'));
+});
+
+test('diff of a modified file reports the changed lines only', async () => {
+  const res = await diffOf(slugForPath(DIFFPROJ), 'lib/a.txt');
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.path, 'lib/a.txt');
+  assert.deepStrictEqual(res.body.stats, { added: 1, removed: 1 });
+  const kinds = res.body.hunks[0].lines.map(l => l.type + l.content);
+  assert.ok(kinds.includes('-two'), 'the old line is shown as removed');
+  assert.ok(kinds.includes('+TWO'), 'and the new one as added');
+});
+
+test('an unchanged file reports no hunks, not a phantom last line', async () => {
+  const res = await diffOf(slugForPath(DIFFPROJ), 'same.txt');
+
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body.hunks, [], 'trimming HEAD would have invented a change here');
+  assert.deepStrictEqual(res.body.stats, { added: 0, removed: 0 });
+});
+
+test('an untracked file reads as all added', async () => {
+  const res = await diffOf(slugForPath(DIFFPROJ), 'fresh.txt');
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.stats.added, 2);
+  assert.strictEqual(res.body.stats.removed, 0);
+});
+
+test('a deleted file reads as all removed', async () => {
+  const res = await diffOf(slugForPath(DIFFPROJ), 'gone.txt');
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.stats.removed, 1);
+  assert.strictEqual(res.body.stats.added, 0);
+});
+
+test('a binary file is flagged rather than diffed', async () => {
+  const res = await diffOf(slugForPath(DIFFPROJ), 'binary.bin');
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.binary, true);
+  assert.deepStrictEqual(res.body.hunks, []);
+});
+
+test('diff requires a path', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(DIFFPROJ)}/git/diff`);
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Invalid file path');
+});
+
+test('diff refuses a path that escapes the project', async () => {
+  const res = await diffOf(slugForPath(DIFFPROJ), '../../../etc/passwd');
+  assert.strictEqual(res.status, 400);
+  assert.ok(res.body.error);
+});
+
+test('diff refuses a project that is not a repository', async () => {
+  const res = await diffOf(slugForPath(NOGIT), 'readme.txt');
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Not a git repository');
+});
+
+test('gitRaw keeps file bytes while git trims values', async () => {
+  const raw = await gitRaw(['show', 'HEAD:same.txt'], DIFFPROJ);
+  const trimmed = await git(['show', 'HEAD:same.txt'], DIFFPROJ);
+
+  assert.strictEqual(raw, 'unchanged\n');
+  assert.strictEqual(trimmed, 'unchanged', 'which is why the diff route uses the raw form');
 });

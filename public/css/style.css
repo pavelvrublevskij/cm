@@ -4457,11 +4457,52 @@ mark.search-highlight {
   margin-top: 10px;
 }
 
+/* Shell and diff both live in the middle column; only one is visible, neither is re-created. */
+.git-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.git-shell.showing-diff .git-pane-shell,
+.git-shell:not(.showing-diff) .git-pane-diff {
+  display: none;
+}
+
+.git-pane-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.git-diff-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 8px;
+}
+
 .git-shell-host {
   flex: 1;
   min-height: 0;
   background: #000;
   padding: 4px;
+}
+
+/* A file name opens its diff; the checkbox beside it remains the only thing that toggles it. */
+.git-file-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-file-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .git-sync-label {
