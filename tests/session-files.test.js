@@ -488,6 +488,17 @@ test('a changed file opens on the diff, an untouched one on the source', async (
   assert.strictEqual(SessionFiles.open.mode, 'source');
 });
 
+test('a changed markdown file opens on preview, not the diff', async () => {
+  harness.apiHandler = () => ({ content: '# Title', mtime: 1 });
+  await SessionFiles.openFile('README.md', {
+    mode: 'diff',
+    ctx: { session: 's1', hash: 'abc', from: '1', path: 'README.md', isNew: '', isDeleted: '' }
+  });
+
+  assert.strictEqual(SessionFiles.open.canDiff, true, 'a diff is still available as a toggle');
+  assert.strictEqual(SessionFiles.open.mode, 'preview', 'preview wins over the diff default for markdown');
+});
+
 test('a file the session edited without a snapshot offers source only', async () => {
   harness.apiHandler = () => ({ content: 'edited text', mtime: 1 });
   await SessionFiles.openFile('lib/paths.js', {

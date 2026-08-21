@@ -330,8 +330,9 @@ const SessionFiles = {
     const isDeleted = !!(ctx && ctx.isDeleted === '1');
     const canDiff = SessionFiles._canDiff(ctx);
     const canPreview = !isDeleted && CodeView.isPreviewable(relPath);
-    // Markdown and HTML land on their rendered form; everything else on the source.
-    const mode = (opts.mode === 'diff' || isDeleted) && canDiff ? 'diff' : (canPreview ? 'preview' : 'source');
+    // Markdown and HTML land on their rendered form; everything else changed opens on its diff,
+    // and anything unchanged (or without a diff to show) falls back to source.
+    const mode = canPreview ? 'preview' : ((opts.mode === 'diff' || isDeleted) && canDiff ? 'diff' : 'source');
     SessionFiles.open = { path: relPath, mode, ctx, canDiff, canPreview, isDeleted, loading: !isDeleted, saved: '', mtime: null, changedLines: undefined };
     SessionFiles.renderPane();
     SessionFiles.renderTree();
