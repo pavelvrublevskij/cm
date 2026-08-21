@@ -41,11 +41,35 @@ function stripAnsi(text) {
   return (text || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 }
 
+/** Drop a leading YAML frontmatter block (--- ... ---) — metadata, not content to render. */
+function stripFrontmatter(text) {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/, '');
+}
+
+/** GitHub-style heading slug, so a markdown link like `#installation` has a matching id to find. */
+function slugifyHeading(text) {
+  return text.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+}
+
+/** marked renders headings with no id by default, so `[text](#heading)` links have nothing to
+ *  jump to. Slugify each heading's text into an id, GitHub-style, deduping repeats. */
+function addHeadingIds(html) {
+  const seen = new Map();
+  return html.replace(/<(h[1-6])>([\s\S]*?)<\/\1>/g, (whole, tag, inner) => {
+    const plain = inner.replace(/<[^>]+>/g, '');
+    let slug = slugifyHeading(plain) || 'section';
+    const n = seen.get(slug) || 0;
+    seen.set(slug, n + 1);
+    if (n > 0) slug = `${slug}-${n}`;
+    return `<${tag} id="${slug}">${inner}</${tag}>`;
+  });
+}
+
 /** Render markdown to HTML using the marked library. */
 function renderMarkdown(text) {
-  const clean = stripAnsi(text);
+  const clean = stripAnsi(stripFrontmatter(text));
   if (typeof marked !== 'undefined') {
-    return marked.parse(clean, { breaks: true });
+    return addHeadingIds(marked.parse(clean, { breaks: true }));
   }
   return clean.replace(/</g, '&lt;').replace(/\n/g, '<br>');
 }

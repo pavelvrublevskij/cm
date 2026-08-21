@@ -40,6 +40,21 @@ const App = {
     // Listen for back/forward
     window.addEventListener('hashchange', () => App.restoreRoute());
 
+    // A markdown preview's own links (a table of contents, `[text](#heading)`) point at a heading
+    // id, not a view — left to the hashchange listener above, they would reroute the whole app
+    // instead of scrolling. Only intercept when the fragment actually matches an element on the
+    // page, so real in-app hash routes (which never collide with an element id) are untouched.
+    document.addEventListener('click', e => {
+      const a = e.target.closest('a[href^="#"]');
+      if (!a) return;
+      const id = a.getAttribute('href').slice(1);
+      if (!id) return;
+      const target = document.getElementById(id);
+      if (!target) return;
+      e.preventDefault();
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
     // Intercept keyboard refresh shortcuts — handle in-app instead of reloading
     window.addEventListener('keydown', e => {
       const isRefresh = e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'r');
