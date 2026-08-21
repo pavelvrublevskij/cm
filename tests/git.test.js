@@ -5,7 +5,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const request = require('supertest');
 const { app, HOME } = require('./helpers/app');
-const { git, gitRaw, gitOk, gitInstalled, headInfo, upstreamStatus, unpushedCommits, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
+const { git, gitRaw, gitOk, gitInstalled, headInfo, upstreamStatus, unpushedCommits, incomingCommits, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
 
 function slugForPath(p) {
   const win = p.match(/^([A-Za-z]):[\\\/](.*)/);
@@ -221,6 +221,22 @@ test('git/info on a repo without a remote returns null tracking info', async () 
   assert.strictEqual(res.body.behind, null);
 });
 
+test('git/info expands an untracked directory into its individual files', async () => {
+  const dir = path.join(PLAIN, 'untracked-dir');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'one.txt'), 'one\n');
+  fs.writeFileSync(path.join(dir, 'two.txt'), 'two\n');
+
+  const res = await request(app).get(`/api/projects/${slugForPath(PLAIN)}/git/info`);
+  assert.strictEqual(res.status, 200);
+  const paths = res.body.files.map(f => f.path);
+  assert.ok(paths.includes('untracked-dir/one.txt'), 'first file in the untracked dir must be listed');
+  assert.ok(paths.includes('untracked-dir/two.txt'), 'second file in the untracked dir must be listed');
+  assert.ok(!paths.includes('untracked-dir/'), 'the directory itself must not collapse the files into one entry');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('git/info flags a detached HEAD', async () => {
   const res = await request(app).get(`/api/projects/${slugForPath(DETACHED)}/git/info`);
   assert.strictEqual(res.status, 200);
@@ -294,6 +310,33 @@ test('git/info carries the unpushed commits when the branch is ahead', async () 
 test('git/info returns no unpushed commits for a branch that is level', async () => {
   const res = await request(app).get(`/api/projects/${slugForPath(PLAIN)}/git/info`);
   assert.deepStrictEqual(res.body.unpushed, []);
+});
+
+// ── incoming commits ─────────────────────────────────────────────────────────
+
+test('incomingCommits lists what a pull would bring in, newest first', async () => {
+  const commits = await incomingCommits(WORK, `origin/${currentBranch(WORK)}`);
+  assert.strictEqual(commits.length, 1, 'WORK is one commit behind');
+  assert.strictEqual(commits[0].subject, 'remote-side commit');
+  assert.match(commits[0].sha, /^[0-9a-f]{7,}$/);
+});
+
+test('incomingCommits is empty without an upstream', async () => {
+  assert.deepStrictEqual(await incomingCommits(PLAIN, null), []);
+});
+
+test('git/info carries the incoming commits when the branch is behind, without moving HEAD', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(WORK)}/git/info`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.behind, 1);
+  assert.strictEqual(res.body.incoming.length, 1);
+  assert.strictEqual(res.body.incoming[0].subject, 'remote-side commit');
+  assert.strictEqual(res.body.branch, currentBranch(WORK), 'reading incoming commits must not check anything out');
+});
+
+test('git/info returns no incoming commits for a branch that is level', async () => {
+  const res = await request(app).get(`/api/projects/${slugForPath(PLAIN)}/git/info`);
+  assert.deepStrictEqual(res.body.incoming, []);
 });
 
 // ── remote operations ────────────────────────────────────────────────────────

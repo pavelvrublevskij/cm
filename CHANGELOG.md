@@ -1,3 +1,11 @@
+## v1.5.1
+
+### Bug fixes
+
+- **Untracked directories collapsed to a single entry in the Git tab** — `git status --porcelain` reports a new, untracked directory as one line rather than the files inside it. The changes list now reads status with `--untracked-files=all`, so every new file in an untracked folder is listed (and can be selected) individually. The changed-files list also defaults to the Tree view instead of Flat, so a folder of new files reads as one collapsible group rather than a long flat list.
+- **A broken node-pty install left the terminal panel silently unusable** — a spawn failure (e.g. a native module built for the wrong Node/Electron ABI) used to just print a raw error into the terminal with no way to recover short of manually reinstalling. `run.bat`/`run.sh` now verify the pty binding on startup and reinstall `node-pty` (falling back to a full `node_modules` rebuild) if it's broken, and both the session terminal and the Git tab's shell now show a "Fix & Restart App" banner on a spawn failure that repairs the install and restarts the server in place.
+- **Files changed via a Bash command could be wrongly attributed to a session** — the git-status fallback added in v1.5.0 to catch Bash-driven file changes (`cp`, a script, ...) matched on mtime alone, which could pull in changes from an unrelated concurrent session or a file touched outside Claude's tool calls entirely. The fallback has been removed; the Files tab now relies solely on the Write/Edit/MultiEdit/NotebookEdit tool calls recorded in the session transcript.
+
 ## v1.5.0
 
 ### Features

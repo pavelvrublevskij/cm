@@ -77,6 +77,8 @@ if exist "node_modules" (
     call npm install
 )
 
+call :ensure_pty_works
+
 echo.
 echo   Starting server...
 
@@ -171,6 +173,33 @@ echo Bye!
 goto :eof
 
 :: ─── Helpers ────────────────────────────────────────────────────────
+
+:verify_pty
+node "%~dp0scripts\verify-pty.js" >nul 2>&1
+exit /b %errorlevel%
+
+:ensure_pty_works
+call :verify_pty
+if %errorlevel% equ 0 exit /b 0
+echo   In-app terminal support is broken, reinstalling...
+rmdir /s /q "node_modules\node-pty" >nul 2>&1
+call npm install >nul 2>&1
+call :verify_pty
+if %errorlevel% equ 0 (
+    echo   Terminal support fixed.
+    exit /b 0
+)
+echo   Rebuilding all dependencies ^(this may take a minute^)...
+rmdir /s /q "node_modules" >nul 2>&1
+del /q "package-lock.json" >nul 2>&1
+call npm install
+call :verify_pty
+if %errorlevel% equ 0 (
+    echo   Terminal support fixed.
+) else (
+    echo   Could not fix the in-app terminal automatically. The rest of the app will still work.
+)
+exit /b 0
 
 :wait_for_server
 set /a ATTEMPTS=0

@@ -56,6 +56,31 @@ open_browser() {
     fi
 }
 
+verify_pty() {
+    node "$SCRIPT_DIR/scripts/verify-pty.js" >/dev/null 2>&1
+}
+
+ensure_pty_works() {
+    if verify_pty; then
+        return 0
+    fi
+    printf "  ${RED}In-app terminal support is broken, reinstalling...${NC}\n"
+    rm -rf node_modules/node-pty
+    npm install >/dev/null 2>&1 || true
+    if verify_pty; then
+        printf "  ${GREEN}✓${NC} Terminal support fixed.\n"
+        return 0
+    fi
+    printf "  Rebuilding all dependencies (this may take a minute)...\n"
+    rm -rf node_modules package-lock.json
+    npm install || true
+    if verify_pty; then
+        printf "  ${GREEN}✓${NC} Terminal support fixed.\n"
+    else
+        printf "  ${RED}⚠${NC} Could not fix the in-app terminal automatically. The rest of the app will still work.\n"
+    fi
+}
+
 wait_for_url() {
     local target_url="$1"
     local attempts=0
@@ -118,6 +143,8 @@ do_local_start() {
     else
         printf "  ${GREEN}✓${NC} Dependencies installed\n"
     fi
+
+    ensure_pty_works
 
     printf "\n"
 

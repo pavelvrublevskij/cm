@@ -143,6 +143,10 @@ const GitPanel = {
         <div class="git-pane git-pane-shell" id="git-pane-shell">
           <div class="git-shell-idle" id="git-shell-idle">${idleBody}</div>
           <div class="git-shell-host" id="git-shell-host"></div>
+          <div class="term-fix-banner" id="git-shell-fix-banner" style="display:none">
+            <span class="term-fix-text" id="git-shell-fix-text"></span>
+            <button type="button" class="btn btn-sm" id="git-shell-fix-btn" onclick="GitPanel.runFix()">Fix &amp; Restart App</button>
+          </div>
         </div>
         <div class="git-pane git-pane-diff" id="git-pane-diff">
           <div class="git-diff-body" id="git-diff-body">
@@ -258,7 +262,7 @@ const GitPanel = {
   _renderChanges() {
     const host = document.getElementById('git-changes');
     if (!host) return;
-    host.innerHTML = GitPanel._toCommitHtml() + GitPanel._toPushHtml();
+    host.innerHTML = GitPanel._toCommitHtml() + GitPanel._toPullHtml() + GitPanel._toPushHtml();
     GitPanel.syncGroups();
   },
 
@@ -296,8 +300,8 @@ const GitPanel = {
   },
 
   viewMode() {
-    try { return localStorage.getItem(GitPanel.VIEW_MODE_KEY) === 'tree' ? 'tree' : 'flat'; }
-    catch (_) { return 'flat'; }
+    try { return localStorage.getItem(GitPanel.VIEW_MODE_KEY) === 'flat' ? 'flat' : 'tree'; }
+    catch (_) { return 'tree'; }
   },
 
   setViewMode(mode) {
@@ -482,6 +486,29 @@ const GitPanel = {
       </div>
       ${body}
       ${behindNote}`;
+  },
+
+  /**
+   * Incoming commits a Pull would bring in, visible as soon as a Fetch has updated the
+   * remote-tracking ref — so the user can look ahead without moving HEAD.
+   */
+  _toPullHtml() {
+    const info = GitPanel._info || {};
+    if (!info.behind) return '';
+    const incoming = info.incoming || [];
+
+    const commits = incoming.map(c => `
+      <div class="git-commit-row">
+        <code>${escapeHtml(c.sha)}</code>
+        <span class="git-commit-subject">${escapeHtml(c.subject)}</span>
+      </div>`).join('');
+
+    return `
+      <div class="git-changes-header">
+        <span class="git-changes-title">To pull</span>
+        <span class="git-count-badge">${info.behind}</span>
+      </div>
+      <div class="git-changes-commits">${commits}</div>`;
   },
 
   /** Commit the ticked files with the panel's message, reusing the shared commit path. */
@@ -693,11 +720,13 @@ const GitPanel = {
 
   openShell() {
     if (GitPanel._view) return;
+    GitPanel._hideFixBanner();
     const view = TermView.create({
       hostId: 'git-shell-host',
       url: GitPanel._shellUrl(),
       onStatus: (text, cls) => GitPanel._setStatus(text, cls),
       onOpen: () => { if (typeof GitActions !== 'undefined') GitActions.refreshShellState(); },
+      onSpawnError: (message) => GitPanel._showFixBanner(message),
     });
     if (!view) {
       toast('Terminal libraries failed to load', 'error');
@@ -706,6 +735,29 @@ const GitPanel = {
     GitPanel._view = view;
     GitPanel._showShell(true);
     GitPanel._applyRecipesState();
+  },
+
+  _showFixBanner(message) {
+    const banner = document.getElementById('git-shell-fix-banner');
+    const text = document.getElementById('git-shell-fix-text');
+    const btn = document.getElementById('git-shell-fix-btn');
+    if (text) text.textContent = message ? `Shell failed to start: ${message}` : 'Shell failed to start.';
+    if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+    if (banner) banner.style.display = 'flex';
+  },
+
+  _hideFixBanner() {
+    const banner = document.getElementById('git-shell-fix-banner');
+    if (banner) banner.style.display = 'none';
+  },
+
+  runFix() {
+    const btn = document.getElementById('git-shell-fix-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
+    TerminalRepair.trigger(status => {
+      const text = document.getElementById('git-shell-fix-text');
+      if (text) text.textContent = status;
+    });
   },
 
   _shellUrl() {
@@ -725,6 +777,7 @@ const GitPanel = {
     GitPanel._showShell(false);
     GitPanel._applyRecipesState();
     GitPanel._setStatus('disconnected', '');
+    GitPanel._hideFixBanner();
     if (typeof GitActions !== 'undefined') GitActions.refreshShellState();
   },
 

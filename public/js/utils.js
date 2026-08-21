@@ -133,6 +133,39 @@ function buildTable(cols, rows) {
   return `<table class="usage-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
+// --- Terminal self-repair ---
+// When a browser terminal's pty fails to spawn (e.g. a broken node-pty install on the user's
+// machine), the terminal panels offer a "Fix & Restart App" button. It hits this same repair
+// flow regardless of which panel (session terminal or git shell) triggered it.
+const TerminalRepair = {
+  POLL_MS: 1000,
+  POLL_MAX_ATTEMPTS: 90,
+
+  async trigger(onUpdate) {
+    if (onUpdate) onUpdate('Repairing and restarting the app…');
+    try {
+      await api('/api/terminal/repair', { method: 'POST' });
+    } catch (e) {
+      if (onUpdate) onUpdate('Repair failed: ' + e.message);
+      return;
+    }
+    TerminalRepair._waitForServer(onUpdate, 0);
+  },
+
+  _waitForServer(onUpdate, attempt) {
+    fetch('/api/version').then(res => {
+      if (!res.ok) throw new Error('not ready');
+      location.reload();
+    }).catch(() => {
+      if (attempt >= TerminalRepair.POLL_MAX_ATTEMPTS) {
+        if (onUpdate) onUpdate('Still restarting — reload the page in a moment.');
+        return;
+      }
+      setTimeout(() => TerminalRepair._waitForServer(onUpdate, attempt + 1), TerminalRepair.POLL_MS);
+    });
+  }
+};
+
 // --- Theme ---
 
 const Theme = {

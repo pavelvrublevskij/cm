@@ -88,7 +88,18 @@ const TermView = {
           view.resize();
           if (opts.onOpen) opts.onOpen();
         };
-        ws.onmessage = ev => { term.write(typeof ev.data === 'string' ? ev.data : ''); };
+        ws.onmessage = ev => {
+          const raw = typeof ev.data === 'string' ? ev.data : '';
+          let control = null;
+          try { control = JSON.parse(raw); } catch (_) {}
+          if (control && typeof control === 'object' && control.t === 'spawn-error') {
+            const label = control.cmd ? `Failed to start ${control.cmd}: ${control.message}` : `Failed to start: ${control.message}`;
+            term.write(`\r\n\x1b[31m${label}\x1b[0m\r\n`);
+            if (opts.onSpawnError) opts.onSpawnError(control.message, control);
+            return;
+          }
+          term.write(raw);
+        };
         ws.onclose = () => { TermView._setStatus(opts, 'disconnected', 'error'); };
         ws.onerror = () => { TermView._setStatus(opts, 'error', 'error'); };
 

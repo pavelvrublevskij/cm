@@ -653,6 +653,18 @@ body {
 .terminal-host .xterm-viewport,
 .terminal-host .xterm-screen { height: 100% !important; }
 
+.term-fix-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--danger, #f85149) 12%, transparent);
+  border-top: 1px solid var(--danger, #f85149);
+  font-size: 12px;
+}
+.term-fix-text { flex: 1 1 auto; color: var(--text-primary); }
+
 @media (max-width: 900px) {
   .session-detail-body { flex-direction: column; }
   .session-detail-body .session-main-panel { flex: 0 0 50%; }
@@ -1628,6 +1640,7 @@ mark.search-highlight {
   border-radius: 50%;
   margin-right: 6px;
   vertical-align: middle;
+  flex-shrink: 0;
   animation: session-dot-pulse 2s ease-in-out infinite;
 }
 
@@ -4066,7 +4079,9 @@ mark.search-highlight {
 
 .git-panel-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 36%) minmax(0, 1fr) 260px;
+  /* The middle column keeps a floor so its Shell/Diff/History tabs can never be squeezed down to
+     nothing and end up hidden behind the recipes column on a narrow window. */
+  grid-template-columns: minmax(300px, 36%) minmax(300px, 1fr) 260px;
   gap: 12px;
   height: calc(100vh - 320px);
   min-height: 420px;
@@ -4084,7 +4099,7 @@ mark.search-highlight {
 
 /* Folded recipes leave a rail to bring them back, and the width goes to the file list. */
 .git-panel-layout.recipes-collapsed {
-  grid-template-columns: minmax(340px, 44%) minmax(0, 1fr) 26px;
+  grid-template-columns: minmax(340px, 44%) minmax(300px, 1fr) 26px;
 }
 
 .git-panel-layout.recipes-collapsed .git-recipes {

@@ -98,6 +98,7 @@ const TerminalPanel = {
     const body = document.getElementById('session-detail-body');
     if (!pane || !body) return;
 
+    this._hideFixBanner();
     const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || this.DEFAULT_WIDTH_PCT;
     body.style.setProperty('--terminal-width', savedWidth + '%');
     pane.classList.add('connected');
@@ -110,10 +111,34 @@ const TerminalPanel = {
         if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
         if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.poll();
       },
+      onSpawnError: (message) => this._showFixBanner(message),
     });
     if (!view) return;
 
     this.state = { open: true, slug, sessionId: sessionId || null, view };
+  },
+
+  _showFixBanner(message) {
+    const banner = document.getElementById('terminal-fix-banner');
+    const text = document.getElementById('terminal-fix-text');
+    const btn = document.getElementById('terminal-fix-btn');
+    if (text) text.textContent = message ? `Terminal failed to start: ${message}` : 'Terminal failed to start.';
+    if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+    if (banner) banner.style.display = 'flex';
+  },
+
+  _hideFixBanner() {
+    const banner = document.getElementById('terminal-fix-banner');
+    if (banner) banner.style.display = 'none';
+  },
+
+  runFix() {
+    const btn = document.getElementById('terminal-fix-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
+    TerminalRepair.trigger(status => {
+      const text = document.getElementById('terminal-fix-text');
+      if (text) text.textContent = status;
+    });
   },
 
   _wsUrl(slug, sessionId) {
@@ -145,6 +170,7 @@ const TerminalPanel = {
     const pane = document.getElementById('terminal-pane');
     if (pane) pane.classList.remove('connected');
     this._setStatus('disconnected', '');
+    this._hideFixBanner();
 
     this.state = { open: false, slug: null, sessionId: null, view: null };
   },

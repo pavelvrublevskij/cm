@@ -642,6 +642,10 @@
               <button class="btn btn-primary" onclick="TerminalPanel.openFromSession()">Open Terminal</button>
             </div>
             <div id="terminal-host" class="terminal-host"></div>
+            <div class="term-fix-banner" id="terminal-fix-banner" style="display:none">
+              <span class="term-fix-text" id="terminal-fix-text"></span>
+              <button type="button" class="btn btn-sm" id="terminal-fix-btn" onclick="TerminalPanel.runFix()">Fix &amp; Restart App</button>
+            </div>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const { safeSlug, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
-const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, logCommits, commitDetail, parseStatus } = require('../lib/git');
+const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus } = require('../lib/git');
 const { computeDiff } = require('../lib/diff');
 const { resolveProjectPath } = require('../lib/project-files');
 const fs = require('fs');
@@ -33,17 +33,18 @@ router.get('/:slug/git/info', wrapRoute(async (req, res) => {
   const { branch, detached } = await headInfo(projectPath);
   const { upstream, ahead, behind } = await upstreamStatus(projectPath);
   const unpushed = ahead ? await unpushedCommits(projectPath, upstream) : [];
+  const incoming = behind ? await incomingCommits(projectPath, upstream) : [];
 
   let hasRemote = false;
   try { hasRemote = (await git(['remote'], projectPath)).length > 0; } catch (_) {}
 
   let files = [];
   try {
-    const raw = await git(['status', '--porcelain'], projectPath);
+    const raw = await git(['status', '--porcelain', '--untracked-files=all'], projectPath);
     files = parseStatus(raw);
   } catch (_) {}
 
-  res.json({ available: true, branch, detached, upstream, ahead, behind, unpushed, hasRemote, files });
+  res.json({ available: true, branch, detached, upstream, ahead, behind, unpushed, incoming, hasRemote, files });
 }));
 
 router.post('/:slug/git/commit', wrapRoute(async (req, res) => {

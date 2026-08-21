@@ -804,13 +804,12 @@ test('tree folders are not labels either, keeping the rule consistent', async ()
 
 // ── flat and tree views ──────────────────────────────────────────────────────
 
-test('flat is the default view and shows whole paths', async () => {
+test('tree is the default view and nests folders', async () => {
   harness.gitInfo.files = [{ path: 'public/js/git.js', label: 'modified' }];
   await GitPanel.mount(HOST, 'proj');
 
-  assert.strictEqual(GitPanel.viewMode(), 'flat');
-  assert.match(el('git-changes').innerHTML, />public\/js\/git\.js</);
-  assert.ok(!el('git-changes').innerHTML.includes('git-tree-folder'), 'no folders in flat view');
+  assert.strictEqual(GitPanel.viewMode(), 'tree');
+  assert.ok(el('git-changes').innerHTML.includes('git-tree-folder'), 'folders shown in tree view');
 });
 
 test('the view toggle appears with files and marks the active mode', async () => {
@@ -819,7 +818,7 @@ test('the view toggle appears with files and marks the active mode', async () =>
 
   const html = el('git-changes').innerHTML;
   assert.match(html, /git-view-toggle/);
-  assert.match(html, /sf-mode-btn active[\s\S]*?setViewMode\('flat'\)/);
+  assert.match(html, /sf-mode-btn active[\s\S]*?setViewMode\('tree'\)/);
 });
 
 test('no view toggle when there is nothing to commit', async () => {
@@ -883,10 +882,10 @@ test('switching the view remembers the choice and keeps a half-typed message', a
   assert.strictEqual(GitPanel.viewMode(), 'flat');
 });
 
-test('an unknown stored view mode falls back to flat', async () => {
+test('an unknown stored view mode falls back to tree', async () => {
   harness.store[GitPanel.VIEW_MODE_KEY] = 'nonsense';
   await GitPanel.mount(HOST, 'proj');
-  assert.strictEqual(GitPanel.viewMode(), 'flat');
+  assert.strictEqual(GitPanel.viewMode(), 'tree');
 });
 
 // ── unticking a folder ───────────────────────────────────────────────────────
