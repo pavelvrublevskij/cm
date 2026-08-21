@@ -123,7 +123,6 @@ router.get('/:slug/git/commit/:sha', wrapRoute(async (req, res) => {
  * Anything that rewrites history stays in the shell, where the user can see and answer git.
  */
 const REMOTE_OPS = {
-  push: ['push'],
   pull: ['pull', '--ff-only'],
   fetch: ['fetch', '--prune'],
 };
@@ -139,5 +138,23 @@ for (const [op, args] of Object.entries(REMOTE_OPS)) {
     res.json({ ok: true, output });
   }));
 }
+
+/** A branch with no upstream yet needs `-u origin <branch>` to set one on its first push. */
+router.post('/:slug/git/push', wrapRoute(async (req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const projectPath = decodeSlug(req.params.slug);
+  if (!projectPath) return res.status(400).json({ error: 'Cannot resolve project path' });
+  if (!(await gitOk(projectPath))) return res.status(400).json({ error: GIT_UNAVAILABLE });
+
+  const { upstream } = await upstreamStatus(projectPath);
+  let args = ['push'];
+  if (!upstream) {
+    const { branch } = await headInfo(projectPath);
+    args = ['push', '-u', 'origin', branch];
+  }
+
+  const output = await git(args, projectPath);
+  res.json({ ok: true, output });
+}));
 
 module.exports = router;

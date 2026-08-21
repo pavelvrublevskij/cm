@@ -419,12 +419,16 @@ const GitPanel = {
   },
 
   _actionsHtml() {
-    const files = (GitPanel._info || {}).files || [];
-    const unpushed = ((GitPanel._info || {}).unpushed || []).length;
+    const info = GitPanel._info || {};
+    const files = info.files || [];
+    const unpushed = (info.unpushed || []).length;
+    // A brand new local branch has no upstream to diff against, so `unpushed` is always empty —
+    // that must not block the first push, which is what sets the upstream in the first place.
+    const canPush = info.hasRemote && (!info.upstream || unpushed > 0);
 
     return GitPanel._actionButton('commit', 'Commit', 'GitPanel.commit(false)', files.length, ' btn-primary')
       + GitPanel._actionButton('commit-push', 'Commit &amp; Push', 'GitPanel.commit(true)', files.length)
-      + GitPanel._actionButton('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', unpushed);
+      + GitPanel._actionButton('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', canPush);
   },
 
   /**

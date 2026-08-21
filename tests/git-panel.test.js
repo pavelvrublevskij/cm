@@ -598,6 +598,34 @@ test('a branch with no upstream is told the first push needs -u', async () => {
   assert.match(el('git-changes').innerHTML, /first push needs/);
 });
 
+test('the Push button stays enabled for a first push, with no upstream to diff against', async () => {
+  harness.gitInfo.upstream = null;
+  harness.gitInfo.unpushed = [];
+  await GitPanel.mount(HOST, 'proj');
+
+  const html = el('git-changes').innerHTML;
+  const pushBtn = html.slice(html.indexOf('GitPanel.push()'));
+  assert.ok(!/disabled/.test(pushBtn.slice(0, 60)), 'Push must stay usable to set the upstream');
+});
+
+test('Push is disabled with an upstream and nothing new to send', async () => {
+  await GitPanel.mount(HOST, 'proj');
+
+  const html = el('git-changes').innerHTML;
+  const pushBtn = html.slice(html.indexOf('GitPanel.push()'));
+  assert.match(pushBtn.slice(0, 60), /disabled/, 'nothing to push, so the button is off');
+});
+
+test('Push is disabled with no remote at all', async () => {
+  harness.gitInfo.hasRemote = false;
+  harness.gitInfo.upstream = null;
+  await GitPanel.mount(HOST, 'proj');
+
+  const html = el('git-changes').innerHTML;
+  const pushBtn = html.slice(html.indexOf('GitPanel.push()'));
+  assert.match(pushBtn.slice(0, 60), /disabled/, 'nowhere to push to');
+});
+
 test('being behind the upstream warns to pull before pushing', async () => {
   harness.gitInfo.behind = 3;
   await GitPanel.mount(HOST, 'proj');

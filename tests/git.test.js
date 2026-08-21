@@ -389,6 +389,23 @@ test('pull refuses to merge diverged history instead of creating a merge commit'
   assert.strictEqual(after, before, 'HEAD is untouched — no merge was made');
 });
 
+test('push sets the upstream on a branch that has never been pushed', async () => {
+  const original = currentBranch(WORK);
+  const branch = 'feature/never-pushed';
+  run(['checkout', '-q', '-b', branch], WORK);
+  commit(WORK, 'never-pushed.txt', 'new branch\n', 'first commit on the new branch');
+  await assert.rejects(() => git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], WORK),
+    'the new branch must start with no upstream');
+
+  const res = await request(app).post(`/api/projects/${slugForPath(WORK)}/git/push`);
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.ok, true);
+  assert.strictEqual(await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], WORK), `origin/${branch}`);
+
+  run(['checkout', '-q', original], WORK);
+});
+
 test('pull and fetch reject a traversal slug', async () => {
   for (const op of ['pull', 'fetch']) {
     const res = await request(app).post(`/api/projects/bad..slug/git/${op}`);
