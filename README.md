@@ -10,7 +10,9 @@ Runs entirely on your machine. No cloud, no accounts, no external dependencies b
 
 ## Quick Start
 
-**macOS / Linux / Git Bash on Windows:**
+> **macOS:** just double-click `run.command` in Finder — no terminal needed.
+
+**Linux / Git Bash on Windows:**
 ```bash
 ./run.sh 1
 ```
