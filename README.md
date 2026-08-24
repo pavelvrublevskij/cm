@@ -10,7 +10,7 @@ Runs entirely on your machine. No cloud, no accounts, no external dependencies b
 
 ## Quick Start
 
-> **macOS:** just double-click `run.command` in Finder — no terminal needed.
+> **macOS:** just double-click `CM.app` in Finder — no terminal needed.
 
 **Linux / Git Bash on Windows:**
 ```bash
