@@ -143,9 +143,12 @@ const GitPanel = {
         <div class="git-pane git-pane-shell" id="git-pane-shell">
           <div class="git-shell-idle" id="git-shell-idle">${idleBody}</div>
           <div class="git-shell-host" id="git-shell-host"></div>
-          <div class="term-fix-banner" id="git-shell-fix-banner" style="display:none">
-            <span class="term-fix-text" id="git-shell-fix-text"></span>
-            <button type="button" class="btn btn-sm" id="git-shell-fix-btn" onclick="GitPanel.runFix()">Fix &amp; Restart App</button>
+          <div class="term-error-overlay" id="git-shell-error-overlay" style="display:none">
+            <div class="term-error-box">
+              <div class="term-error-icon">⚠</div>
+              <div class="term-error-text" id="git-shell-error-text"></div>
+              <button type="button" class="btn btn-primary" id="git-shell-fix-btn" onclick="GitPanel.runFix()">Fix &amp; Restart App</button>
+            </div>
           </div>
         </div>
         <div class="git-pane git-pane-diff" id="git-pane-diff">
@@ -724,16 +727,16 @@ const GitPanel = {
 
   openShell() {
     if (GitPanel._view) return;
-    GitPanel._hideFixBanner();
+    GitPanel._hideFixOverlay();
     const view = TermView.create({
       hostId: 'git-shell-host',
       url: GitPanel._shellUrl(),
       onStatus: (text, cls) => GitPanel._setStatus(text, cls),
       onOpen: () => {
-        GitPanel._hideFixBanner();
+        GitPanel._hideFixOverlay();
         if (typeof GitActions !== 'undefined') GitActions.refreshShellState();
       },
-      onSpawnError: (message, control) => GitPanel._showFixBanner(message, control && control.hint),
+      onSpawnError: (message, control) => GitPanel._showFixOverlay(message, control && control.hint),
     });
     if (!view) {
       toast('Terminal libraries failed to load', 'error');
@@ -744,27 +747,27 @@ const GitPanel = {
     GitPanel._applyRecipesState();
   },
 
-  _showFixBanner(message, hint) {
-    const banner = document.getElementById('git-shell-fix-banner');
-    const text = document.getElementById('git-shell-fix-text');
+  _showFixOverlay(message, hint) {
+    const overlay = document.getElementById('git-shell-error-overlay');
+    const text = document.getElementById('git-shell-error-text');
     const btn = document.getElementById('git-shell-fix-btn');
     let full = message ? `Shell failed to start: ${message}` : 'Shell failed to start.';
     if (hint) full += ' ' + hint;
     if (text) text.textContent = full;
     if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
-    if (banner) banner.style.display = 'flex';
+    if (overlay) overlay.style.display = 'flex';
   },
 
-  _hideFixBanner() {
-    const banner = document.getElementById('git-shell-fix-banner');
-    if (banner) banner.style.display = 'none';
+  _hideFixOverlay() {
+    const overlay = document.getElementById('git-shell-error-overlay');
+    if (overlay) overlay.style.display = 'none';
   },
 
   runFix() {
     const btn = document.getElementById('git-shell-fix-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
     TerminalRepair.trigger((status, failed) => {
-      const text = document.getElementById('git-shell-fix-text');
+      const text = document.getElementById('git-shell-error-text');
       if (text) text.textContent = status;
       if (failed && btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
     });
@@ -787,7 +790,7 @@ const GitPanel = {
     GitPanel._showShell(false);
     GitPanel._applyRecipesState();
     GitPanel._setStatus('disconnected', '');
-    GitPanel._hideFixBanner();
+    GitPanel._hideFixOverlay();
     if (typeof GitActions !== 'undefined') GitActions.refreshShellState();
   },
 

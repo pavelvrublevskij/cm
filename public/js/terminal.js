@@ -98,7 +98,7 @@ const TerminalPanel = {
     const body = document.getElementById('session-detail-body');
     if (!pane || !body) return;
 
-    this._hideFixBanner();
+    this._hideFixOverlay();
     const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || this.DEFAULT_WIDTH_PCT;
     body.style.setProperty('--terminal-width', savedWidth + '%');
     pane.classList.add('connected');
@@ -108,38 +108,38 @@ const TerminalPanel = {
       url: this._wsUrl(slug, sessionId),
       onStatus: (text, cls) => this._setStatus(text, cls),
       onOpen: () => {
-        this._hideFixBanner();
+        this._hideFixOverlay();
         if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
         if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.poll();
       },
-      onSpawnError: (message, control) => this._showFixBanner(message, control && control.hint),
+      onSpawnError: (message, control) => this._showFixOverlay(message, control && control.hint),
     });
     if (!view) return;
 
     this.state = { open: true, slug, sessionId: sessionId || null, view };
   },
 
-  _showFixBanner(message, hint) {
-    const banner = document.getElementById('terminal-fix-banner');
-    const text = document.getElementById('terminal-fix-text');
+  _showFixOverlay(message, hint) {
+    const overlay = document.getElementById('terminal-error-overlay');
+    const text = document.getElementById('terminal-error-text');
     const btn = document.getElementById('terminal-fix-btn');
     let full = message ? `Terminal failed to start: ${message}` : 'Terminal failed to start.';
     if (hint) full += ' ' + hint;
     if (text) text.textContent = full;
     if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
-    if (banner) banner.style.display = 'flex';
+    if (overlay) overlay.style.display = 'flex';
   },
 
-  _hideFixBanner() {
-    const banner = document.getElementById('terminal-fix-banner');
-    if (banner) banner.style.display = 'none';
+  _hideFixOverlay() {
+    const overlay = document.getElementById('terminal-error-overlay');
+    if (overlay) overlay.style.display = 'none';
   },
 
   runFix() {
     const btn = document.getElementById('terminal-fix-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
     TerminalRepair.trigger((status, failed) => {
-      const text = document.getElementById('terminal-fix-text');
+      const text = document.getElementById('terminal-error-text');
       if (text) text.textContent = status;
       if (failed && btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
     });
@@ -174,7 +174,7 @@ const TerminalPanel = {
     const pane = document.getElementById('terminal-pane');
     if (pane) pane.classList.remove('connected');
     this._setStatus('disconnected', '');
-    this._hideFixBanner();
+    this._hideFixOverlay();
 
     this.state = { open: false, slug: null, sessionId: null, view: null };
   },
