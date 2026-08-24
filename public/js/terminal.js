@@ -108,21 +108,24 @@ const TerminalPanel = {
       url: this._wsUrl(slug, sessionId),
       onStatus: (text, cls) => this._setStatus(text, cls),
       onOpen: () => {
+        this._hideFixBanner();
         if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
         if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.poll();
       },
-      onSpawnError: (message) => this._showFixBanner(message),
+      onSpawnError: (message, control) => this._showFixBanner(message, control && control.hint),
     });
     if (!view) return;
 
     this.state = { open: true, slug, sessionId: sessionId || null, view };
   },
 
-  _showFixBanner(message) {
+  _showFixBanner(message, hint) {
     const banner = document.getElementById('terminal-fix-banner');
     const text = document.getElementById('terminal-fix-text');
     const btn = document.getElementById('terminal-fix-btn');
-    if (text) text.textContent = message ? `Terminal failed to start: ${message}` : 'Terminal failed to start.';
+    let full = message ? `Terminal failed to start: ${message}` : 'Terminal failed to start.';
+    if (hint) full += ' ' + hint;
+    if (text) text.textContent = full;
     if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
     if (banner) banner.style.display = 'flex';
   },
@@ -135,9 +138,10 @@ const TerminalPanel = {
   runFix() {
     const btn = document.getElementById('terminal-fix-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
-    TerminalRepair.trigger(status => {
+    TerminalRepair.trigger((status, failed) => {
       const text = document.getElementById('terminal-fix-text');
       if (text) text.textContent = status;
+      if (failed && btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
     });
   },
 

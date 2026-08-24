@@ -216,6 +216,13 @@ test('validateTerminal: shell mode resolves a project path without a session fil
   assert.strictEqual(claude.mode, 'claude');
 });
 
+test('_diagnoseSpawnFailure returns no diagnosis on win32 (no spawn-helper on that platform)', () => {
+  const { _diagnoseSpawnFailure } = require('../lib/terminal-server');
+  if (process.platform === 'win32') {
+    assert.strictEqual(_diagnoseSpawnFailure(), null);
+  }
+});
+
 test('shellCommand targets the platform shell', () => {
   const { shellCommand } = require('../lib/terminal-server');
   const { cmd, args } = shellCommand();

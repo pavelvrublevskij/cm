@@ -165,12 +165,13 @@ const TerminalRepair = {
   POLL_MS: 1000,
   POLL_MAX_ATTEMPTS: 90,
 
+  /** onUpdate(text, failed) — failed=true means the button should re-enable so the user can retry. */
   async trigger(onUpdate) {
-    if (onUpdate) onUpdate('Repairing and restarting the app…');
+    if (onUpdate) onUpdate('Repairing and restarting the app…', false);
     try {
       await api('/api/terminal/repair', { method: 'POST' });
     } catch (e) {
-      if (onUpdate) onUpdate('Repair failed: ' + e.message);
+      if (onUpdate) onUpdate('Repair failed: ' + e.message, true);
       return;
     }
     TerminalRepair._waitForServer(onUpdate, 0);
@@ -182,7 +183,7 @@ const TerminalRepair = {
       location.reload();
     }).catch(() => {
       if (attempt >= TerminalRepair.POLL_MAX_ATTEMPTS) {
-        if (onUpdate) onUpdate('Still restarting — reload the page in a moment.');
+        if (onUpdate) onUpdate('Still restarting — reload the page in a moment.', true);
         return;
       }
       setTimeout(() => TerminalRepair._waitForServer(onUpdate, attempt + 1), TerminalRepair.POLL_MS);

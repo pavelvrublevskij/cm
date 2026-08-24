@@ -95,6 +95,7 @@ const TermView = {
           if (control && typeof control === 'object' && control.t === 'spawn-error') {
             const label = control.cmd ? `Failed to start ${control.cmd}: ${control.message}` : `Failed to start: ${control.message}`;
             term.write(`\r\n\x1b[31m${label}\x1b[0m\r\n`);
+            if (control.hint) term.write(`\x1b[33m${control.hint}\x1b[0m\r\n`);
             if (opts.onSpawnError) opts.onSpawnError(control.message, control);
             return;
           }

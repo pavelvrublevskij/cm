@@ -225,6 +225,17 @@ test('a spawn-error control frame is shown in the terminal and reported via onSp
   assert.strictEqual(spawnErrors[0].control.cmd, 'claude');
 });
 
+test('a spawn-error hint is written to the terminal and passed through to onSpawnError', () => {
+  const spawnErrors = [];
+  create({ onSpawnError: (message, control) => spawnErrors.push({ message, control }) });
+  harness.ws.onmessage({ data: JSON.stringify({
+    t: 'spawn-error', cmd: 'claude', message: 'posix_spawnp failed.', hint: 'Run: chmod +x /path/spawn-helper'
+  }) });
+
+  assert.match(harness.term.written.join(''), /Run: chmod \+x \/path\/spawn-helper/);
+  assert.strictEqual(spawnErrors[0].control.hint, 'Run: chmod +x /path/spawn-helper');
+});
+
 test('a spawn-error frame without onSpawnError still writes to the terminal without throwing', () => {
   create();
   assert.doesNotThrow(() => {

@@ -729,8 +729,11 @@ const GitPanel = {
       hostId: 'git-shell-host',
       url: GitPanel._shellUrl(),
       onStatus: (text, cls) => GitPanel._setStatus(text, cls),
-      onOpen: () => { if (typeof GitActions !== 'undefined') GitActions.refreshShellState(); },
-      onSpawnError: (message) => GitPanel._showFixBanner(message),
+      onOpen: () => {
+        GitPanel._hideFixBanner();
+        if (typeof GitActions !== 'undefined') GitActions.refreshShellState();
+      },
+      onSpawnError: (message, control) => GitPanel._showFixBanner(message, control && control.hint),
     });
     if (!view) {
       toast('Terminal libraries failed to load', 'error');
@@ -741,11 +744,13 @@ const GitPanel = {
     GitPanel._applyRecipesState();
   },
 
-  _showFixBanner(message) {
+  _showFixBanner(message, hint) {
     const banner = document.getElementById('git-shell-fix-banner');
     const text = document.getElementById('git-shell-fix-text');
     const btn = document.getElementById('git-shell-fix-btn');
-    if (text) text.textContent = message ? `Shell failed to start: ${message}` : 'Shell failed to start.';
+    let full = message ? `Shell failed to start: ${message}` : 'Shell failed to start.';
+    if (hint) full += ' ' + hint;
+    if (text) text.textContent = full;
     if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
     if (banner) banner.style.display = 'flex';
   },
@@ -758,9 +763,10 @@ const GitPanel = {
   runFix() {
     const btn = document.getElementById('git-shell-fix-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
-    TerminalRepair.trigger(status => {
+    TerminalRepair.trigger((status, failed) => {
       const text = document.getElementById('git-shell-fix-text');
       if (text) text.textContent = status;
+      if (failed && btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
     });
   },
 
