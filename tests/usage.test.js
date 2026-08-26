@@ -51,6 +51,68 @@ before(() => {
     makeEntry('req-bbb', 'text'),      // different API call — count separately
   ];
   fs.writeFileSync(path.join(dedupDir, 'sess-dedup.jsonl'), dedupLines.join('\n') + '\n');
+
+  // Seed a session where the main turn runs on one model but a background Agent-tool
+  // subagent resolves to a different model. The subagent never appears as an 'assistant'
+  // entry in the parent transcript — only via toolUseResult.resolvedModel (keyed by agentId)
+  // and a later task-notification carrying a lump-sum <subagent_tokens> count.
+  const subagentSlug = 'usage-proj-subagent';
+  const subagentDir = path.join(paths.PROJECTS_DIR, subagentSlug);
+  fs.mkdirSync(subagentDir, { recursive: true });
+  const subagentLines = [
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-03-01T12:00:00Z',
+      message: {
+        model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+      }
+    }),
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-03-01T12:00:05Z',
+      toolUseResult: { isAsync: true, agentId: 'agent-xyz', resolvedModel: 'claude-haiku-4-5' }
+    }),
+    JSON.stringify({
+      type: 'attachment',
+      timestamp: '2026-03-01T12:00:10Z',
+      attachment: {
+        commandMode: 'task-notification',
+        prompt: '<task-notification>\n<task-id>agent-xyz</task-id>\n<status>completed</status>\n<usage><subagent_tokens>500</subagent_tokens></usage>\n</task-notification>'
+      }
+    })
+  ];
+  fs.writeFileSync(path.join(subagentDir, 'sess-subagent.jsonl'), subagentLines.join('\n') + '\n');
+
+  // Newer Claude Code versions deliver the same task-notification as a plain 'user' message
+  // whose content is a raw string, instead of an 'attachment' entry with a commandMode.
+  const subagentSlug2 = 'usage-proj-subagent-plain';
+  const subagentDir2 = path.join(paths.PROJECTS_DIR, subagentSlug2);
+  fs.mkdirSync(subagentDir2, { recursive: true });
+  const subagentLines2 = [
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-03-01T12:00:00Z',
+      message: {
+        model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+      }
+    }),
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-03-01T12:00:05Z',
+      toolUseResult: { isAsync: true, agentId: 'agent-plain', resolvedModel: 'claude-opus-4-6' }
+    }),
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-03-01T12:00:10Z',
+      message: {
+        role: 'user',
+        content: '<task-notification>\n<task-id>agent-plain</task-id>\n<status>completed</status>\n<usage><subagent_tokens>300</subagent_tokens></usage>\n</task-notification>'
+      }
+    })
+  ];
+  fs.writeFileSync(path.join(subagentDir2, 'sess-subagent-plain.jsonl'), subagentLines2.join('\n') + '\n');
 });
 
 test('GET /api/usage/summary returns aggregated shape', async () => {
@@ -157,6 +219,24 @@ test('usage indexer deduplicates entries sharing the same requestId', async () =
   // With dedup: 2 unique requestIds × 100 = 200 input, 2 × 50 = 100 output.
   assert.strictEqual(res.body.totals.input_tokens, 200);
   assert.strictEqual(res.body.totals.output_tokens, 100);
+});
+
+test('usage indexer attributes subagent task-notification tokens to the resolved model', async () => {
+  const res = await request(app).get('/api/usage/project/usage-proj-subagent');
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.byModel['claude-sonnet-4-6'], 'parent model present');
+  assert.ok(res.body.byModel['claude-haiku-4-5'], 'subagent resolved model present');
+  assert.strictEqual(res.body.byModel['claude-haiku-4-5'].output_tokens, 500);
+  assert.strictEqual(res.body.totals.output_tokens, 20 + 500);
+});
+
+test('usage indexer attributes subagent tokens when the notification is a plain user message', async () => {
+  const res = await request(app).get('/api/usage/project/usage-proj-subagent-plain');
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.byModel['claude-sonnet-4-6'], 'parent model present');
+  assert.ok(res.body.byModel['claude-opus-4-6'], 'subagent resolved model present');
+  assert.strictEqual(res.body.byModel['claude-opus-4-6'].output_tokens, 300);
+  assert.strictEqual(res.body.totals.output_tokens, 20 + 300);
 });
 
 test('GET /api/usage/summary with fromTime/toTime filters by hour', async () => {
