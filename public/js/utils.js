@@ -191,6 +191,47 @@ const TerminalRepair = {
   }
 };
 
+/**
+ * DOM wiring shared by every terminal/shell panel: connection status text and the spawn-error
+ * "Fix & Restart App" overlay. One instance per panel — ids names that panel's own elements;
+ * describeError formats its panel-specific "X failed to start" message.
+ */
+function createTerminalPanelUI(ids, describeError) {
+  return {
+    setStatus(text, cls) {
+      const el = document.getElementById(ids.status);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.remove('connected', 'error');
+      if (cls) el.classList.add(cls);
+    },
+
+    showError(message, hint) {
+      const overlay = document.getElementById(ids.overlay);
+      const text = document.getElementById(ids.errorText);
+      const btn = document.getElementById(ids.fixBtn);
+      if (text) text.textContent = describeError(message, hint);
+      if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+      if (overlay) overlay.style.display = 'flex';
+    },
+
+    hideError() {
+      const overlay = document.getElementById(ids.overlay);
+      if (overlay) overlay.style.display = 'none';
+    },
+
+    runFix() {
+      const btn = document.getElementById(ids.fixBtn);
+      if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
+      TerminalRepair.trigger((status, failed) => {
+        const text = document.getElementById(ids.errorText);
+        if (text) text.textContent = status;
+        if (failed && btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+      });
+    }
+  };
+}
+
 // --- Theme ---
 
 const Theme = {

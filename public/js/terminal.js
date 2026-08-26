@@ -3,6 +3,15 @@
 // session-specific parts — the split-pane drag, the leave prompt and the auto-open preference.
 // Named TerminalPanel (not Terminal) because xterm.js owns window.Terminal.
 
+const _terminalUI = createTerminalPanelUI(
+  { status: 'terminal-status', overlay: 'terminal-error-overlay', errorText: 'terminal-error-text', fixBtn: 'terminal-fix-btn' },
+  (message, hint) => {
+    let full = message ? `Terminal failed to start: ${message}` : 'Terminal failed to start.';
+    if (hint) full += ' ' + hint;
+    return full;
+  }
+);
+
 const TerminalPanel = {
   WIDTH_KEY: 'claude-manager-terminal-width',
   AUTOOPEN_KEY: 'claude-manager-terminal-autoopen',
@@ -98,7 +107,7 @@ const TerminalPanel = {
     const body = document.getElementById('session-detail-body');
     if (!pane || !body) return;
 
-    this._hideFixOverlay();
+    _terminalUI.hideError();
     const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || this.DEFAULT_WIDTH_PCT;
     body.style.setProperty('--terminal-width', savedWidth + '%');
     pane.classList.add('connected');
@@ -106,44 +115,20 @@ const TerminalPanel = {
     const view = TermView.create({
       hostId: 'terminal-host',
       url: this._wsUrl(slug, sessionId),
-      onStatus: (text, cls) => this._setStatus(text, cls),
+      onStatus: (text, cls) => _terminalUI.setStatus(text, cls),
       onOpen: () => {
-        this._hideFixOverlay();
+        _terminalUI.hideError();
         if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
         if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.poll();
       },
-      onSpawnError: (message, control) => this._showFixOverlay(message, control && control.hint),
+      onSpawnError: (message, control) => _terminalUI.showError(message, control && control.hint),
     });
     if (!view) return;
 
     this.state = { open: true, slug, sessionId: sessionId || null, view };
   },
 
-  _showFixOverlay(message, hint) {
-    const overlay = document.getElementById('terminal-error-overlay');
-    const text = document.getElementById('terminal-error-text');
-    const btn = document.getElementById('terminal-fix-btn');
-    let full = message ? `Terminal failed to start: ${message}` : 'Terminal failed to start.';
-    if (hint) full += ' ' + hint;
-    if (text) text.textContent = full;
-    if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
-    if (overlay) overlay.style.display = 'flex';
-  },
-
-  _hideFixOverlay() {
-    const overlay = document.getElementById('terminal-error-overlay');
-    if (overlay) overlay.style.display = 'none';
-  },
-
-  runFix() {
-    const btn = document.getElementById('terminal-fix-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
-    TerminalRepair.trigger((status, failed) => {
-      const text = document.getElementById('terminal-error-text');
-      if (text) text.textContent = status;
-      if (failed && btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
-    });
-  },
+  runFix() { _terminalUI.runFix(); },
 
   _wsUrl(slug, sessionId) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -156,14 +141,6 @@ const TerminalPanel = {
     this.state.view.reconnect('[restarting]');
   },
 
-  _setStatus(text, cls) {
-    const el = document.getElementById('terminal-status');
-    if (!el) return;
-    el.textContent = text;
-    el.classList.remove('connected', 'error');
-    if (cls) el.classList.add(cls);
-  },
-
   _sendResize() {
     if (this.state.view) this.state.view.resize();
   },
@@ -173,8 +150,8 @@ const TerminalPanel = {
 
     const pane = document.getElementById('terminal-pane');
     if (pane) pane.classList.remove('connected');
-    this._setStatus('disconnected', '');
-    this._hideFixOverlay();
+    _terminalUI.setStatus('disconnected', '');
+    _terminalUI.hideError();
 
     this.state = { open: false, slug: null, sessionId: null, view: null };
   },

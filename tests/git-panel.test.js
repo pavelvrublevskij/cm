@@ -150,6 +150,38 @@ const context = vm.createContext({
     },
   },
   toast: (msg, type) => { harness.toasts.push({ msg, type }); },
+  TerminalRepair: {
+    trigger: onUpdate => {
+      harness.repairTriggers = (harness.repairTriggers || 0) + 1;
+      if (onUpdate) onUpdate('Repairing and restarting the app…', false);
+    },
+  },
+  createTerminalPanelUI: (ids, describeError) => ({
+    setStatus(text, cls) {
+      const target = el(ids.status);
+      target.textContent = text;
+      target.classList.remove('connected');
+      target.classList.remove('error');
+      if (cls) target.classList.add(cls);
+    },
+    showError(message, hint) {
+      el(ids.errorText).textContent = describeError(message, hint);
+      const btn = el(ids.fixBtn);
+      btn.disabled = false;
+      btn.textContent = 'Fix & Restart App';
+      el(ids.overlay).style.display = 'flex';
+    },
+    hideError() { el(ids.overlay).style.display = 'none'; },
+    runFix() {
+      const btn = el(ids.fixBtn);
+      btn.disabled = true;
+      btn.textContent = 'Restarting…';
+      context.TerminalRepair.trigger((status, failed) => {
+        el(ids.errorText).textContent = status;
+        if (failed) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+      });
+    },
+  }),
   api: async url => {
     if (harness.apiHandler) return harness.apiHandler(url);
     if (url.includes('terminal/info')) return { available: true, running: harness.shellRunning === true, mode: 'shell' };
