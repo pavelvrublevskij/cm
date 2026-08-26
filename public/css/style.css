@@ -5037,13 +5037,8 @@ mark.search-highlight {
   font-size: 14px;
   line-height: 1;
   padding: 0 0 0 4px;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
-}
-
-.asb-pill:hover .asb-close,
-.asb-pill--current .asb-close {
   opacity: 1;
+  transition: color 0.15s;
 }
 
 .asb-close:hover {
@@ -5054,11 +5049,6 @@ mark.search-highlight {
   margin-left: auto;
   padding: 0;
   font-size: 13px;
-  opacity: 0;
-}
-
-.project-active-sub:hover .asb-close--sidebar,
-.project-active-sub.active .asb-close--sidebar {
   opacity: 1;
 }
 
