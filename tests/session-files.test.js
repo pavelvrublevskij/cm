@@ -54,41 +54,20 @@ function el(id) {
   return harness.els[id];
 }
 
-const context = vm.createContext({
-  localStorage: {
-    getItem: k => (k in harness.store ? harness.store[k] : null),
-    setItem: (k, v) => { harness.store[k] = String(v); },
-  },
-  document: {
-    getElementById: id => el(id),
-    querySelectorAll: sel => (sel === '.sf-layout' ? [el('session-context')] : []),
-    body: { style: {} },
-  },
-  window: { addEventListener() {}, removeEventListener() {} },
-  setTimeout: (fn, ms) => {
-    const id = harness.nextTimerId++;
-    harness.timers.set(id, { fn, ms });
-    return id;
-  },
-  clearTimeout: id => { harness.timers.delete(id); },
-  api: async (url, opts) => {
-    harness.apiCalls.push({ url, opts });
-    return harness.apiHandler ? harness.apiHandler(url, opts) : {};
-  },
-  escapeHtml: s => String(s).split('<').join('&lt;'),
-  formatBytes: n => `${n} B`,
-  codeModeFor: p => (p.endsWith('.java') ? 'text/x-java' : p.endsWith('.js') ? 'javascript' : null),
-  renderMarkdown: s => 'MD:' + s,
-  addCodeCopyButtons: container => { harness.copyTargets.push(container); },
-  showLoading: (container, text) => { container.innerHTML = text; },
-  toast: (msg, type) => { harness.toasts.push({ msg, type }); },
-  CodeMirror: (host, opts) => {
+/** A fake CodeMirror constructor with just enough surface for session-files.js + code-view.js:
+ *  editing (type/getValue), search marks, view state, and — for the chunked-loading tests —
+ *  appendText plus a scroll handler the tests can fire via harness.cm.handlers.scroll(). */
+function makeCodeMirrorMock() {
+  function CodeMirror(host, opts) {
     harness.cmOpts = opts;
     const inst = {
       value: opts.value,
+      lines: opts.value.split('\n'),
       handlers: {},
       cursor: { line: 0, ch: 0 },
       scrollTop: 0,
+      scrollHeight: 1000,
+      clientHeight: 300,
       marks: [],
       selection: null,
       scrolledTo: null,
@@ -96,10 +75,16 @@ const context = vm.createContext({
       on: (evt, fn) => { inst.handlers[evt] = fn; },
       refresh() {},
       getCursor: () => inst.cursor,
-      getScrollInfo: () => ({ top: inst.scrollTop }),
+      getScrollInfo: () => ({ top: inst.scrollTop, height: inst.scrollHeight, clientHeight: inst.clientHeight }),
       setCursor: c => { inst.cursor = c; },
       scrollTo: (x, top) => { inst.scrollTop = top; },
-      type(text) { inst.value = text; if (inst.handlers.change) inst.handlers.change(); },
+      type(text) { inst.value = text; inst.lines = text.split('\n'); if (inst.handlers.change) inst.handlers.change(); },
+      lastLine: () => inst.lines.length - 1,
+      getLine: n => inst.lines[n],
+      replaceRange(text) {
+        inst.value += text;
+        inst.lines = inst.value.split('\n');
+      },
       // Fake search cursor over the plain string value — good enough to exercise highlightMatches.
       getSearchCursor(query) {
         const lower = inst.value.toLowerCase();
@@ -129,7 +114,40 @@ const context = vm.createContext({
     };
     harness.cm = inst;
     return inst;
+  }
+  CodeMirror.Pos = (line, ch) => ({ line, ch });
+  return CodeMirror;
+}
+
+const context = vm.createContext({
+  localStorage: {
+    getItem: k => (k in harness.store ? harness.store[k] : null),
+    setItem: (k, v) => { harness.store[k] = String(v); },
   },
+  document: {
+    getElementById: id => el(id),
+    querySelectorAll: sel => (sel === '.sf-layout' ? [el('session-context')] : []),
+    body: { style: {} },
+  },
+  window: { addEventListener() {}, removeEventListener() {} },
+  setTimeout: (fn, ms) => {
+    const id = harness.nextTimerId++;
+    harness.timers.set(id, { fn, ms });
+    return id;
+  },
+  clearTimeout: id => { harness.timers.delete(id); },
+  api: async (url, opts) => {
+    harness.apiCalls.push({ url, opts });
+    return harness.apiHandler ? harness.apiHandler(url, opts) : {};
+  },
+  escapeHtml: s => String(s).split('<').join('&lt;'),
+  formatBytes: n => `${n} B`,
+  codeModeFor: p => (p.endsWith('.java') ? 'text/x-java' : p.endsWith('.js') ? 'javascript' : null),
+  renderMarkdown: s => 'MD:' + s,
+  addCodeCopyButtons: container => { harness.copyTargets.push(container); },
+  showLoading: (container, text) => { container.innerHTML = text; },
+  toast: (msg, type) => { harness.toasts.push({ msg, type }); },
+  CodeMirror: makeCodeMirrorMock(),
   Sessions: { _ctx: { projSlug: 'proj' }, toggleActionMenu() {}, openCtxFile() {}, revealCtxFile() {} },
   FileHistory: {
     fetchDiffCurrent: async () => ({ hunks: [{ oldStart: 1, newStart: 1, lines: [] }], stats: { added: 1, removed: 0 } }),
@@ -288,6 +306,24 @@ test('reloadTree refetches the root and every expanded folder', async () => {
 });
 
 // ── search ────────────────────────────────────────────────────────────────────
+
+/** Serves a file's content one chunk at a time by matching the requested ?offset against each
+ *  chunk's real position in the concatenated text — mirrors readFileChunk's contract. */
+function chunkedHandler(chunks) {
+  const size = chunks.join('').length;
+  const offsets = [];
+  let acc = 0;
+  for (const c of chunks) { offsets.push(acc); acc += c.length; }
+  return url => {
+    const m = url.match(/offset=(\d+)/);
+    const offset = m ? parseInt(m[1], 10) : 0;
+    const idx = offsets.indexOf(offset);
+    if (idx === -1) return { content: '', size, mtime: 1, offset: size, nextOffset: size, done: true };
+    const content = chunks[idx];
+    const nextOffset = offset + content.length;
+    return { content, size, mtime: 1, offset, nextOffset, done: nextOffset >= size };
+  };
+}
 
 function searchAndTreeHandler(treeMap, searchMap) {
   return url => {
@@ -738,6 +774,146 @@ test('leaving source drops the stale editor reference', async () => {
 
   SessionFiles.setMode('source');
   assert.ok(SessionFiles.editor, 'coming back re-mounts it');
+});
+
+// ── chunked loading of large files ─────────────────────────────────────────────
+
+test('a file that arrives in chunks loads more as the editor scrolls toward the bottom', async () => {
+  harness.apiHandler = chunkedHandler(['AAAA', 'BBBB', 'CCCC']);
+  await SessionFiles.openFile('big.txt');
+
+  assert.strictEqual(SessionFiles.open.doneLoading, false);
+  assert.strictEqual(harness.cm.getValue(), 'AAAA');
+  assert.strictEqual(el('sf-status-chunk').style.display, '');
+  assert.ok(el('sf-status-chunk').textContent.includes('scroll for more'));
+
+  harness.cm.scrollTop = 350; // within NEAR_BOTTOM_PX of the mock's 1000/300 scroll/client height
+  harness.cm.handlers.scroll();
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(harness.cm.getValue(), 'AAAABBBB');
+  assert.strictEqual(SessionFiles.open.doneLoading, false);
+
+  harness.cm.handlers.scroll();
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(harness.cm.getValue(), 'AAAABBBBCCCC');
+  assert.strictEqual(SessionFiles.open.doneLoading, true);
+  assert.strictEqual(el('sf-status-chunk').style.display, 'none');
+});
+
+test('scrolling again while a chunk is already in flight does not double-fetch', async () => {
+  harness.apiHandler = chunkedHandler(['AAAA', 'BBBB', 'CCCC']);
+  await SessionFiles.openFile('big.txt');
+  harness.apiCalls = [];
+
+  const first = SessionFiles._loadMoreChunk();
+  const second = SessionFiles._loadMoreChunk();
+  await Promise.all([first, second]);
+
+  assert.strictEqual(harness.apiCalls.length, 1);
+  assert.strictEqual(harness.cm.getValue(), 'AAAABBBB');
+});
+
+test('a small file is reported fully loaded immediately, with no chunk status shown', async () => {
+  harness.apiHandler = () => ({ content: 'const a = 1;', mtime: 1, size: 13, done: true, nextOffset: 13 });
+  await SessionFiles.openFile('server.js');
+
+  assert.strictEqual(SessionFiles.open.doneLoading, true);
+  assert.strictEqual(el('sf-status-chunk').style.display, 'none');
+});
+
+test('saving a partially-loaded file finishes loading it first, so the write is not truncated', async () => {
+  harness.apiHandler = chunkedHandler(['AAAA', 'BBBB', 'CCCC']);
+  await SessionFiles.openFile('big.txt');
+  harness.cm.type('AAAA-edited');
+  assert.strictEqual(SessionFiles.isDirty(), true);
+
+  const chunker = chunkedHandler(['AAAA', 'BBBB', 'CCCC']);
+  let putBody = null;
+  harness.apiHandler = (url, opts) => {
+    if (opts && opts.method === 'PUT') { putBody = opts.body; return { ok: true, mtime: 3, size: 99 }; }
+    return chunker(url);
+  };
+
+  await SessionFiles.save();
+
+  assert.strictEqual(SessionFiles.open.doneLoading, true);
+  assert.ok(putBody, 'the write happened only after loading finished');
+  assert.strictEqual(putBody.content, 'AAAA-editedBBBBCCCC');
+  assert.strictEqual(SessionFiles.isDirty(), false);
+});
+
+test('a failed forced load cancels the save instead of writing a truncated file', async () => {
+  harness.apiHandler = chunkedHandler(['AAAA', 'BBBB', 'CCCC']);
+  await SessionFiles.openFile('big.txt');
+  harness.cm.type('AAAA-edited');
+
+  let putCalled = false;
+  harness.apiHandler = (url, opts) => {
+    if (opts && opts.method === 'PUT') { putCalled = true; return { ok: true }; }
+    throw new Error('network down');
+  };
+
+  await SessionFiles.save();
+
+  assert.strictEqual(putCalled, false, 'never writes a partial file');
+  assert.strictEqual(SessionFiles.open.doneLoading, false);
+  assert.strictEqual(SessionFiles.isDirty(), true, 'the edit is preserved for a retry');
+  assert.ok(harness.toasts.some(t => t.type === 'error'));
+});
+
+test('a partially-loaded markdown file finishes loading before it is previewed', async () => {
+  harness.apiHandler = chunkedHandler(['# Title\n', 'more content here']);
+  await SessionFiles.openFile('big.md');
+
+  assert.strictEqual(SessionFiles.open.mode, 'preview');
+  assert.strictEqual(SessionFiles.open.doneLoading, false);
+  assert.ok(el('sf-pane-body').innerHTML.includes('Loading full file for preview'));
+
+  await SessionFiles.open._previewLoadPromise;
+
+  assert.strictEqual(SessionFiles.open.doneLoading, true);
+  assert.ok(el('sf-pane-body').innerHTML.includes('MD:# Title\nmore content here'));
+});
+
+test('searching within a partially-loaded file forces it to finish loading, then highlights every match', async () => {
+  harness.apiHandler = searchAndTreeHandler(
+    { '': [fileEntry('big.txt')] },
+    { needle: [{ path: 'big.txt', type: 'file', matchedBy: 'content' }] }
+  );
+  await SessionFiles.loadTree();
+  await SessionFiles._runSearch('needle');
+
+  harness.apiHandler = chunkedHandler(['first needle\n', 'second needle\n', 'no more']);
+  await SessionFiles.openFile('big.txt');
+
+  assert.strictEqual(SessionFiles.open.doneLoading, false);
+  assert.strictEqual(el('sf-pane-search-count').textContent, 'Loading full file to search…');
+
+  await SessionFiles.open._searchLoadPromise;
+
+  assert.strictEqual(SessionFiles.open.doneLoading, true);
+  assert.strictEqual(harness.cm.getValue(), 'first needle\nsecond needle\nno more');
+  assert.strictEqual(harness.cm.marks.length, 2);
+  assert.strictEqual(el('sf-pane-search-count').textContent, '2 matches');
+});
+
+// ── tree search spinner ─────────────────────────────────────────────────────────
+
+test('the search spinner shows while a project search is in flight and hides once it resolves', async () => {
+  harness.apiHandler = treeHandler({ '': [fileEntry('readme.md')] });
+  await SessionFiles.loadTree();
+
+  let resolveSearch;
+  harness.apiHandler = () => new Promise(r => { resolveSearch = r; });
+  const search = SessionFiles._runSearch('read');
+  await new Promise(r => setImmediate(r));
+
+  assert.strictEqual(el('sf-search-spinner').style.display, '');
+
+  resolveSearch({ matches: [], truncated: false });
+  await search;
+
+  assert.strictEqual(el('sf-search-spinner').style.display, 'none');
 });
 
 // ── file view cache ───────────────────────────────────────────────────────────

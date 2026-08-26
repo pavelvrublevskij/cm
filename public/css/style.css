@@ -3475,6 +3475,7 @@ mark.search-highlight {
 }
 
 .sf-search-bar {
+  position: relative;
   padding: 6px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
@@ -3483,6 +3484,19 @@ mark.search-highlight {
 .sf-search-input {
   padding: 6px 10px !important;
   font-size: 12px !important;
+}
+
+.sf-search-spinner {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
 
 .sf-search-truncated {
@@ -3655,6 +3669,7 @@ mark.search-highlight {
 }
 .sf-status-dirty { color: var(--warning); font-weight: 600; }
 .sf-status-sep { opacity: 0.5; }
+.sf-status-chunk { margin-left: auto; white-space: nowrap; }
 
 .sf-pane-empty {
   margin: auto;

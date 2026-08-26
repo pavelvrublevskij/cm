@@ -168,7 +168,7 @@ const FileHistory = {
 
   /** Render just the diff — syntax-coloured per line, using the file's CodeMirror mode. */
   renderDiff(container, result, filePath) {
-    if (result.tooLarge) { container.innerHTML = '<div class="empty-state"><p>File too large to diff (&gt;5000 lines)</p></div>'; return; }
+    if (result.tooLarge) { container.innerHTML = '<div class="empty-state"><p>The differing region of this file is too large to diff (&gt;8000 lines)</p></div>'; return; }
     if (!result.hunks.length) { container.innerHTML = '<div class="empty-state"><p>No differences found</p></div>'; return; }
 
     const mode = codeModeFor(filePath);
