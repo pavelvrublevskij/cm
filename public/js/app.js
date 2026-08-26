@@ -124,21 +124,12 @@ const App = {
     const previousProject = App.currentProject;
     const previousSessionId = (typeof Sessions !== 'undefined' && Sessions.detailState) ? Sessions.detailState.sessionId : null;
 
-    // Gate navigation away from session-detail when a browser terminal pty is attached.
-    // confirmLeave handles all decision paths (no pty, no-sessionId-yet, prompt the user); it only
-    // proceeds when the user confirms — Cancel short-circuits and leaves the view unchanged.
     // Switching directly from one session's detail to another's (e.g. resuming a different
     // session while one is already open) counts as leaving too — otherwise the terminal pane
     // stays attached to the old session while the UI shows the new one.
     const switchingSession = previousView === 'session-detail' && view === 'session-detail'
       && (opts.slug !== previousProject || opts.sessionId !== previousSessionId);
     const leavingSession = (previousView === 'session-detail' && view !== 'session-detail') || switchingSession;
-    if (leavingSession && !opts._terminalConfirmed && typeof TerminalPanel !== 'undefined' && TerminalPanel.isOpen() && TerminalPanel.hasAttachedPty()) {
-      TerminalPanel.confirmLeave(() => {
-        App.navigate(view, Object.assign({}, opts, { _terminalConfirmed: true }), fromHash);
-      });
-      return;
-    }
 
     // Stop auto-refresh + close in-page terminal when leaving session-detail
     if (leavingSession) {
