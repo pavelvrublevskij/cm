@@ -4839,12 +4839,37 @@ mark.search-highlight {
   flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 5px 32px 5px 12px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
   overflow-x: auto;
   min-height: 46px;
   position: relative;
+}
+
+.active-sessions-bar.asb-position-top {
+  order: -1;
+  border-top: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.asb-position-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  background: var(--bg-secondary);
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  z-index: 2;
+}
+
+.asb-position-toggle:hover {
+  color: var(--text-primary);
 }
 
 

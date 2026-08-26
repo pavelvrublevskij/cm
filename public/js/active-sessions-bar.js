@@ -1,17 +1,39 @@
 const ActiveSessionsBar = {
   POLL_MS: 15000,
+  POSITION_KEY: 'claude-manager-asb-position',
   _timer: null,
   _sessions: [],
   _lastSidebarKey: null,
   _projectBranches: {},
 
   start() {
+    ActiveSessionsBar._applyPosition(localStorage.getItem(ActiveSessionsBar.POSITION_KEY) || 'bottom');
+    const toggle = document.getElementById('asb-position-toggle');
+    if (toggle) toggle.addEventListener('click', e => { e.stopPropagation(); ActiveSessionsBar._togglePosition(); });
     ActiveSessionsBar.poll();
     ActiveSessionsBar._timer = setInterval(ActiveSessionsBar.poll, ActiveSessionsBar.POLL_MS);
     document.addEventListener('click', () => {
       const p = document.getElementById('asb-new-panel');
       if (p) p.remove();
     });
+  },
+
+  _applyPosition(position) {
+    const bar = document.getElementById('active-sessions-bar');
+    const toggle = document.getElementById('asb-position-toggle');
+    if (!bar) return;
+    bar.classList.toggle('asb-position-top', position === 'top');
+    if (toggle) {
+      toggle.innerHTML = position === 'top' ? '&#8595;' : '&#8593;';
+      toggle.title = position === 'top' ? 'Move to bottom' : 'Move to top';
+    }
+  },
+
+  _togglePosition() {
+    const current = localStorage.getItem(ActiveSessionsBar.POSITION_KEY) || 'bottom';
+    const next = current === 'top' ? 'bottom' : 'top';
+    localStorage.setItem(ActiveSessionsBar.POSITION_KEY, next);
+    ActiveSessionsBar._applyPosition(next);
   },
 
   _showNewPanel(btn, slug) {

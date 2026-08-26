@@ -26,24 +26,42 @@ const harness = {
 function makeEl() {
   return {
     innerHTML: '',
+    title: '',
     style: { display: '', cssText: '' },
     dataset: {},
+    classList: {
+      _set: new Set(),
+      toggle(cls, force) {
+        const has = this._set.has(cls);
+        const add = force === undefined ? !has : force;
+        if (add) this._set.add(cls); else this._set.delete(cls);
+        return add;
+      },
+      contains(cls) { return this._set.has(cls); },
+    },
     querySelectorAll: () => [],
     addEventListener() {},
     remove() {},
   };
 }
 
+const elementsById = {};
+const localStorageStore = {};
+
 const context = vm.createContext({
   document: {
     addEventListener: () => {},
-    getElementById: () => makeEl(),
+    getElementById: id => (elementsById[id] || (elementsById[id] = makeEl())),
     querySelector: () => null,
     querySelectorAll: sel => (sel.includes('.session-active-dot') ? harness.dots : []),
     createElement: () => makeEl(),
     body: { appendChild() {} },
   },
   window: { innerWidth: 1200, innerHeight: 800 },
+  localStorage: {
+    getItem: k => (k in localStorageStore ? localStorageStore[k] : null),
+    setItem: (k, v) => { localStorageStore[k] = v; },
+  },
   setInterval: () => 1,
   clearInterval: () => {},
   api: async url => { harness.apiCalls.push(url); return {}; },
@@ -66,6 +84,8 @@ beforeEach(() => {
   harness.terminalClosed = false;
   harness.autoRefreshStopped = false;
   harness.dashboardRendered = null;
+  Object.keys(elementsById).forEach(id => delete elementsById[id]);
+  Object.keys(localStorageStore).forEach(k => delete localStorageStore[k]);
 
   ActiveSessionsBar._sessions = [
     { slug: SLUG, sessionId: SESSION_A, kind: 'os', title: 'A' },
@@ -136,6 +156,40 @@ test('closing the session being viewed stops polling, closes the terminal and go
   assert.strictEqual(harness.navigations.length, 1);
   assert.strictEqual(harness.navigations[0].view, 'project-detail');
   assert.strictEqual(harness.navigations[0].opts.slug, SLUG);
+});
+
+test('defaults to the bottom position when nothing is stored', () => {
+  ActiveSessionsBar._applyPosition(context.localStorage.getItem(ActiveSessionsBar.POSITION_KEY) || 'bottom');
+  const bar = elementsById['active-sessions-bar'];
+  const toggle = elementsById['asb-position-toggle'];
+  assert.strictEqual(bar.classList.contains('asb-position-top'), false);
+  assert.strictEqual(toggle.title, 'Move to top');
+});
+
+test('toggling the position moves the bar to the top and persists the choice', () => {
+  ActiveSessionsBar._applyPosition('bottom');
+  ActiveSessionsBar._togglePosition();
+  const bar = elementsById['active-sessions-bar'];
+  const toggle = elementsById['asb-position-toggle'];
+  assert.strictEqual(bar.classList.contains('asb-position-top'), true);
+  assert.strictEqual(toggle.title, 'Move to bottom');
+  assert.strictEqual(context.localStorage.getItem(ActiveSessionsBar.POSITION_KEY), 'top');
+});
+
+test('toggling twice returns the bar to the bottom', () => {
+  ActiveSessionsBar._applyPosition('bottom');
+  ActiveSessionsBar._togglePosition();
+  ActiveSessionsBar._togglePosition();
+  const bar = elementsById['active-sessions-bar'];
+  assert.strictEqual(bar.classList.contains('asb-position-top'), false);
+  assert.strictEqual(context.localStorage.getItem(ActiveSessionsBar.POSITION_KEY), 'bottom');
+});
+
+test('start restores a previously stored top position', () => {
+  localStorageStore[ActiveSessionsBar.POSITION_KEY] = 'top';
+  ActiveSessionsBar.start();
+  const bar = elementsById['active-sessions-bar'];
+  assert.strictEqual(bar.classList.contains('asb-position-top'), true);
 });
 
 test('closing another session while viewing one leaves the current view alone', async () => {
