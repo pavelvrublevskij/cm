@@ -50,9 +50,18 @@ const GitWindow = {
     setFooterStatus(`Live · refresh ${Math.round(ms / 1000)}s`, true);
   },
 
+  // Only the footer pill (branch/ahead-behind/dirty count) auto-refreshes. Rerunning
+  // GitPanel.refreshIfMounted() on a timer replaces the whole "to commit" card and reloads
+  // history from scratch every tick — mid-typed commit messages lost focus, ticked/unticked files
+  // reset to all-checked, and the History pane's scroll position and open commit kept resetting
+  // out from under whoever was reading it. A stale panel that the ↻ button (or a commit/push)
+  // refreshes on demand beats a "live" one nobody can interact with.
+  _refreshing: false,
   async _refresh() {
-    await GitActions.refresh();
-    await GitPanel.refreshIfMounted();
+    if (GitWindow._refreshing) return;   // guards against a slow request outliving its own interval tick
+    GitWindow._refreshing = true;
+    try { await GitActions.refresh(); }
+    finally { GitWindow._refreshing = false; }
   }
 };
 
