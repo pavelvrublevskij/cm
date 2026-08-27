@@ -60,13 +60,33 @@ verify_pty() {
     node "$SCRIPT_DIR/scripts/verify-pty.js" >/dev/null 2>&1
 }
 
+# The two causes reinstalling can't fix by itself: a lost execute bit and a Gatekeeper quarantine
+# flag on spawn-helper. Both have a one-line manual fix a non-technical user would otherwise have
+# to be walked through by hand -- do it automatically instead, before falling back to reinstalling.
+fix_pty_permissions() {
+    local helper
+    for helper in \
+        "node_modules/node-pty/build/Release/spawn-helper" \
+        node_modules/node-pty/prebuilds/*/spawn-helper
+    do
+        if [ -f "$helper" ]; then
+            chmod +x "$helper" 2>/dev/null || true
+            if command -v xattr >/dev/null 2>&1; then
+                xattr -d com.apple.quarantine "$helper" 2>/dev/null || true
+            fi
+        fi
+    done
+}
+
 ensure_pty_works() {
+    fix_pty_permissions
     if verify_pty; then
         return 0
     fi
     printf "  ${RED}In-app terminal support is broken, reinstalling...${NC}\n"
     rm -rf node_modules/node-pty
     npm install >/dev/null 2>&1 || true
+    fix_pty_permissions
     if verify_pty; then
         printf "  ${GREEN}✓${NC} Terminal support fixed.\n"
         return 0
@@ -74,11 +94,55 @@ ensure_pty_works() {
     printf "  Rebuilding all dependencies (this may take a minute)...\n"
     rm -rf node_modules package-lock.json
     npm install || true
+    fix_pty_permissions
     if verify_pty; then
         printf "  ${GREEN}✓${NC} Terminal support fixed.\n"
     else
         printf "  ${RED}⚠${NC} Could not fix the in-app terminal automatically. The rest of the app will still work.\n"
     fi
+}
+
+# Resolve the pid(s) currently listening on $PORT, trying each detection tool available.
+# LISTEN-only: a plain "tcp:$PORT" match with lsof also catches any browser tab or WebSocket still
+# connected to the app, whose pid isn't ours to kill.
+find_unix_server_pid() {
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -ti tcp:$PORT -sTCP:LISTEN 2>/dev/null || true
+    elif command -v ss >/dev/null 2>&1; then
+        ss -tlnp "sport = :$PORT" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1 || true
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser $PORT/tcp 2>/dev/null || true
+    fi
+}
+
+# A single `kill` can be swallowed -- a busy process, a race with the process's own shutdown, or a
+# macOS quirk where the port briefly reports free before the old process actually exits. Escalate
+# through increasingly forceful/different approaches, re-checking the port after each one, and
+# report every retry so "Stop" doesn't look like it silently did nothing.
+kill_unix_server_pid() {
+    local pid="$1"
+
+    kill $pid 2>/dev/null || true
+    sleep 1
+    pid=$(find_unix_server_pid)
+    if [ -z "$pid" ]; then return 0; fi
+
+    printf "  ${RED}Kill unsuccessful, still running (PID $pid) -- retrying with SIGKILL...${NC}\n"
+    kill -9 $pid 2>/dev/null || true
+    sleep 1
+    pid=$(find_unix_server_pid)
+    if [ -z "$pid" ]; then return 0; fi
+
+    printf "  ${RED}Kill unsuccessful, still running (PID $pid) -- retrying by matching the process name...${NC}\n"
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -9 -f "node .*server\.js" 2>/dev/null || true
+    fi
+    sleep 1
+    pid=$(find_unix_server_pid)
+    if [ -z "$pid" ]; then return 0; fi
+
+    printf "  ${RED}⚠ Could not stop the server (PID $pid). Try manually: kill -9 $pid${NC}\n"
+    return 1
 }
 
 wait_for_url() {
@@ -123,17 +187,12 @@ do_local_start() {
             taskkill.exe //PID "$PID" //F >/dev/null 2>&1 || true
             sleep 2
         fi
-    elif command -v lsof >/dev/null 2>&1; then
-        PID=$(lsof -ti tcp:$PORT 2>/dev/null || true)
-    elif command -v ss >/dev/null 2>&1; then
-        PID=$(ss -tlnp "sport = :$PORT" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1 || true)
-    elif command -v fuser >/dev/null 2>&1; then
-        PID=$(fuser $PORT/tcp 2>/dev/null || true)
-    fi
-    if [ -n "$PID" ] && ! $IS_WINDOWS; then
-        printf "  Port $PORT in use (PID $PID), stopping previous instance...\n"
-        kill "$PID" 2>/dev/null || true
-        sleep 1
+    else
+        PID=$(find_unix_server_pid)
+        if [ -n "$PID" ]; then
+            printf "  Port $PORT in use (PID $PID), stopping previous instance...\n"
+            kill_unix_server_pid "$PID" || true
+        fi
     fi
 
     cd "$SCRIPT_DIR"
@@ -172,17 +231,11 @@ do_stop() {
         else
             printf "  Server is not running.\n"
         fi
-    elif command -v lsof >/dev/null 2>&1; then
-        PID=$(lsof -ti tcp:$PORT 2>/dev/null || true)
-    elif command -v ss >/dev/null 2>&1; then
-        PID=$(ss -tlnp "sport = :$PORT" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1 || true)
-    elif command -v fuser >/dev/null 2>&1; then
-        PID=$(fuser $PORT/tcp 2>/dev/null || true)
-    fi
-    if ! $IS_WINDOWS; then
+    else
+        PID=$(find_unix_server_pid)
         if [ -n "$PID" ]; then
             printf "  Stopping server (PID $PID)...\n"
-            kill "$PID" 2>/dev/null || true
+            kill_unix_server_pid "$PID" || true
         else
             printf "  Server is not running.\n"
         fi

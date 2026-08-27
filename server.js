@@ -134,6 +134,8 @@ app.post('/api/update/zip', async (req, res) => {
 });
 
 // Repair a broken node-pty install (e.g. arch mismatch, corrupted native build) and restart.
+const terminalServer = require('./lib/terminal-server');
+
 function verifyPty() {
   try {
     execFileSync(process.execPath, [path.join(__dirname, 'scripts', 'verify-pty.js')], {
@@ -146,6 +148,20 @@ function verifyPty() {
   }
 }
 
+/**
+ * The two causes reinstalling can't fix by itself: a lost execute bit and a Gatekeeper quarantine
+ * flag on spawn-helper (see lib/terminal-server.js's diagnoseSpawnFailure for why). Both have a
+ * one-line manual fix a non-technical user would otherwise have to be walked through by hand —
+ * do it here instead, before falling back to reinstalling anything.
+ */
+function fixPtyPermissions() {
+  if (process.platform === 'win32') return;
+  const helperPath = terminalServer._spawnHelperPath();
+  if (!helperPath) return;
+  try { fs.chmodSync(helperPath, 0o755); } catch (_) {}
+  try { execFileSync('xattr', ['-d', 'com.apple.quarantine', helperPath], { stdio: 'ignore' }); } catch (_) {}
+}
+
 function npmInstall() {
   return new Promise(resolve => {
     exec('npm install', { cwd: __dirname }, err => resolve(!err));
@@ -154,13 +170,16 @@ function npmInstall() {
 
 app.post('/api/terminal/repair', async (req, res) => {
   try {
+    fixPtyPermissions();
     if (!verifyPty()) {
       fs.rmSync(path.join(__dirname, 'node_modules', 'node-pty'), { recursive: true, force: true });
       await npmInstall();
+      fixPtyPermissions();
       if (!verifyPty()) {
         fs.rmSync(path.join(__dirname, 'node_modules'), { recursive: true, force: true });
         fs.rmSync(path.join(__dirname, 'package-lock.json'), { force: true });
         await npmInstall();
+        fixPtyPermissions();
       }
     }
   } catch (_) {
