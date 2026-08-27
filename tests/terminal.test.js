@@ -224,7 +224,9 @@ test('_diagnoseSpawnFailure returns no diagnosis on win32 (no spawn-helper on th
 });
 
 test('_spawnHelperPath finds spawn-helper in the layout this node-pty actually ships', (t) => {
-  if (process.platform === 'win32') return t.skip('no spawn-helper on win32');
+  // spawn-helper is a macOS-only build target in node-pty's binding.gyp — Linux's pty.cc calls
+  // forkpty() directly and never produces this binary, even on a fully correct install.
+  if (process.platform !== 'darwin') return t.skip('spawn-helper only exists on macOS');
   const { _spawnHelperPath, ptyAvailable } = require('../lib/terminal-server');
   if (!ptyAvailable()) return t.skip('node-pty not installed');
 
