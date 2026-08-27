@@ -185,7 +185,16 @@ do_local_start() {
         if [ -n "$PID" ]; then
             printf "  Port $PORT in use (PID $PID), stopping previous instance...\n"
             taskkill.exe //PID "$PID" //F >/dev/null 2>&1 || true
-            sleep 2
+            local attempts=0
+            while netstat.exe -aon 2>/dev/null | grep "127.0.0.1:$PORT " | grep -q LISTENING; do
+                attempts=$((attempts + 1))
+                if [ "$attempts" -ge 5 ]; then
+                    printf "  ${RED}⚠ Could not stop the process on port $PORT (PID $PID). Close it manually and re-run.${NC}\n\n"
+                    return 1
+                fi
+                sleep 1
+            done
+            printf "  ${GREEN}✓${NC} Previous instance stopped.\n"
         fi
     else
         PID=$(find_unix_server_pid)

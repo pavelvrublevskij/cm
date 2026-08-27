@@ -66,7 +66,13 @@ for /f "tokens=*" %%v in ('node -v') do echo   Node.js %%v found
 for /f "tokens=5" %%p in ('netstat -aon ^| findstr "127.0.0.1:%PORT% " ^| findstr "LISTENING"') do (
     echo   Port %PORT% in use ^(PID %%p^), stopping previous instance...
     taskkill /PID %%p /F >nul 2>&1
-    timeout /t 1 /nobreak >nul
+    call :wait_port_free
+    if !errorlevel! equ 0 (
+        echo   Previous instance stopped.
+    ) else (
+        echo   Could not stop the process on port %PORT% ^(PID %%p^). Close it manually and re-run.
+        goto :eof
+    )
 )
 
 :: Install dependencies
@@ -200,6 +206,16 @@ if %errorlevel% equ 0 (
     echo   Could not fix the in-app terminal automatically. The rest of the app will still work.
 )
 exit /b 0
+
+:wait_port_free
+set /a ATTEMPTS=0
+:wait_port_free_loop
+netstat -aon | findstr "127.0.0.1:%PORT% " | findstr "LISTENING" >nul 2>&1
+if errorlevel 1 exit /b 0
+set /a ATTEMPTS+=1
+if %ATTEMPTS% geq 5 exit /b 1
+timeout /t 1 /nobreak >nul
+goto :wait_port_free_loop
 
 :wait_for_server
 set /a ATTEMPTS=0
