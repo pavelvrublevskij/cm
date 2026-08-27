@@ -8,7 +8,8 @@
     "dev": "node --watch server.js",
     "pretest": "node tests/helpers/clean-tmp.js",
     "test": "node --test --test-concurrency=1",
-    "posttest": "node tests/helpers/clean-tmp.js"
+    "posttest": "node tests/helpers/clean-tmp.js",
+    "bench": "node bench/index.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",
