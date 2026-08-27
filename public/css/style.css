@@ -2667,13 +2667,17 @@ mark.search-highlight {
 }
 
 .modal--diff {
-  position: relative;
   width: 90vw;
   max-width: 98vw;
   height: 85vh;
   max-height: 98vh;
   min-width: 400px;
   min-height: 300px;
+}
+
+/* Anchors the resize handle to the modal box instead of the viewport, and clips it while dragging. */
+.modal--resizable {
+  position: relative;
   overflow: hidden;
 }
 
@@ -4173,10 +4177,60 @@ mark.search-highlight {
 .git-panel-modal {
   width: min(1180px, 94vw);
   max-width: 94vw;
+  height: min(680px, 88vh);
+  max-height: 88vh;
+  min-width: 900px;
+  min-height: 460px;
 }
 
+.git-panel-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.git-panel-modal #git-panel-modal-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The layout fills whatever height the (resizable) modal ends up with, not a fixed vh slice. */
 .git-panel-modal .git-panel-layout {
-  height: min(68vh, 640px);
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* --- Git standalone window (git-window.html) --- */
+/* body is already a full-height flex column (see base body rule), so header + host just split it. */
+
+.git-window-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.git-window-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#git-window-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+}
+
+#git-window-host .git-panel-layout {
+  height: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .git-shell-dot {
@@ -4206,6 +4260,21 @@ mark.search-highlight {
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
   padding: 8px 10px;
+}
+
+/* To commit takes whatever height is left; to pull/to push always stay visible at the bottom. */
+.git-changes-commit-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.git-changes-bottom {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 .git-changes-header {
@@ -4244,10 +4313,10 @@ mark.search-highlight {
   margin-left: auto;
 }
 
-/* Fixed height: the list scrolls inside it, so eight changed files and none look the same. */
+/* Fills whatever height "to commit" has left over — grows with the window instead of a fixed size. */
 .git-changes-files {
-  flex: 0 0 auto;
-  height: 240px;
+  flex: 1 1 auto;
+  min-height: 100px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -4272,8 +4341,32 @@ mark.search-highlight {
   flex: 0 0 auto;
 }
 
+/* The file currently loaded into the diff pane, so "to commit" shows what's actually on screen. */
+.git-file-row-active {
+  background: var(--accent-bg);
+  border-radius: var(--radius-sm);
+}
+
+.git-file-row-active .git-file-link {
+  color: var(--accent);
+}
+
 .git-file-path {
   word-break: break-all;
+}
+
+/* Pushed to the row's right edge so it reads as a trailing stat, not part of the filename. */
+.git-file-stat {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding-left: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.git-file-stat-binary {
+  color: var(--text-muted);
 }
 
 .git-tree-name {
@@ -4539,6 +4632,17 @@ mark.search-highlight {
   min-height: 0;
   overflow: auto;
   padding: 4px 8px;
+}
+
+/* The diff fills the pane and scrolls inside it, rather than capping at the base .diff-view height. */
+.git-diff-body {
+  display: flex;
+  flex-direction: column;
+}
+.git-diff-body .diff-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 /* --- History --- */

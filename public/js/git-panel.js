@@ -213,6 +213,7 @@ const GitPanel = {
     GitPanel._diffPath = filePath;
     GitPanel._diffSha = sha || null;
     GitPanel.showPane('diff');
+    GitPanel._highlightOpenFile();
 
     const body = document.getElementById('git-diff-body');
     if (body) showLoading(body, `Diffing ${filePath}…`);
@@ -234,6 +235,19 @@ const GitPanel = {
       return;
     }
     FileHistory.renderDiff(body, result, filePath);
+  },
+
+  /**
+   * Mark which file's diff is showing, without a full re-render of "to commit" — that would reset
+   * every checkbox back to checked. Only a working-tree diff (no sha) can match a "to commit" row;
+   * a commit picked from history never should, even if it happens to touch a same-named file.
+   */
+  _highlightOpenFile() {
+    const active = GitPanel._diffSha ? null : GitPanel._diffPath;
+    document.querySelectorAll('#git-changes .git-file-link').forEach(link => {
+      const row = link.closest('.git-file-row');
+      if (row) row.classList.toggle('git-file-row-active', active != null && link.getAttribute('data-path') === active);
+    });
   },
 
   /** The column, plus the rail that brings it back once folded. */
@@ -274,7 +288,9 @@ const GitPanel = {
   _renderChanges() {
     const host = document.getElementById('git-changes');
     if (!host) return;
-    host.innerHTML = GitPanel._toCommitHtml() + GitPanel._toPullHtml() + GitPanel._toPushHtml();
+    // To commit gets whatever height is left; to pull/to push stay pinned at the bottom.
+    host.innerHTML = `<div class="git-changes-commit-section">${GitPanel._toCommitHtml()}</div>`
+      + `<div class="git-changes-bottom">${GitPanel._toPullHtml()}${GitPanel._toPushHtml()}</div>`;
     GitPanel.syncGroups();
   },
 
@@ -334,15 +350,28 @@ const GitPanel = {
   _fileRowHtml(file, depth) {
     const badge = GitPanel.BADGE_CLASS[file.label] || 'ctx-file-badge-edited';
     const name = GitPanel.viewMode() === 'tree' ? file.path.split('/').pop() : file.path;
+    const isOpen = !GitPanel._diffSha && GitPanel._diffPath === file.path;
     return `
-      <div class="git-file-row" style="--git-depth:${depth}">
+      <div class="git-file-row${isOpen ? ' git-file-row-active' : ''}" style="--git-depth:${depth}">
         <input type="checkbox" class="git-file-cb" value="${escapeAttr(file.path)}" checked
           onchange="GitPanel.syncGroups()" title="Include in the commit">
         <span class="ctx-file-badge git-file-badge ${escapeHtml(badge)}">${escapeHtml(file.label)}</span>
         <button class="git-file-path git-file-link" data-path="${escapeAttr(file.path)}"
           onclick="GitPanel.openDiff(this.getAttribute('data-path'))"
           title="Show what committing ${escapeAttr(file.path)} would record">${escapeHtml(name)}</button>
+        ${GitPanel._fileStatHtml(file)}
       </div>`;
+  },
+
+  /** Line-count stat shown next to a file so its size of change is visible before opening the diff. */
+  _fileStatHtml(file) {
+    const stat = file.stat;
+    if (!stat) return '';
+    if (stat.binary) return '<span class="git-file-stat git-file-stat-binary">binary</span>';
+    const parts = [];
+    if (stat.added) parts.push(`<span class="diff-added">+${stat.added}</span>`);
+    if (stat.removed) parts.push(`<span class="diff-removed">-${stat.removed}</span>`);
+    return parts.length ? `<span class="git-file-stat">${parts.join(' ')}</span>` : '';
   },
 
   /** Group paths into nested folders so a whole folder can be unticked at once. */

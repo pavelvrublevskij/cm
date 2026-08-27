@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CM Git</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <!-- CodeMirror first: its default theme is the base layer our themes override in style.css -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/themes/dark.css" id="theme-stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+  <script>
+    (function() {
+      var t = localStorage.getItem('claude-manager-theme') || 'dark';
+      document.getElementById('theme-stylesheet').href = '/css/themes/' + t + '.css';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body>
+  <div class="git-window-header">
+    <span class="git-window-title" id="git-window-title">Git</span>
+  </div>
+  <div id="git-window-host"></div>
+
+  <footer class="app-footer">
+    <div class="app-footer-left">
+      <img src="/favicon.svg" alt="CM" style="width: 24px; height: 20px;">
+      <span>CM <span id="footer-version"></span></span>
+      <a href="https://github.com/pavelvrublevskij/cm/issues/new" target="_blank" rel="noopener" class="app-footer-issue-link" title="Raise an issue on GitHub">&#9888; Raise Issue</a>
+    </div>
+    <div class="app-footer-right">
+      <div id="footer-git" style="display:none;align-items:center;gap:8px"></div>
+      <span class="app-footer-status" id="footer-status">Idle</span>
+      <span id="footer-host"></span>
+      <span>Theme:</span>
+      <button class="theme-toggle" id="theme-toggle" onclick="Theme.toggle()" title="Dark mode">
+        <span id="theme-icon">&#9790;</span>
+        <span id="theme-label">Dark</span>
+      </button>
+    </div>
+  </footer>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/css/css.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/xml/xml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/yaml/yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/shell/shell.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/python/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/clike/clike.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/groovy/groovy.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/sql/sql.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/go/go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/rust/rust.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/swift/swift.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/php/php.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/ruby/ruby.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/lua/lua.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/powershell/powershell.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/dockerfile/dockerfile.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/properties/properties.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/toml/toml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/diff/diff.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/runmode/runmode.min.js"></script>
+  <script src="/js/utils.js"></script>
+  <script src="/js/file-history.js"></script>
+  <script src="/js/git-api.js"></script>
+  <script src="/js/git.js"></script>
+  <script src="/js/git-recipes.js"></script>
+  <script src="/js/git-panel.js"></script>
+  <script src="/js/term-view.js"></script>
+  <script src="/js/git-window.js"></script>
+</body>
+</html>

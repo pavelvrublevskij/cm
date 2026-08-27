@@ -1,10 +1,11 @@
 const { Router } = require('express');
 const { safeSlug, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
-const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus } = require('../lib/git');
+const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus, diffNumstat } = require('../lib/git');
 const { computeDiff } = require('../lib/diff');
 const { resolveProjectPath } = require('../lib/project-files');
 const fs = require('fs');
+const path = require('path');
 
 const router = Router();
 
@@ -12,9 +13,43 @@ const router = Router();
 // spawn error like "spawn git ENOENT" to the user.
 const GIT_UNAVAILABLE = 'Git is not available for this project';
 
+// Above this, an untracked file's line count isn't worth reading synchronously on every panel
+// refresh — same "too large to preview inline" cutoff used elsewhere for file content.
+const UNTRACKED_STAT_MAX_BYTES = 1024 * 1024;
+
 /** Text read out of git or the working tree that is not text at all. */
 function looksBinary(text) {
   return text.indexOf('\u0000') !== -1;
+}
+
+/**
+ * Attach an { added, removed } or { binary: true } stat to every file the status list reports, so
+ * the "to commit" list can show it without a click. Tracked files come from one `git diff --numstat`
+ * call; untracked files have no HEAD side for git to diff against, so their "added" count is just
+ * their own line count, read directly (skipped past UNTRACKED_STAT_MAX_BYTES or when unreadable).
+ */
+async function attachFileStats(files, projectPath) {
+  if (!files.length) return files;
+  const numstat = await diffNumstat(projectPath);
+  for (const file of files) {
+    file.stat = file.label === 'untracked'
+      ? untrackedFileStat(path.join(projectPath, file.path))
+      : (numstat[file.path] || null);
+  }
+  return files;
+}
+
+function untrackedFileStat(fullPath) {
+  try {
+    const st = fs.statSync(fullPath);
+    if (!st.isFile() || st.size > UNTRACKED_STAT_MAX_BYTES) return null;
+    const text = fs.readFileSync(fullPath, 'utf-8');
+    if (looksBinary(text)) return { binary: true };
+    if (!text) return { added: 0, removed: 0 };
+    return { added: text.split('\n').length - (text.endsWith('\n') ? 1 : 0), removed: 0 };
+  } catch (_) {
+    return null;
+  }
 }
 
 /** Why git cannot be used here: no binary on this machine, or a directory that is not a repository. */
@@ -41,7 +76,7 @@ router.get('/:slug/git/info', wrapRoute(async (req, res) => {
   let files = [];
   try {
     const raw = await git(['status', '--porcelain', '--untracked-files=all'], projectPath);
-    files = parseStatus(raw);
+    files = await attachFileStats(parseStatus(raw), projectPath);
   } catch (_) {}
 
   res.json({ available: true, branch, detached, upstream, ahead, behind, unpushed, incoming, hasRemote, files });
