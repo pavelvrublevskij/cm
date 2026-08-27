@@ -410,6 +410,62 @@ test('context: Edit-tool files without a snapshot still appear', async () => {
   assert.deepStrictEqual(editFile.versions, []);
 });
 
+// ── Bash rm/git rm fallback (Claude Code has no dedicated delete tool) ───────
+
+const BASH_RM_SESSION_ID = 'bashrmtest-6666-6666-6666-666666666666';
+const BASH_RM_PROJ_DIR = path.resolve(decodeSlug(PROJ_SLUG));
+
+before(() => {
+  const projDir = path.join(paths.PROJECTS_DIR, PROJ_SLUG);
+
+  // A file the rm command targets that is still on disk — must NOT be reported as deleted.
+  fs.mkdirSync(path.join(BASH_RM_PROJ_DIR, 'keep'), { recursive: true });
+  fs.writeFileSync(path.join(BASH_RM_PROJ_DIR, 'keep', 'still-here.js'), 'x');
+
+  const entries = [
+    { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'clean up' } },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'rm gone/leaf.txt' } },
+          { type: 'tool_use', id: 'b2', name: 'Bash', input: { command: 'cd sub && git rm -r --quiet leftover-dir && echo done' } },
+          { type: 'tool_use', id: 'b3', name: 'Bash', input: { command: 'rm keep/still-here.js' } }
+        ]
+      }
+    }
+  ];
+  fs.writeFileSync(
+    path.join(projDir, BASH_RM_SESSION_ID + '.jsonl'),
+    entries.map(e => JSON.stringify(e)).join('\n')
+  );
+});
+
+test('context: plain rm target absent from disk is reported deleted', async () => {
+  const res = await request(app).get(`/api/file-history/${BASH_RM_SESSION_ID}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'gone/leaf.txt');
+  assert.ok(f, 'rm target must be listed');
+  assert.strictEqual(f.isDeleted, true);
+  assert.strictEqual(f.isNew, false);
+  assert.strictEqual(f.hash, null);
+});
+
+test('context: git rm -r target resolved through a leading cd is reported deleted', async () => {
+  const res = await request(app).get(`/api/file-history/${BASH_RM_SESSION_ID}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'sub/leftover-dir');
+  assert.ok(f, 'git rm target resolved via the cd in the same command must be listed');
+  assert.strictEqual(f.isDeleted, true);
+});
+
+test('context: rm target still present on disk is not reported as deleted', async () => {
+  const res = await request(app).get(`/api/file-history/${BASH_RM_SESSION_ID}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'keep/still-here.js');
+  assert.ok(!f, 'a still-present file must not be reported as a session change from a stray rm mention');
+});
+
 // ── backup mapping recovered when the transcript has no snapshot records ─────
 // Newer Claude Code versions write the backups but no file-history-snapshot records, so the
 // path -> backup mapping has to be recomputed as sha256(absolute path)[0..16].

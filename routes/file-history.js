@@ -24,6 +24,41 @@ function backupHash(absPath) {
   return crypto.createHash('sha256').update(absPath, 'utf8').digest('hex').slice(0, 16);
 }
 
+/** Splits shell arg text into tokens, keeping quoted substrings intact. */
+function tokenizeShellArgs(str) {
+  const tokens = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(str))) tokens.push(m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3]);
+  return tokens;
+}
+
+/**
+ * Claude Code has no dedicated delete tool — deletions happen via `rm`/`git rm` inside Bash calls,
+ * which carry no file-history snapshot. This scans a single Bash command for `cd`/`rm`-family
+ * statements to recover the paths it deleted, resolving `cd`s only within that same command string
+ * (cwd is not tracked across separate Bash calls — too unreliable to simulate).
+ */
+function extractBashDeletions(command) {
+  const statements = (command || '').split(/&&|\|\||;|\n/).map(s => s.trim()).filter(Boolean);
+  let cwd = '';
+  const targets = [];
+  for (const stmt of statements) {
+    const cdMatch = stmt.match(/^cd\s+(\S+)/);
+    if (cdMatch) {
+      cwd = path.posix.join(cwd, cdMatch[1].replace(/^["']|["']$/, '').replace(/["']$/, ''));
+      continue;
+    }
+    const rmMatch = stmt.match(/^(?:git\s+rm|rm|rmdir|del|Remove-Item|unlink)\b(.*)$/i);
+    if (!rmMatch) continue;
+    for (const tok of tokenizeShellArgs(rmMatch[1])) {
+      if (tok.startsWith('-') || tok.startsWith('/') || /^\d*>/.test(tok)) continue;
+      targets.push(path.posix.join(cwd, tok));
+    }
+  }
+  return targets;
+}
+
 /** Resolve+validate a projSlug/filePath pair against the project dir. Returns { error, status } or { target }. */
 function resolveProjectFile(projSlug, filePath) {
   if (!filePath) return { status: 400, error: 'Invalid file path' };
@@ -100,7 +135,8 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
 
     const projectDir = projSlug ? decodeSlug(projSlug) : null;
 
-    // Fallback: collect files touched via Write/Edit/MultiEdit tool calls.
+    // Fallback: collect files touched via Write/Edit/MultiEdit tool calls, plus files/dirs removed
+    // via rm/git rm inside Bash calls (Claude Code has no dedicated delete tool).
     // Runs unconditionally so sessions without a file-history dir still show their files.
     if (projectDir) {
       const resolvedProjectDir = path.resolve(projectDir);
@@ -114,6 +150,20 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
           if (!Array.isArray(content)) continue;
           for (const block of content) {
             if (block.type !== 'tool_use' || !block.input) continue;
+            if (block.name === 'Bash') {
+              for (const target of extractBashDeletions(block.input.command)) {
+                const abs = path.resolve(resolvedProjectDir, target);
+                const rel = path.relative(resolvedProjectDir, abs);
+                if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+                const relNorm = rel.replace(/\\/g, '/');
+                // Only trust a parsed rm target once disk confirms it's actually gone — an
+                // imperfect shell parse should never mislabel a still-present file as deleted.
+                if (existingKeys.has(relNorm) || fs.existsSync(abs)) continue;
+                existingKeys.add(relNorm);
+                fileMap[relNorm] = { hash: null, maxVersion: 0, isNew: false };
+              }
+              continue;
+            }
             let filePath = null;
             let isNew = false;
             if (block.name === 'Write') { filePath = block.input.file_path; isNew = true; }
