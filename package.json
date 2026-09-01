@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "postinstall": "node scripts/fix-pty-permissions.js",
     "pretest": "node tests/helpers/clean-tmp.js",
     "test": "node --test --test-concurrency=1",
     "posttest": "node tests/helpers/clean-tmp.js",
