@@ -413,10 +413,15 @@ test('context: Edit-tool files without a snapshot still appear', async () => {
 // ── Bash rm/git rm fallback (Claude Code has no dedicated delete tool) ───────
 
 const BASH_RM_SESSION_ID = 'bashrmtest-6666-6666-6666-666666666666';
-const BASH_RM_PROJ_DIR = path.resolve(decodeSlug(PROJ_SLUG));
+// A project directory that really exists on disk, so the disk-existence check the route runs
+// (decodeSlug(projSlug) -> fs.existsSync) resolves to a writable path instead of guessing one
+// rooted at "/".
+const BASH_RM_PROJ_DIR = path.join(HOME, 'bash-rm-proj');
+const BASH_RM_SLUG = slugForPath(BASH_RM_PROJ_DIR);
 
 before(() => {
-  const projDir = path.join(paths.PROJECTS_DIR, PROJ_SLUG);
+  const projDir = path.join(paths.PROJECTS_DIR, BASH_RM_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
 
   // A file the rm command targets that is still on disk — must NOT be reported as deleted.
   fs.mkdirSync(path.join(BASH_RM_PROJ_DIR, 'keep'), { recursive: true });
