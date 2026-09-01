@@ -100,7 +100,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       if (!line.trim()) continue;
       try {
         const obj = JSON.parse(line);
-        if (planPathsFromSession.size === 0 && planCache.get(sessionId) !== false && obj.type === 'assistant') {
+        if (planPathsFromSession.size === 0 && obj.type === 'assistant') {
           const content = obj.message && obj.message.content;
           if (Array.isArray(content)) {
             for (const block of content) {
@@ -225,7 +225,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       plans.push({ name, mtime: stat.mtime });
     } catch (_) {}
   }
-  if (planCache.get(sessionId) === undefined) planCache.set(sessionId, plans.length > 0);
+  planCache.set(sessionId, plans.length > 0);
 
   res.json({ files, plans, projSlug });
 }));

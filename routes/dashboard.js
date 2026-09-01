@@ -20,13 +20,12 @@ function loadPlanStems() {
 }
 
 function fileHasPlan(sessionId, filePath, planStems) {
-  const cached = planCache.get(sessionId);
-  if (cached !== undefined) return cached;
-  if (!planStems.length) { planCache.set(sessionId, false); return false; }
+  if (planCache.get(sessionId)) return true;
+  if (!planStems.length) return false;
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const hasPlan = planStems.some(stem => content.includes(stem));
-    planCache.set(sessionId, hasPlan);
+    if (hasPlan) planCache.set(sessionId, true);
     return hasPlan;
   } catch (_) { return false; }
 }
