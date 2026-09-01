@@ -36,7 +36,7 @@ Available options:
 ## Requirements
 
 - Claude Code installed (`~/.claude/` directory must exist)
-- Node.js 18+ (auto-installed by the run script if missing)
+- Node.js 20+ (auto-installed by the run script if missing)
 - git (optional) — the Git panel appears only for projects that are repositories, on machines that have git; everything else works without it
 
 ## What It Manages

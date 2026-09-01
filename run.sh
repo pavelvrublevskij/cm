@@ -17,7 +17,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PORT=3000
 URL="http://127.0.0.1:$PORT"
-MIN_NODE=16
+MIN_NODE=20
 
 IS_WINDOWS=false
 if printf '%s' "$OSTYPE" | grep -qE "msys|mingw|cygwin"; then
