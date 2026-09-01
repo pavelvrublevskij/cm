@@ -21,4 +21,13 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
+      - name: Fix node-pty spawn-helper permissions (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for helper in node_modules/node-pty/build/Release/spawn-helper node_modules/node-pty/prebuilds/*/spawn-helper; do
+            if [ -f "$helper" ]; then
+              chmod +x "$helper" || true
+              xattr -d com.apple.quarantine "$helper" 2>/dev/null || true
+            fi
+          done
       - run: npm test
