@@ -9,5 +9,9 @@ const { execFileSync } = require('child_process');
 const SCRIPT = path.join(__dirname, '../scripts/verify-pty.js');
 
 test('verify-pty exits 0 on a machine with a working node-pty install', () => {
-  assert.doesNotThrow(() => execFileSync(process.execPath, [SCRIPT], { cwd: path.join(__dirname, '..') }));
+  try {
+    execFileSync(process.execPath, [SCRIPT], { cwd: path.join(__dirname, '..'), encoding: 'utf-8' });
+  } catch (e) {
+    assert.fail(`verify-pty.js exited non-zero:\n${e.stderr}`);
+  }
 });

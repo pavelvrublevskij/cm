@@ -6,6 +6,7 @@ try {
   const term = pty.spawn(cmd, [], { name: 'xterm-256color', cols: 80, rows: 24 });
   term.kill();
   process.exit(0);
-} catch (_) {
+} catch (e) {
+  console.error(e && e.stack || e);
   process.exit(1);
 }
