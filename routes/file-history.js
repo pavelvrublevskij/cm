@@ -82,6 +82,9 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
 
   let projSlug = null;
   const planPathsFromSession = new Set();
+  // Temporary diagnostic for the macOS file-detection issue -- pass ?debug=1 to see, per tool
+  // call, why a file was or wasn't matched into the project directory. Remove once resolved.
+  const debug = req.query.debug === '1' ? [] : null;
 
   // Always find the session JSONL regardless of whether file-history exists
   let sessionContent = null;
@@ -171,7 +174,9 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
             else if (block.name === 'NotebookEdit') { filePath = block.input.notebook_path; }
             if (!filePath) continue;
             const rel = path.relative(resolvedProjectDir, path.resolve(filePath));
-            if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+            const included = !(rel.startsWith('..') || path.isAbsolute(rel));
+            if (debug) debug.push({ tool: block.name, filePath, resolvedProjectDir, rel, included });
+            if (!included) continue;
             const relNorm = rel.replace(/\\/g, '/');
             if (!existingKeys.has(relNorm)) {
               existingKeys.add(relNorm);
@@ -227,7 +232,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
   }
   planCache.set(sessionId, plans.length > 0);
 
-  res.json({ files, plans, projSlug });
+  res.json(debug ? { files, plans, projSlug, debug } : { files, plans, projSlug });
 }));
 
 router.post('/open-file', wrapRoute((req, res) => {
