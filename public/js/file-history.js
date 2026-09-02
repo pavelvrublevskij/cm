@@ -27,6 +27,7 @@ const FileHistory = {
     const overlay = openModal({
       title: `${filePath} ${label}`,
       cls: 'modal--diff',
+      resizable: true,
       body: `${navHtml}<div id="fh-diff-body"><div class="loading"><div class="spinner"></div>Computing diff…</div></div>`,
       buttons: [
         { label: 'Show in explorer', onClick: () => { Sessions.revealCtxFile(state.filePath); return false; } },
@@ -41,7 +42,6 @@ const FileHistory = {
       FileHistory._updateNav(overlay, allItems, index);
     }
 
-    FileHistory._addResizeHandle(overlay.querySelector('.modal'));
     await FileHistory._loadDiff(overlay, sessionId, hash, version, projSlug, filePath, { isNew, isDeleted });
   },
 
@@ -129,46 +129,9 @@ const FileHistory = {
     });
   },
 
-  _addResizeHandle(modal) {
-    if (!modal) return;
-    const handle = document.createElement('div');
-    handle.className = 'modal-resize-handle';
-    modal.appendChild(handle);
-    handle.addEventListener('mousedown', e => {
-      e.preventDefault();
-      const rect = modal.getBoundingClientRect();
-      modal.style.position = 'fixed';
-      modal.style.top = rect.top + 'px';
-      modal.style.left = rect.left + 'px';
-      modal.style.width = rect.width + 'px';
-      modal.style.height = rect.height + 'px';
-      const startX = e.clientX;
-      const startY = e.clientY;
-      const startW = rect.width;
-      const startH = rect.height;
-      const onMove = e => {
-        const newW = Math.max(400, startW + 2 * (e.clientX - startX));
-        const newH = Math.max(300, startH + 2 * (e.clientY - startY));
-        modal.style.width = newW + 'px';
-        modal.style.height = newH + 'px';
-        modal.style.left = ((window.innerWidth - newW) / 2) + 'px';
-        modal.style.top = ((window.innerHeight - newH) / 2) + 'px';
-      };
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        modal.style.position = '';
-        modal.style.top = '';
-        modal.style.left = '';
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
-  },
-
   /** Render just the diff — syntax-coloured per line, using the file's CodeMirror mode. */
   renderDiff(container, result, filePath) {
-    if (result.tooLarge) { container.innerHTML = '<div class="empty-state"><p>File too large to diff (&gt;5000 lines)</p></div>'; return; }
+    if (result.tooLarge) { container.innerHTML = '<div class="empty-state"><p>The differing region of this file is too large to diff (&gt;8000 lines)</p></div>'; return; }
     if (!result.hunks.length) { container.innerHTML = '<div class="empty-state"><p>No differences found</p></div>'; return; }
 
     const mode = codeModeFor(filePath);

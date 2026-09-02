@@ -591,6 +591,7 @@
                     <div class="sf-search-bar">
                       <input type="search" id="sf-search" class="sf-search-input" placeholder="Search files..."
                         oninput="SessionFiles.onSearchInput(this.value)">
+                      <div class="sf-search-spinner" id="sf-search-spinner" style="display:none"></div>
                     </div>
                   </div>
                   <div id="sf-tree"></div>
@@ -642,6 +643,13 @@
               <button class="btn btn-primary" onclick="TerminalPanel.openFromSession()">Open Terminal</button>
             </div>
             <div id="terminal-host" class="terminal-host"></div>
+            <div class="term-error-overlay" id="terminal-error-overlay" style="display:none">
+              <div class="term-error-box">
+                <div class="term-error-icon">⚠</div>
+                <div class="term-error-text" id="terminal-error-text"></div>
+                <button type="button" class="btn btn-primary" id="terminal-fix-btn" onclick="TerminalPanel.runFix()">Fix &amp; Restart App</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -749,6 +757,7 @@
   <div class="active-sessions-bar" id="active-sessions-bar" style="display:none">
     <span class="asb-placeholder">Your current active sessions</span>
     <div id="asb-groups"></div>
+    <button class="asb-position-toggle" id="asb-position-toggle" title="Move to top">&#8593;</button>
   </div>
 
   <footer class="app-footer">

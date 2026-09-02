@@ -9,38 +9,11 @@ const planCache = require('../lib/plan-cache');
 const { resolveProjectPath } = require('../lib/project-files');
 const { decodeSlug } = require('../lib/slug');
 const { computeDiff } = require('../lib/diff');
-const { git, gitOk, parseStatus } = require('../lib/git');
 
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 
 const router = express.Router();
 const FILE_HISTORY_DIR = path.join(CLAUDE_DIR, 'file-history');
-
-/** Local git changes with an mtime inside [from, to] — catches files a session touched via
- *  Bash (cp, scripts, ...) rather than the Write/Edit/MultiEdit/NotebookEdit tools we scan for. */
-async function gitFilesInWindow(projectDir, from, to) {
-  if (!from) return [];
-  if (!(await gitOk(projectDir))) return [];
-
-  let raw;
-  try {
-    raw = await git(['status', '--porcelain'], projectDir);
-  } catch (_) {
-    return [];
-  }
-
-  const BUFFER_MS = 5000;
-  const results = [];
-  for (const entry of parseStatus(raw)) {
-    if (entry.label === 'deleted') continue;
-    const relNorm = entry.path.replace(/\\/g, '/');
-    let mtime;
-    try { mtime = fs.statSync(path.join(projectDir, entry.path)).mtimeMs; } catch (_) { continue; }
-    if (mtime < from - BUFFER_MS || mtime > to + BUFFER_MS) continue;
-    results.push({ path: relNorm, isNew: entry.label === 'new' || entry.label === 'untracked' });
-  }
-  return results;
-}
 
 /**
  * Claude Code names file-history backups `<sha256(absolute path) truncated to 16 hex>@v<n>`.
@@ -49,6 +22,41 @@ async function gitFilesInWindow(projectDir, from, to) {
  */
 function backupHash(absPath) {
   return crypto.createHash('sha256').update(absPath, 'utf8').digest('hex').slice(0, 16);
+}
+
+/** Splits shell arg text into tokens, keeping quoted substrings intact. */
+function tokenizeShellArgs(str) {
+  const tokens = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(str))) tokens.push(m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3]);
+  return tokens;
+}
+
+/**
+ * Claude Code has no dedicated delete tool — deletions happen via `rm`/`git rm` inside Bash calls,
+ * which carry no file-history snapshot. This scans a single Bash command for `cd`/`rm`-family
+ * statements to recover the paths it deleted, resolving `cd`s only within that same command string
+ * (cwd is not tracked across separate Bash calls — too unreliable to simulate).
+ */
+function extractBashDeletions(command) {
+  const statements = (command || '').split(/&&|\|\||;|\n/).map(s => s.trim()).filter(Boolean);
+  let cwd = '';
+  const targets = [];
+  for (const stmt of statements) {
+    const cdMatch = stmt.match(/^cd\s+(\S+)/);
+    if (cdMatch) {
+      cwd = path.posix.join(cwd, cdMatch[1].replace(/^["']|["']$/, '').replace(/["']$/, ''));
+      continue;
+    }
+    const rmMatch = stmt.match(/^(?:git\s+rm|rm|rmdir|del|Remove-Item|unlink)\b(.*)$/i);
+    if (!rmMatch) continue;
+    for (const tok of tokenizeShellArgs(rmMatch[1])) {
+      if (tok.startsWith('-') || tok.startsWith('/') || /^\d*>/.test(tok)) continue;
+      targets.push(path.posix.join(cwd, tok));
+    }
+  }
+  return targets;
 }
 
 /** Resolve+validate a projSlug/filePath pair against the project dir. Returns { error, status } or { target }. */
@@ -71,7 +79,6 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
 
   const histDir = path.join(FILE_HISTORY_DIR, sessionId);
   let files = [];
-  let sessionFrom = null, sessionTo = null;
 
   let projSlug = null;
   const planPathsFromSession = new Set();
@@ -93,12 +100,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       if (!line.trim()) continue;
       try {
         const obj = JSON.parse(line);
-        if (obj.type === 'user' && obj.timestamp) {
-          const t = new Date(obj.timestamp).getTime();
-          if (!sessionFrom) sessionFrom = t;
-          sessionTo = t;
-        }
-        if (planPathsFromSession.size === 0 && planCache.get(sessionId) !== false && obj.type === 'assistant') {
+        if (planPathsFromSession.size === 0 && obj.type === 'assistant') {
           const content = obj.message && obj.message.content;
           if (Array.isArray(content)) {
             for (const block of content) {
@@ -133,7 +135,8 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
 
     const projectDir = projSlug ? decodeSlug(projSlug) : null;
 
-    // Fallback: collect files touched via Write/Edit/MultiEdit tool calls.
+    // Fallback: collect files touched via Write/Edit/MultiEdit tool calls, plus files/dirs removed
+    // via rm/git rm inside Bash calls (Claude Code has no dedicated delete tool).
     // Runs unconditionally so sessions without a file-history dir still show their files.
     if (projectDir) {
       const resolvedProjectDir = path.resolve(projectDir);
@@ -147,6 +150,20 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
           if (!Array.isArray(content)) continue;
           for (const block of content) {
             if (block.type !== 'tool_use' || !block.input) continue;
+            if (block.name === 'Bash') {
+              for (const target of extractBashDeletions(block.input.command)) {
+                const abs = path.resolve(resolvedProjectDir, target);
+                const rel = path.relative(resolvedProjectDir, abs);
+                if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+                const relNorm = rel.replace(/\\/g, '/');
+                // Only trust a parsed rm target once disk confirms it's actually gone — an
+                // imperfect shell parse should never mislabel a still-present file as deleted.
+                if (existingKeys.has(relNorm) || fs.existsSync(abs)) continue;
+                existingKeys.add(relNorm);
+                fileMap[relNorm] = { hash: null, maxVersion: 0, isNew: false };
+              }
+              continue;
+            }
             let filePath = null;
             let isNew = false;
             if (block.name === 'Write') { filePath = block.input.file_path; isNew = true; }
@@ -162,15 +179,6 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
             }
           }
         } catch (_) {}
-      }
-
-      // Second fallback: files with local git changes and an mtime inside the session's time
-      // window. Catches files a session modified via Bash (cp, a script, ...) instead of the
-      // Write/Edit/MultiEdit/NotebookEdit tools scanned for above.
-      for (const gf of await gitFilesInWindow(resolvedProjectDir, sessionFrom, sessionTo)) {
-        if (existingKeys.has(gf.path)) continue;
-        existingKeys.add(gf.path);
-        fileMap[gf.path] = { hash: null, maxVersion: 0, isNew: gf.isNew };
       }
     }
 
@@ -217,7 +225,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       plans.push({ name, mtime: stat.mtime });
     } catch (_) {}
   }
-  if (planCache.get(sessionId) === undefined) planCache.set(sessionId, plans.length > 0);
+  planCache.set(sessionId, plans.length > 0);
 
   res.json({ files, plans, projSlug });
 }));

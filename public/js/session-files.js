@@ -226,35 +226,45 @@ const SessionFiles = {
     if (!SessionFiles.slug) return;
 
     const token = ++SessionFiles._searchToken;
-    let data;
+    SessionFiles._setSearchSpinner(true);
     try {
-      data = await api(`/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/search?q=${encodeURIComponent(query)}`);
-    } catch (e) {
+      let data;
+      try {
+        data = await api(`/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/search?q=${encodeURIComponent(query)}`);
+      } catch (e) {
+        if (token !== SessionFiles._searchToken) return;
+        const el = document.getElementById('sf-tree');
+        if (el) el.innerHTML = `<div class="ctx-empty">Search failed: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
       if (token !== SessionFiles._searchToken) return;
-      const el = document.getElementById('sf-tree');
-      if (el) el.innerHTML = `<div class="ctx-empty">Search failed: ${escapeHtml(e.message)}</div>`;
-      return;
-    }
-    if (token !== SessionFiles._searchToken) return;
 
-    const matches = data.matches || [];
-    const searchMatches = new Set(matches.map(m => `${m.type}:${m.path}`));
-    const searchContentOnly = new Set(matches.filter(m => m.matchedBy === 'content').map(m => m.path));
-    const searchExpand = new Set();
-    for (const m of matches) {
-      const parts = m.path.split('/');
-      for (let i = 1; i < parts.length; i++) searchExpand.add(parts.slice(0, i).join('/'));
-    }
-    await SessionFiles._ensureDirsLoaded(searchExpand);
-    if (token !== SessionFiles._searchToken) return;
+      const matches = data.matches || [];
+      const searchMatches = new Set(matches.map(m => `${m.type}:${m.path}`));
+      const searchContentOnly = new Set(matches.filter(m => m.matchedBy === 'content').map(m => m.path));
+      const searchExpand = new Set();
+      for (const m of matches) {
+        const parts = m.path.split('/');
+        for (let i = 1; i < parts.length; i++) searchExpand.add(parts.slice(0, i).join('/'));
+      }
+      await SessionFiles._ensureDirsLoaded(searchExpand);
+      if (token !== SessionFiles._searchToken) return;
 
-    SessionFiles.searchActive = true;
-    SessionFiles.searchMatches = searchMatches;
-    SessionFiles.searchContentOnly = searchContentOnly;
-    SessionFiles.searchExpand = searchExpand;
-    SessionFiles.searchTruncated = !!data.truncated;
-    SessionFiles.renderTree();
-    SessionFiles._applySearchHighlight();
+      SessionFiles.searchActive = true;
+      SessionFiles.searchMatches = searchMatches;
+      SessionFiles.searchContentOnly = searchContentOnly;
+      SessionFiles.searchExpand = searchExpand;
+      SessionFiles.searchTruncated = !!data.truncated;
+      SessionFiles.renderTree();
+      SessionFiles._applySearchHighlight();
+    } finally {
+      if (token === SessionFiles._searchToken) SessionFiles._setSearchSpinner(false);
+    }
+  },
+
+  _setSearchSpinner(on) {
+    const el = document.getElementById('sf-search-spinner');
+    if (el) el.style.display = on ? '' : 'none';
   },
 
   /** Whether relPath should be shown while filtering — a direct match, or an ancestor of one. */
@@ -330,9 +340,13 @@ const SessionFiles = {
     const isDeleted = !!(ctx && ctx.isDeleted === '1');
     const canDiff = SessionFiles._canDiff(ctx);
     const canPreview = !isDeleted && CodeView.isPreviewable(relPath);
-    // Markdown and HTML land on their rendered form; everything else on the source.
-    const mode = (opts.mode === 'diff' || isDeleted) && canDiff ? 'diff' : (canPreview ? 'preview' : 'source');
-    SessionFiles.open = { path: relPath, mode, ctx, canDiff, canPreview, isDeleted, loading: !isDeleted, saved: '', mtime: null, changedLines: undefined };
+    // Markdown and HTML land on their rendered form; everything else changed opens on its diff,
+    // and anything unchanged (or without a diff to show) falls back to source.
+    const mode = canPreview ? 'preview' : ((opts.mode === 'diff' || isDeleted) && canDiff ? 'diff' : 'source');
+    SessionFiles.open = {
+      path: relPath, mode, ctx, canDiff, canPreview, isDeleted, loading: !isDeleted, saved: '', mtime: null,
+      changedLines: undefined, nextOffset: 0, doneLoading: true, loadingMore: false
+    };
     SessionFiles.renderPane();
     SessionFiles.renderTree();
     SessionFiles._updateActiveRow();
@@ -351,7 +365,9 @@ const SessionFiles = {
         mtime: data.mtime,
         size: data.size,
         binary: !!data.binary,
-        tooLarge: !!data.tooLarge
+        tooLarge: !!data.tooLarge,
+        nextOffset: data.nextOffset || 0,
+        doneLoading: data.done !== false
       });
       SessionFiles.renderPane();
     } catch (e) {
@@ -360,6 +376,50 @@ const SessionFiles = {
       open.loading = false;
       open.error = e.message;
       SessionFiles.renderPane();
+    }
+  },
+
+  /** True once a file has more on disk than the pane currently holds. Only source mode paginates
+   *  on scroll — diff/preview show the same fetched-so-far text either way, so the "scroll for
+   *  more" hint would be misleading there. */
+  isChunked(open) {
+    return !!open && open.mode === 'source' && !open.binary && !open.tooLarge && !open.doneLoading;
+  },
+
+  /** Fetch the next chunk and append it to the loaded text, the live buffer, and the mounted editor.
+   *  Returns false (and toasts) on failure so callers looping toward full load know to stop. */
+  async _loadMoreChunk() {
+    const open = SessionFiles.open;
+    if (!open || open.doneLoading || open.loadingMore) return true;
+    open.loadingMore = true;
+    SessionFiles.renderStatus();
+    try {
+      const data = await api(`/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/content?path=${encodeURIComponent(open.path)}&offset=${open.nextOffset}`);
+      if (SessionFiles.open !== open) return true;
+      const chunk = data.content || '';
+      open.saved += chunk;
+      open.nextOffset = data.nextOffset || open.nextOffset;
+      open.doneLoading = data.done !== false;
+      if (SessionFiles.buffers[open.path] !== undefined) SessionFiles.buffers[open.path] += chunk;
+      if (SessionFiles.editor && SessionFiles.editor.appendText) SessionFiles.editor.appendText(chunk);
+      return true;
+    } catch (e) {
+      toast('Could not load more of the file: ' + e.message, 'error');
+      return false;
+    } finally {
+      if (SessionFiles.open === open) {
+        open.loadingMore = false;
+        SessionFiles.renderStatus();
+      }
+    }
+  },
+
+  /** Keep fetching chunks until the file is fully loaded (or a fetch fails) — used before save
+   *  and before searching within a file that isn't fully loaded yet. */
+  async _ensureFullyLoaded() {
+    const open = SessionFiles.open;
+    while (open && SessionFiles.open === open && !open.doneLoading) {
+      if (!await SessionFiles._loadMoreChunk()) break;
     }
   },
 
@@ -427,6 +487,7 @@ const SessionFiles = {
         <span id="sf-status-autosave"></span>
         <span class="sf-status-sep">&middot;</span>
         <span class="sf-status-hint">Ctrl+S to save</span>
+        <span class="sf-status-chunk" id="sf-status-chunk" style="display:none"></span>
       </div>`;
 
     // The body is rebuilt below, so any editor mounted in it is gone; _mountEditor re-creates it.
@@ -447,7 +508,19 @@ const SessionFiles = {
     } else if (open.tooLarge) {
       body.innerHTML = `<div class="empty-state"><p>File too large to edit here (${formatBytes(open.size)}) — open it in your editor instead.</p></div>`;
     } else if (open.mode === 'preview') {
-      CodeView.preview(body, SessionFiles._currentText(), open.path);
+      // Previews render the whole thing at once, with no scroll trigger to load the rest — so a
+      // partially-loaded file finishes loading first instead of rendering a silently-truncated preview.
+      if (!open.doneLoading) {
+        showLoading(body, 'Loading full file for preview...');
+        if (!open._previewLoadPromise) {
+          open._previewLoadPromise = SessionFiles._ensureFullyLoaded().then(() => {
+            open._previewLoadPromise = null;
+            if (SessionFiles.open === open) SessionFiles.renderPane();
+          });
+        }
+      } else {
+        CodeView.preview(body, SessionFiles._currentText(), open.path);
+      }
     } else {
       body.innerHTML = '<div class="sf-editor-host code-colors" id="sf-editor-host"></div>';
       SessionFiles._mountEditor();
@@ -458,13 +531,27 @@ const SessionFiles = {
     SessionFiles._updateDirtyMarkers();
   },
 
-  /** When a project search is active, highlight its matches in the open file and show the count. */
+  /** When a project search is active, highlight its matches in the open file and show the count.
+   *  A partially-loaded file is finished loading first, so matches past the loaded window aren't missed. */
   _applySearchHighlight() {
     const countEl = document.getElementById('sf-pane-search-count');
     const open = SessionFiles.open;
     const query = SessionFiles.searchActive ? SessionFiles.searchQuery : '';
     if (!open || open.mode !== 'source' || !SessionFiles.editor || !SessionFiles.editor.highlightMatches) {
       if (countEl) countEl.style.display = 'none';
+      return;
+    }
+    if (query && !open.doneLoading) {
+      if (countEl) {
+        countEl.style.display = '';
+        countEl.textContent = 'Loading full file to search…';
+      }
+      if (!open._searchLoadPromise) {
+        open._searchLoadPromise = SessionFiles._ensureFullyLoaded().then(() => {
+          open._searchLoadPromise = null;
+          if (SessionFiles.open === open) SessionFiles._applySearchHighlight();
+        });
+      }
       return;
     }
     const count = SessionFiles.editor.highlightMatches(query);
@@ -550,6 +637,7 @@ const SessionFiles = {
     SessionFiles.editor = CodeView.mount(document.getElementById('sf-editor-host'), SessionFiles._currentText(), open.path, {
       onChange: () => SessionFiles.onEdit(),
       onSave: () => SessionFiles.save(),
+      onNearBottom: () => SessionFiles._loadMoreChunk(),
       trackChanges: open.canDiff,
       changedLines: open.changedLines
     });
@@ -618,6 +706,17 @@ const SessionFiles = {
     const open = SessionFiles.open;
     if (!open || !SessionFiles.isDirty(open.path)) return;
 
+    // A partially-loaded file must be completed first — otherwise writing the buffer as-is would
+    // truncate the file at wherever loading had gotten to.
+    if (!open.doneLoading) {
+      await SessionFiles._ensureFullyLoaded();
+      if (SessionFiles.open !== open) return;
+      if (!open.doneLoading) {
+        toast('Could not load the rest of the file — save cancelled to avoid truncating it.', 'error');
+        return;
+      }
+    }
+
     const path = open.path;
     const content = SessionFiles.buffers[path];
     SessionFiles._saving = true;
@@ -650,7 +749,9 @@ const SessionFiles = {
     const stateEl = document.getElementById('sf-status-state');
     const autosaveEl = document.getElementById('sf-status-autosave');
     const saveBtn = document.getElementById('sf-save-btn');
+    const chunkEl = document.getElementById('sf-status-chunk');
     const dirty = SessionFiles.isDirty();
+    const open = SessionFiles.open;
 
     if (autosaveEl) {
       autosaveEl.textContent = SessionFiles.autosaveEnabled()
@@ -658,10 +759,22 @@ const SessionFiles = {
         : 'autosave off';
     }
     if (saveBtn) saveBtn.disabled = !dirty || SessionFiles._saving;
+
+    if (chunkEl) {
+      if (open && SessionFiles.isChunked(open)) {
+        chunkEl.style.display = '';
+        chunkEl.textContent = open.loadingMore
+          ? `Loading more… (${formatBytes(open.nextOffset)} of ${formatBytes(open.size)})`
+          : `Loaded ${formatBytes(open.nextOffset)} of ${formatBytes(open.size)} — scroll for more`;
+      } else {
+        chunkEl.style.display = 'none';
+      }
+    }
+
     if (!stateEl) return;
 
     stateEl.classList.toggle('sf-status-dirty', dirty);
-    const savedHere = SessionFiles.open && SessionFiles._savedPath === SessionFiles.open.path;
+    const savedHere = open && SessionFiles._savedPath === open.path;
     if (SessionFiles._saving) stateEl.textContent = 'Saving...';
     else if (dirty) stateEl.textContent = '● Unsaved changes';
     else if (savedHere && SessionFiles._savedAt) stateEl.textContent = 'Saved ' + new Date(SessionFiles._savedAt).toLocaleTimeString();

@@ -1,0 +1,9 @@
+#!/bin/bash
+exec /System/Library/Frameworks/AppleScriptObjC.framework/Versions/A/bin/osascript - "$@" << 'APPLESCRIPT'
+tell application "Terminal"
+    activate
+    set appPath to (POSIX path of (path to me))
+    set appFolder to text 1 thru ((length of appPath) - 34) of appPath
+    do shell script "cd " & quoted form of appFolder & " && ./run.sh 1"
+end tell
+APPLESCRIPT

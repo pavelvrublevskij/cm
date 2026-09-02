@@ -583,6 +583,7 @@ body {
   color: var(--text-primary, #e6edf3);
 }
 .terminal-pane {
+  position: relative;
   flex: 0 0 var(--terminal-width, 25%);
   display: flex;
   flex-direction: column;
@@ -652,6 +653,37 @@ body {
 .terminal-host .xterm,
 .terminal-host .xterm-viewport,
 .terminal-host .xterm-screen { height: 100% !important; }
+
+.term-error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 100;
+}
+.term-error-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--danger, #f85149);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 400px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.term-error-icon {
+  font-size: 32px;
+  color: var(--danger, #f85149);
+}
+.term-error-text {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
 
 @media (max-width: 900px) {
   .session-detail-body { flex-direction: column; }
@@ -1628,6 +1660,7 @@ mark.search-highlight {
   border-radius: 50%;
   margin-right: 6px;
   vertical-align: middle;
+  flex-shrink: 0;
   animation: session-dot-pulse 2s ease-in-out infinite;
 }
 
@@ -2634,13 +2667,17 @@ mark.search-highlight {
 }
 
 .modal--diff {
-  position: relative;
   width: 90vw;
   max-width: 98vw;
   height: 85vh;
   max-height: 98vh;
   min-width: 400px;
   min-height: 300px;
+}
+
+/* Anchors the resize handle to the modal box instead of the viewport, and clips it while dragging. */
+.modal--resizable {
+  position: relative;
   overflow: hidden;
 }
 
@@ -3442,6 +3479,7 @@ mark.search-highlight {
 }
 
 .sf-search-bar {
+  position: relative;
   padding: 6px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
@@ -3450,6 +3488,19 @@ mark.search-highlight {
 .sf-search-input {
   padding: 6px 10px !important;
   font-size: 12px !important;
+}
+
+.sf-search-spinner {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
 
 .sf-search-truncated {
@@ -3622,6 +3673,7 @@ mark.search-highlight {
 }
 .sf-status-dirty { color: var(--warning); font-weight: 600; }
 .sf-status-sep { opacity: 0.5; }
+.sf-status-chunk { margin-left: auto; white-space: nowrap; }
 
 .sf-pane-empty {
   margin: auto;
@@ -4066,7 +4118,9 @@ mark.search-highlight {
 
 .git-panel-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 36%) minmax(0, 1fr) 260px;
+  /* The middle column keeps a floor so its Shell/Diff/History tabs can never be squeezed down to
+     nothing and end up hidden behind the recipes column on a narrow window. */
+  grid-template-columns: minmax(300px, 36%) minmax(300px, 1fr) 260px;
   gap: 12px;
   height: calc(100vh - 320px);
   min-height: 420px;
@@ -4084,7 +4138,7 @@ mark.search-highlight {
 
 /* Folded recipes leave a rail to bring them back, and the width goes to the file list. */
 .git-panel-layout.recipes-collapsed {
-  grid-template-columns: minmax(340px, 44%) minmax(0, 1fr) 26px;
+  grid-template-columns: minmax(340px, 44%) minmax(300px, 1fr) 26px;
 }
 
 .git-panel-layout.recipes-collapsed .git-recipes {
@@ -4123,10 +4177,60 @@ mark.search-highlight {
 .git-panel-modal {
   width: min(1180px, 94vw);
   max-width: 94vw;
+  height: min(680px, 88vh);
+  max-height: 88vh;
+  min-width: 900px;
+  min-height: 460px;
 }
 
+.git-panel-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.git-panel-modal #git-panel-modal-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The layout fills whatever height the (resizable) modal ends up with, not a fixed vh slice. */
 .git-panel-modal .git-panel-layout {
-  height: min(68vh, 640px);
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* --- Git standalone window (git-window.html) --- */
+/* body is already a full-height flex column (see base body rule), so header + host just split it. */
+
+.git-window-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.git-window-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#git-window-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+}
+
+#git-window-host .git-panel-layout {
+  height: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .git-shell-dot {
@@ -4156,6 +4260,21 @@ mark.search-highlight {
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
   padding: 8px 10px;
+}
+
+/* To commit takes whatever height is left; to pull/to push always stay visible at the bottom. */
+.git-changes-commit-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.git-changes-bottom {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
 }
 
 .git-changes-header {
@@ -4194,10 +4313,10 @@ mark.search-highlight {
   margin-left: auto;
 }
 
-/* Fixed height: the list scrolls inside it, so eight changed files and none look the same. */
+/* Fills whatever height "to commit" has left over — grows with the window instead of a fixed size. */
 .git-changes-files {
-  flex: 0 0 auto;
-  height: 240px;
+  flex: 1 1 auto;
+  min-height: 100px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -4222,8 +4341,32 @@ mark.search-highlight {
   flex: 0 0 auto;
 }
 
+/* The file currently loaded into the diff pane, so "to commit" shows what's actually on screen. */
+.git-file-row-active {
+  background: var(--accent-bg);
+  border-radius: var(--radius-sm);
+}
+
+.git-file-row-active .git-file-link {
+  color: var(--accent);
+}
+
 .git-file-path {
   word-break: break-all;
+}
+
+/* Pushed to the row's right edge so it reads as a trailing stat, not part of the filename. */
+.git-file-stat {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding-left: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.git-file-stat-binary {
+  color: var(--text-muted);
 }
 
 .git-tree-name {
@@ -4476,6 +4619,8 @@ mark.search-highlight {
   display: flex;
 }
 
+.git-pane-shell { position: relative; }
+
 .git-pane-tabs {
   display: flex;
   gap: 4px;
@@ -4487,6 +4632,17 @@ mark.search-highlight {
   min-height: 0;
   overflow: auto;
   padding: 4px 8px;
+}
+
+/* The diff fills the pane and scrolls inside it, rather than capping at the base .diff-view height. */
+.git-diff-body {
+  display: flex;
+  flex-direction: column;
+}
+.git-diff-body .diff-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 /* --- History --- */
@@ -4802,12 +4958,37 @@ mark.search-highlight {
   flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 5px 32px 5px 12px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
   overflow-x: auto;
   min-height: 46px;
   position: relative;
+}
+
+.active-sessions-bar.asb-position-top {
+  order: -1;
+  border-top: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.asb-position-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  background: var(--bg-secondary);
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  z-index: 2;
+}
+
+.asb-position-toggle:hover {
+  color: var(--text-primary);
 }
 
 
@@ -4975,13 +5156,8 @@ mark.search-highlight {
   font-size: 14px;
   line-height: 1;
   padding: 0 0 0 4px;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
-}
-
-.asb-pill:hover .asb-close,
-.asb-pill--current .asb-close {
   opacity: 1;
+  transition: color 0.15s;
 }
 
 .asb-close:hover {
@@ -4992,11 +5168,6 @@ mark.search-highlight {
   margin-left: auto;
   padding: 0;
   font-size: 13px;
-  opacity: 0;
-}
-
-.project-active-sub:hover .asb-close--sidebar,
-.project-active-sub.active .asb-close--sidebar {
   opacity: 1;
 }
 

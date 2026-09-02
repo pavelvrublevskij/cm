@@ -81,9 +81,22 @@ Object.assign(Sessions, {
       if (Sessions.detailState.sessionId !== sessionId) return;
       Sessions.renderContext(el, sessionId, data);
       Sessions._flashItems(el, null);
-    } catch (_) {
-      Sessions.switchTab('conversation');
+    } catch (e) {
+      if (Sessions.detailState.sessionId !== sessionId) return;
+      Sessions.renderContextError(el, e);
     }
+  },
+
+  /** Loading "Changed in this session" failed outright -- say so instead of silently falling back
+   *  to the Conversation tab, which reads identically to "nothing changed" and hides a real bug. */
+  renderContextError(el, err) {
+    Sessions._ctx = null;
+    const message = (err && err.message) || 'Unknown error';
+    el.innerHTML = `<div class="empty-state">
+      <p>&#9888; Couldn't load file changes for this session.</p>
+      <p>${escapeHtml(message)}</p>
+      <p><a href="https://github.com/pavelvrublevskij/cm/issues/new" target="_blank" rel="noopener" class="app-footer-issue-link">&#9888; Report this issue</a></p>
+    </div>`;
   },
 
   renderContext(el, sessionId, data) {

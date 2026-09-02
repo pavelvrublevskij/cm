@@ -150,6 +150,38 @@ const context = vm.createContext({
     },
   },
   toast: (msg, type) => { harness.toasts.push({ msg, type }); },
+  TerminalRepair: {
+    trigger: onUpdate => {
+      harness.repairTriggers = (harness.repairTriggers || 0) + 1;
+      if (onUpdate) onUpdate('Repairing and restarting the app…', false);
+    },
+  },
+  createTerminalPanelUI: (ids, describeError) => ({
+    setStatus(text, cls) {
+      const target = el(ids.status);
+      target.textContent = text;
+      target.classList.remove('connected');
+      target.classList.remove('error');
+      if (cls) target.classList.add(cls);
+    },
+    showError(message, hint) {
+      el(ids.errorText).textContent = describeError(message, hint);
+      const btn = el(ids.fixBtn);
+      btn.disabled = false;
+      btn.textContent = 'Fix & Restart App';
+      el(ids.overlay).style.display = 'flex';
+    },
+    hideError() { el(ids.overlay).style.display = 'none'; },
+    runFix() {
+      const btn = el(ids.fixBtn);
+      btn.disabled = true;
+      btn.textContent = 'Restarting…';
+      context.TerminalRepair.trigger((status, failed) => {
+        el(ids.errorText).textContent = status;
+        if (failed) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+      });
+    },
+  }),
   api: async url => {
     if (harness.apiHandler) return harness.apiHandler(url);
     if (url.includes('terminal/info')) return { available: true, running: harness.shellRunning === true, mode: 'shell' };
@@ -598,6 +630,34 @@ test('a branch with no upstream is told the first push needs -u', async () => {
   assert.match(el('git-changes').innerHTML, /first push needs/);
 });
 
+test('the Push button stays enabled for a first push, with no upstream to diff against', async () => {
+  harness.gitInfo.upstream = null;
+  harness.gitInfo.unpushed = [];
+  await GitPanel.mount(HOST, 'proj');
+
+  const html = el('git-changes').innerHTML;
+  const pushBtn = html.slice(html.indexOf('GitPanel.push()'));
+  assert.ok(!/disabled/.test(pushBtn.slice(0, 60)), 'Push must stay usable to set the upstream');
+});
+
+test('Push is disabled with an upstream and nothing new to send', async () => {
+  await GitPanel.mount(HOST, 'proj');
+
+  const html = el('git-changes').innerHTML;
+  const pushBtn = html.slice(html.indexOf('GitPanel.push()'));
+  assert.match(pushBtn.slice(0, 60), /disabled/, 'nothing to push, so the button is off');
+});
+
+test('Push is disabled with no remote at all', async () => {
+  harness.gitInfo.hasRemote = false;
+  harness.gitInfo.upstream = null;
+  await GitPanel.mount(HOST, 'proj');
+
+  const html = el('git-changes').innerHTML;
+  const pushBtn = html.slice(html.indexOf('GitPanel.push()'));
+  assert.match(pushBtn.slice(0, 60), /disabled/, 'nowhere to push to');
+});
+
 test('being behind the upstream warns to pull before pushing', async () => {
   harness.gitInfo.behind = 3;
   await GitPanel.mount(HOST, 'proj');
@@ -804,13 +864,12 @@ test('tree folders are not labels either, keeping the rule consistent', async ()
 
 // ── flat and tree views ──────────────────────────────────────────────────────
 
-test('flat is the default view and shows whole paths', async () => {
+test('tree is the default view and nests folders', async () => {
   harness.gitInfo.files = [{ path: 'public/js/git.js', label: 'modified' }];
   await GitPanel.mount(HOST, 'proj');
 
-  assert.strictEqual(GitPanel.viewMode(), 'flat');
-  assert.match(el('git-changes').innerHTML, />public\/js\/git\.js</);
-  assert.ok(!el('git-changes').innerHTML.includes('git-tree-folder'), 'no folders in flat view');
+  assert.strictEqual(GitPanel.viewMode(), 'tree');
+  assert.ok(el('git-changes').innerHTML.includes('git-tree-folder'), 'folders shown in tree view');
 });
 
 test('the view toggle appears with files and marks the active mode', async () => {
@@ -819,7 +878,7 @@ test('the view toggle appears with files and marks the active mode', async () =>
 
   const html = el('git-changes').innerHTML;
   assert.match(html, /git-view-toggle/);
-  assert.match(html, /sf-mode-btn active[\s\S]*?setViewMode\('flat'\)/);
+  assert.match(html, /sf-mode-btn active[\s\S]*?setViewMode\('tree'\)/);
 });
 
 test('no view toggle when there is nothing to commit', async () => {
@@ -883,10 +942,10 @@ test('switching the view remembers the choice and keeps a half-typed message', a
   assert.strictEqual(GitPanel.viewMode(), 'flat');
 });
 
-test('an unknown stored view mode falls back to flat', async () => {
+test('an unknown stored view mode falls back to tree', async () => {
   harness.store[GitPanel.VIEW_MODE_KEY] = 'nonsense';
   await GitPanel.mount(HOST, 'proj');
-  assert.strictEqual(GitPanel.viewMode(), 'flat');
+  assert.strictEqual(GitPanel.viewMode(), 'tree');
 });
 
 // ── unticking a folder ───────────────────────────────────────────────────────

@@ -389,16 +389,11 @@ router.get('/:slug/sessions/with-plans', wrapRoute((req, res) => {
   const sessionIds = [];
   for (const f of files) {
     const sessionId = f.replace('.jsonl', '');
-    const cached = planCache.get(sessionId);
-    if (cached !== undefined) {
-      if (cached) sessionIds.push(sessionId);
-      continue;
-    }
+    if (planCache.get(sessionId)) { sessionIds.push(sessionId); continue; }
     try {
       const content = fs.readFileSync(path.join(dir, f), 'utf-8');
       const hasPlan = planStems.some(stem => content.includes(stem));
-      planCache.set(sessionId, hasPlan);
-      if (hasPlan) sessionIds.push(sessionId);
+      if (hasPlan) { planCache.set(sessionId, true); sessionIds.push(sessionId); }
     } catch (_) {}
   }
   res.json(sessionIds);
@@ -423,8 +418,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
   let firstPrompt = '';
   let indexSummary = '';
   let created = null;
-  const cachedHasPlan = planCache.get(sessionId);
-  let hasPlan = cachedHasPlan === true;
+  let hasPlan = planCache.get(sessionId) === true;
 
   for (const line of lines) {
     try {
@@ -445,7 +439,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
         }
         if (raw && !isSkippablePrompt(raw)) firstPrompt = normalizePrompt(raw).slice(0, 200);
       }
-      if (!hasPlan && cachedHasPlan === undefined && entry.type === 'assistant') {
+      if (!hasPlan && entry.type === 'assistant') {
         const content = entry.message && entry.message.content;
         if (Array.isArray(content)) {
           for (const block of content) {
@@ -518,7 +512,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
   const lastGitBranch = gitBranches.length ? gitBranches[gitBranches.length - 1] : '';
   const usage = getSessionUsage(req.params.slug, sessionId);
   const customTitle = getCustomTitle(filePath);
-  if (cachedHasPlan === undefined) planCache.set(sessionId, hasPlan);
+  planCache.set(sessionId, hasPlan);
 
   const gitBranch = gitBranches[0] || '';
   const activeList = listAllActiveSessions();

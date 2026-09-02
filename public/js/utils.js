@@ -41,11 +41,35 @@ function stripAnsi(text) {
   return (text || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 }
 
+/** Drop a leading YAML frontmatter block (--- ... ---) — metadata, not content to render. */
+function stripFrontmatter(text) {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/, '');
+}
+
+/** GitHub-style heading slug, so a markdown link like `#installation` has a matching id to find. */
+function slugifyHeading(text) {
+  return text.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+}
+
+/** marked renders headings with no id by default, so `[text](#heading)` links have nothing to
+ *  jump to. Slugify each heading's text into an id, GitHub-style, deduping repeats. */
+function addHeadingIds(html) {
+  const seen = new Map();
+  return html.replace(/<(h[1-6])>([\s\S]*?)<\/\1>/g, (whole, tag, inner) => {
+    const plain = inner.replace(/<[^>]+>/g, '');
+    let slug = slugifyHeading(plain) || 'section';
+    const n = seen.get(slug) || 0;
+    seen.set(slug, n + 1);
+    if (n > 0) slug = `${slug}-${n}`;
+    return `<${tag} id="${slug}">${inner}</${tag}>`;
+  });
+}
+
 /** Render markdown to HTML using the marked library. */
 function renderMarkdown(text) {
-  const clean = stripAnsi(text);
+  const clean = stripAnsi(stripFrontmatter(text));
   if (typeof marked !== 'undefined') {
-    return marked.parse(clean, { breaks: true });
+    return addHeadingIds(marked.parse(clean, { breaks: true }));
   }
   return clean.replace(/</g, '&lt;').replace(/\n/g, '<br>');
 }
@@ -131,6 +155,81 @@ function buildTable(cols, rows) {
     `<tr>${cells.map((v, i) => `<td${cols[i]?.cls ? ` class="${cols[i].cls}"` : ''}>${v}</td>`).join('')}</tr>`
   ).join('');
   return `<table class="usage-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+// --- Terminal self-repair ---
+// When a browser terminal's pty fails to spawn (e.g. a broken node-pty install on the user's
+// machine), the terminal panels offer a "Fix & Restart App" button. It hits this same repair
+// flow regardless of which panel (session terminal or git shell) triggered it.
+const TerminalRepair = {
+  POLL_MS: 1000,
+  POLL_MAX_ATTEMPTS: 90,
+
+  /** onUpdate(text, failed) — failed=true means the button should re-enable so the user can retry. */
+  async trigger(onUpdate) {
+    if (onUpdate) onUpdate('Repairing and restarting the app…', false);
+    try {
+      await api('/api/terminal/repair', { method: 'POST' });
+    } catch (e) {
+      if (onUpdate) onUpdate('Repair failed: ' + e.message, true);
+      return;
+    }
+    TerminalRepair._waitForServer(onUpdate, 0);
+  },
+
+  _waitForServer(onUpdate, attempt) {
+    fetch('/api/version').then(res => {
+      if (!res.ok) throw new Error('not ready');
+      location.reload();
+    }).catch(() => {
+      if (attempt >= TerminalRepair.POLL_MAX_ATTEMPTS) {
+        if (onUpdate) onUpdate('Still restarting — reload the page in a moment.', true);
+        return;
+      }
+      setTimeout(() => TerminalRepair._waitForServer(onUpdate, attempt + 1), TerminalRepair.POLL_MS);
+    });
+  }
+};
+
+/**
+ * DOM wiring shared by every terminal/shell panel: connection status text and the spawn-error
+ * "Fix & Restart App" overlay. One instance per panel — ids names that panel's own elements;
+ * describeError formats its panel-specific "X failed to start" message.
+ */
+function createTerminalPanelUI(ids, describeError) {
+  return {
+    setStatus(text, cls) {
+      const el = document.getElementById(ids.status);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.remove('connected', 'error');
+      if (cls) el.classList.add(cls);
+    },
+
+    showError(message, hint) {
+      const overlay = document.getElementById(ids.overlay);
+      const text = document.getElementById(ids.errorText);
+      const btn = document.getElementById(ids.fixBtn);
+      if (text) text.textContent = describeError(message, hint);
+      if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+      if (overlay) overlay.style.display = 'flex';
+    },
+
+    hideError() {
+      const overlay = document.getElementById(ids.overlay);
+      if (overlay) overlay.style.display = 'none';
+    },
+
+    runFix() {
+      const btn = document.getElementById(ids.fixBtn);
+      if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
+      TerminalRepair.trigger((status, failed) => {
+        const text = document.getElementById(ids.errorText);
+        if (text) text.textContent = status;
+        if (failed && btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+      });
+    }
+  };
 }
 
 // --- Theme ---

@@ -10,7 +10,9 @@ Runs entirely on your machine. No cloud, no accounts, no external dependencies b
 
 ## Quick Start
 
-**macOS / Linux / Git Bash on Windows:**
+> **macOS:** just double-click `CM.app` in Finder — no terminal needed.
+
+**Linux / Git Bash on Windows:**
 ```bash
 ./run.sh 1
 ```
@@ -34,7 +36,7 @@ Available options:
 ## Requirements
 
 - Claude Code installed (`~/.claude/` directory must exist)
-- Node.js 18+ (auto-installed by the run script if missing)
+- Node.js 18+ (the run script checks your version and links to nodejs.org if it's missing or too old)
 - git (optional) — the Git panel appears only for projects that are repositories, on machines that have git; everything else works without it
 
 ## What It Manages

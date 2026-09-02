@@ -60,7 +60,7 @@ app.get('/api/changelog', (req, res) => {
 });
 
 // Auto-update via release zip
-const { exec, spawn } = require('child_process');
+const { exec, execFileSync, spawn } = require('child_process');
 const os = require('os');
 const AdmZip = require('adm-zip');
 
@@ -131,6 +131,73 @@ app.post('/api/update/zip', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// Repair a broken node-pty install (e.g. arch mismatch, corrupted native build) and restart.
+const terminalServer = require('./lib/terminal-server');
+
+function verifyPty() {
+  try {
+    execFileSync(process.execPath, [path.join(__dirname, 'scripts', 'verify-pty.js')], {
+      cwd: __dirname,
+      stdio: 'ignore'
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * The two causes reinstalling can't fix by itself: a lost execute bit and a Gatekeeper quarantine
+ * flag on spawn-helper (see lib/terminal-server.js's diagnoseSpawnFailure for why). Both have a
+ * one-line manual fix a non-technical user would otherwise have to be walked through by hand —
+ * do it here instead, before falling back to reinstalling anything.
+ */
+function fixPtyPermissions() {
+  if (process.platform === 'win32') return;
+  const helperPath = terminalServer._spawnHelperPath();
+  if (!helperPath) return;
+  try { fs.chmodSync(helperPath, 0o755); } catch (_) {}
+  try { execFileSync('xattr', ['-d', 'com.apple.quarantine', helperPath], { stdio: 'ignore' }); } catch (_) {}
+}
+
+function npmInstall() {
+  return new Promise(resolve => {
+    exec('npm install', { cwd: __dirname }, err => resolve(!err));
+  });
+}
+
+app.post('/api/terminal/repair', async (req, res) => {
+  try {
+    fixPtyPermissions();
+    if (!verifyPty()) {
+      fs.rmSync(path.join(__dirname, 'node_modules', 'node-pty'), { recursive: true, force: true });
+      await npmInstall();
+      fixPtyPermissions();
+      if (!verifyPty()) {
+        fs.rmSync(path.join(__dirname, 'node_modules'), { recursive: true, force: true });
+        fs.rmSync(path.join(__dirname, 'package-lock.json'), { force: true });
+        await npmInstall();
+        fixPtyPermissions();
+      }
+    }
+  } catch (_) {
+    // Best-effort repair — restart regardless so a fresh process picks up whatever state resulted.
+  }
+
+  res.json({ ok: true });
+
+  setTimeout(() => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+      detached: true,
+      stdio: 'ignore',
+      cwd: __dirname,
+      env: { ...process.env, RESTART_DELAY_MS: '800' }
+    });
+    child.unref();
+    process.exit(0);
+  }, 200);
 });
 
 // Pricing endpoints

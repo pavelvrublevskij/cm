@@ -14,6 +14,15 @@
 // Clicking a changed file shows its diff in the middle column beside the shell rather than in a
 // dialog: the panel already has the room, and the shell stays alive behind the switch.
 
+const _gitShellUI = createTerminalPanelUI(
+  { status: 'git-shell-status', overlay: 'git-shell-error-overlay', errorText: 'git-shell-error-text', fixBtn: 'git-shell-fix-btn' },
+  (message, hint) => {
+    let full = message ? `Shell failed to start: ${message}` : 'Shell failed to start.';
+    if (hint) full += ' ' + hint;
+    return full;
+  }
+);
+
 const GitPanel = {
   LOG_PAGE: 50,
 
@@ -143,6 +152,13 @@ const GitPanel = {
         <div class="git-pane git-pane-shell" id="git-pane-shell">
           <div class="git-shell-idle" id="git-shell-idle">${idleBody}</div>
           <div class="git-shell-host" id="git-shell-host"></div>
+          <div class="term-error-overlay" id="git-shell-error-overlay" style="display:none">
+            <div class="term-error-box">
+              <div class="term-error-icon">⚠</div>
+              <div class="term-error-text" id="git-shell-error-text"></div>
+              <button type="button" class="btn btn-primary" id="git-shell-fix-btn" onclick="GitPanel.runFix()">Fix &amp; Restart App</button>
+            </div>
+          </div>
         </div>
         <div class="git-pane git-pane-diff" id="git-pane-diff">
           <div class="git-diff-body" id="git-diff-body">
@@ -197,6 +213,7 @@ const GitPanel = {
     GitPanel._diffPath = filePath;
     GitPanel._diffSha = sha || null;
     GitPanel.showPane('diff');
+    GitPanel._highlightOpenFile();
 
     const body = document.getElementById('git-diff-body');
     if (body) showLoading(body, `Diffing ${filePath}…`);
@@ -218,6 +235,19 @@ const GitPanel = {
       return;
     }
     FileHistory.renderDiff(body, result, filePath);
+  },
+
+  /**
+   * Mark which file's diff is showing, without a full re-render of "to commit" — that would reset
+   * every checkbox back to checked. Only a working-tree diff (no sha) can match a "to commit" row;
+   * a commit picked from history never should, even if it happens to touch a same-named file.
+   */
+  _highlightOpenFile() {
+    const active = GitPanel._diffSha ? null : GitPanel._diffPath;
+    document.querySelectorAll('#git-changes .git-file-link').forEach(link => {
+      const row = link.closest('.git-file-row');
+      if (row) row.classList.toggle('git-file-row-active', active != null && link.getAttribute('data-path') === active);
+    });
   },
 
   /** The column, plus the rail that brings it back once folded. */
@@ -258,7 +288,9 @@ const GitPanel = {
   _renderChanges() {
     const host = document.getElementById('git-changes');
     if (!host) return;
-    host.innerHTML = GitPanel._toCommitHtml() + GitPanel._toPushHtml();
+    // To commit gets whatever height is left; to pull/to push stay pinned at the bottom.
+    host.innerHTML = `<div class="git-changes-commit-section">${GitPanel._toCommitHtml()}</div>`
+      + `<div class="git-changes-bottom">${GitPanel._toPullHtml()}${GitPanel._toPushHtml()}</div>`;
     GitPanel.syncGroups();
   },
 
@@ -296,8 +328,8 @@ const GitPanel = {
   },
 
   viewMode() {
-    try { return localStorage.getItem(GitPanel.VIEW_MODE_KEY) === 'tree' ? 'tree' : 'flat'; }
-    catch (_) { return 'flat'; }
+    try { return localStorage.getItem(GitPanel.VIEW_MODE_KEY) === 'flat' ? 'flat' : 'tree'; }
+    catch (_) { return 'tree'; }
   },
 
   setViewMode(mode) {
@@ -318,15 +350,28 @@ const GitPanel = {
   _fileRowHtml(file, depth) {
     const badge = GitPanel.BADGE_CLASS[file.label] || 'ctx-file-badge-edited';
     const name = GitPanel.viewMode() === 'tree' ? file.path.split('/').pop() : file.path;
+    const isOpen = !GitPanel._diffSha && GitPanel._diffPath === file.path;
     return `
-      <div class="git-file-row" style="--git-depth:${depth}">
+      <div class="git-file-row${isOpen ? ' git-file-row-active' : ''}" style="--git-depth:${depth}">
         <input type="checkbox" class="git-file-cb" value="${escapeAttr(file.path)}" checked
           onchange="GitPanel.syncGroups()" title="Include in the commit">
         <span class="ctx-file-badge git-file-badge ${escapeHtml(badge)}">${escapeHtml(file.label)}</span>
         <button class="git-file-path git-file-link" data-path="${escapeAttr(file.path)}"
           onclick="GitPanel.openDiff(this.getAttribute('data-path'))"
           title="Show what committing ${escapeAttr(file.path)} would record">${escapeHtml(name)}</button>
+        ${GitPanel._fileStatHtml(file)}
       </div>`;
+  },
+
+  /** Line-count stat shown next to a file so its size of change is visible before opening the diff. */
+  _fileStatHtml(file) {
+    const stat = file.stat;
+    if (!stat) return '';
+    if (stat.binary) return '<span class="git-file-stat git-file-stat-binary">binary</span>';
+    const parts = [];
+    if (stat.added) parts.push(`<span class="diff-added">+${stat.added}</span>`);
+    if (stat.removed) parts.push(`<span class="diff-removed">-${stat.removed}</span>`);
+    return parts.length ? `<span class="git-file-stat">${parts.join(' ')}</span>` : '';
   },
 
   /** Group paths into nested folders so a whole folder can be unticked at once. */
@@ -415,12 +460,16 @@ const GitPanel = {
   },
 
   _actionsHtml() {
-    const files = (GitPanel._info || {}).files || [];
-    const unpushed = ((GitPanel._info || {}).unpushed || []).length;
+    const info = GitPanel._info || {};
+    const files = info.files || [];
+    const unpushed = (info.unpushed || []).length;
+    // A brand new local branch has no upstream to diff against, so `unpushed` is always empty —
+    // that must not block the first push, which is what sets the upstream in the first place.
+    const canPush = info.hasRemote && (!info.upstream || unpushed > 0);
 
     return GitPanel._actionButton('commit', 'Commit', 'GitPanel.commit(false)', files.length, ' btn-primary')
       + GitPanel._actionButton('commit-push', 'Commit &amp; Push', 'GitPanel.commit(true)', files.length)
-      + GitPanel._actionButton('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', unpushed);
+      + GitPanel._actionButton('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', canPush);
   },
 
   /**
@@ -482,6 +531,29 @@ const GitPanel = {
       </div>
       ${body}
       ${behindNote}`;
+  },
+
+  /**
+   * Incoming commits a Pull would bring in, visible as soon as a Fetch has updated the
+   * remote-tracking ref — so the user can look ahead without moving HEAD.
+   */
+  _toPullHtml() {
+    const info = GitPanel._info || {};
+    if (!info.behind) return '';
+    const incoming = info.incoming || [];
+
+    const commits = incoming.map(c => `
+      <div class="git-commit-row">
+        <code>${escapeHtml(c.sha)}</code>
+        <span class="git-commit-subject">${escapeHtml(c.subject)}</span>
+      </div>`).join('');
+
+    return `
+      <div class="git-changes-header">
+        <span class="git-changes-title">To pull</span>
+        <span class="git-count-badge">${info.behind}</span>
+      </div>
+      <div class="git-changes-commits">${commits}</div>`;
   },
 
   /** Commit the ticked files with the panel's message, reusing the shared commit path. */
@@ -693,11 +765,16 @@ const GitPanel = {
 
   openShell() {
     if (GitPanel._view) return;
+    _gitShellUI.hideError();
     const view = TermView.create({
       hostId: 'git-shell-host',
       url: GitPanel._shellUrl(),
-      onStatus: (text, cls) => GitPanel._setStatus(text, cls),
-      onOpen: () => { if (typeof GitActions !== 'undefined') GitActions.refreshShellState(); },
+      onStatus: (text, cls) => _gitShellUI.setStatus(text, cls),
+      onOpen: () => {
+        _gitShellUI.hideError();
+        if (typeof GitActions !== 'undefined') GitActions.refreshShellState();
+      },
+      onSpawnError: (message, control) => _gitShellUI.showError(message, control && control.hint),
     });
     if (!view) {
       toast('Terminal libraries failed to load', 'error');
@@ -707,6 +784,8 @@ const GitPanel = {
     GitPanel._showShell(true);
     GitPanel._applyRecipesState();
   },
+
+  runFix() { _gitShellUI.runFix(); },
 
   _shellUrl() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -724,7 +803,8 @@ const GitPanel = {
     GitPanel._disposeView();
     GitPanel._showShell(false);
     GitPanel._applyRecipesState();
-    GitPanel._setStatus('disconnected', '');
+    _gitShellUI.setStatus('disconnected', '');
+    _gitShellUI.hideError();
     if (typeof GitActions !== 'undefined') GitActions.refreshShellState();
   },
 
@@ -739,14 +819,6 @@ const GitPanel = {
     const host = document.getElementById('git-shell-host');
     if (idle) idle.style.display = on ? 'none' : '';
     if (host) host.style.display = on ? '' : 'none';
-  },
-
-  _setStatus(text, cls) {
-    const el = document.getElementById('git-shell-status');
-    if (!el) return;
-    el.textContent = text;
-    el.classList.remove('connected', 'error');
-    if (cls) el.classList.add(cls);
   },
 
   _sendResize() {

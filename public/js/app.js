@@ -40,6 +40,21 @@ const App = {
     // Listen for back/forward
     window.addEventListener('hashchange', () => App.restoreRoute());
 
+    // A markdown preview's own links (a table of contents, `[text](#heading)`) point at a heading
+    // id, not a view — left to the hashchange listener above, they would reroute the whole app
+    // instead of scrolling. Only intercept when the fragment actually matches an element on the
+    // page, so real in-app hash routes (which never collide with an element id) are untouched.
+    document.addEventListener('click', e => {
+      const a = e.target.closest('a[href^="#"]');
+      if (!a) return;
+      const id = a.getAttribute('href').slice(1);
+      if (!id) return;
+      const target = document.getElementById(id);
+      if (!target) return;
+      e.preventDefault();
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
     // Intercept keyboard refresh shortcuts — handle in-app instead of reloading
     window.addEventListener('keydown', e => {
       const isRefresh = e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'r');
@@ -109,21 +124,12 @@ const App = {
     const previousProject = App.currentProject;
     const previousSessionId = (typeof Sessions !== 'undefined' && Sessions.detailState) ? Sessions.detailState.sessionId : null;
 
-    // Gate navigation away from session-detail when a browser terminal pty is attached.
-    // confirmLeave handles all decision paths (no pty, no-sessionId-yet, prompt the user); it only
-    // proceeds when the user confirms — Cancel short-circuits and leaves the view unchanged.
     // Switching directly from one session's detail to another's (e.g. resuming a different
     // session while one is already open) counts as leaving too — otherwise the terminal pane
     // stays attached to the old session while the UI shows the new one.
     const switchingSession = previousView === 'session-detail' && view === 'session-detail'
       && (opts.slug !== previousProject || opts.sessionId !== previousSessionId);
     const leavingSession = (previousView === 'session-detail' && view !== 'session-detail') || switchingSession;
-    if (leavingSession && !opts._terminalConfirmed && typeof TerminalPanel !== 'undefined' && TerminalPanel.isOpen() && TerminalPanel.hasAttachedPty()) {
-      TerminalPanel.confirmLeave(() => {
-        App.navigate(view, Object.assign({}, opts, { _terminalConfirmed: true }), fromHash);
-      });
-      return;
-    }
 
     // Stop auto-refresh + close in-page terminal when leaving session-detail
     if (leavingSession) {
