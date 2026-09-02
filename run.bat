@@ -9,7 +9,7 @@ setlocal enabledelayedexpansion
 
 set PORT=3000
 set URL=http://127.0.0.1:%PORT%
-set MIN_NODE=20
+set MIN_NODE=18
 
 :: Header
 echo.
