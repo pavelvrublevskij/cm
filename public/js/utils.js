@@ -74,9 +74,17 @@ function renderMarkdown(text) {
   return clean.replace(/</g, '&lt;').replace(/\n/g, '<br>');
 }
 
+/** Decode HTML entities back to literal characters (e.g. subagent task-notification content
+ *  sometimes stores code snippets pre-escaped, which would otherwise render as literal &lt;/&gt;). */
+function decodeHtmlEntities(str) {
+  const ta = document.createElement('textarea');
+  ta.innerHTML = str;
+  return ta.value;
+}
+
 /** Render markdown for chat messages, escaping any raw HTML in the source instead of injecting it (chat text is untrusted user/model content, not a document preview). */
 function renderChatMarkdown(text) {
-  const clean = stripAnsi(text);
+  const clean = decodeHtmlEntities(stripAnsi(text));
   if (typeof marked === 'undefined') {
     return clean.replace(/</g, '&lt;').replace(/\n/g, '<br>');
   }
