@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const request = require('supertest');
 const { app, HOME } = require('./helpers/app');
-const { CONTENT_MAX_BYTES } = require('../lib/project-files');
+const { CONTENT_MAX_BYTES, CONTENT_HARD_LIMIT_BYTES, readFileChunk } = require('../lib/project-files');
 
 const PROJ_DIR = path.join(HOME, 'pf-test-project');
 
@@ -342,11 +342,67 @@ test('content: binary files are flagged, not returned', async () => {
   assert.strictEqual(res.body.content, undefined);
 });
 
-test('content: oversized files are flagged, not returned', async () => {
+test('content: a file over the inline size comes back as a first chunk, not blocked', async () => {
   const res = await request(app).get(`/api/projects/${SLUG}/files/content`).query({ path: 'big.txt' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.tooLarge, undefined);
+  assert.strictEqual(res.body.binary, false);
+  assert.strictEqual(res.body.content.length, CONTENT_MAX_BYTES);
+  assert.strictEqual(res.body.done, false);
+  assert.strictEqual(res.body.nextOffset, CONTENT_MAX_BYTES);
+  assert.strictEqual(res.body.size, CONTENT_MAX_BYTES + 10);
+});
+
+test('content: the next chunk is fetched via ?offset and reaches done:true at EOF', async () => {
+  const res = await request(app)
+    .get(`/api/projects/${SLUG}/files/content`)
+    .query({ path: 'big.txt', offset: CONTENT_MAX_BYTES });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.content, 'x'.repeat(10));
+  assert.strictEqual(res.body.done, true);
+  assert.strictEqual(res.body.nextOffset, CONTENT_MAX_BYTES + 10);
+});
+
+test('content: a small file comes back whole in one chunk, marked done', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/content`).query({ path: 'src/app.js' });
+  assert.strictEqual(res.body.content, 'const a = 1;\n');
+  assert.strictEqual(res.body.done, true);
+  assert.strictEqual(res.body.nextOffset, Buffer.byteLength('const a = 1;\n'));
+});
+
+test('content: an offset past EOF returns an empty done chunk', async () => {
+  const res = await request(app)
+    .get(`/api/projects/${SLUG}/files/content`)
+    .query({ path: 'src/app.js', offset: 999999 });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.content, '');
+  assert.strictEqual(res.body.done, true);
+});
+
+test('content: a chunk boundary never splits a multi-byte UTF-8 character', async () => {
+  const utfPath = path.join(PROJ_DIR, 'utf-boundary.txt');
+  const prefix = 'x'.repeat(CONTENT_MAX_BYTES - 1);
+  fs.writeFileSync(utfPath, prefix + '€' + 'y'.repeat(20));
+
+  const first = readFileChunk(utfPath, 0);
+  assert.strictEqual(Buffer.byteLength(first.content, 'utf-8'), CONTENT_MAX_BYTES - 1, 'the split euro sign is held back to the next chunk');
+  assert.strictEqual(first.done, false);
+
+  const second = readFileChunk(utfPath, first.nextOffset);
+  assert.strictEqual(second.content, '€' + 'y'.repeat(20));
+  assert.strictEqual(second.done, true);
+  fs.rmSync(utfPath, { force: true });
+});
+
+test('content: a file past the hard limit is refused outright', async () => {
+  const hugePath = path.join(PROJ_DIR, 'way-too-big.txt');
+  fs.closeSync(fs.openSync(hugePath, 'w'));
+  fs.truncateSync(hugePath, CONTENT_HARD_LIMIT_BYTES + 10);
+  const res = await request(app).get(`/api/projects/${SLUG}/files/content`).query({ path: 'way-too-big.txt' });
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.body.tooLarge, true);
   assert.strictEqual(res.body.content, undefined);
+  fs.rmSync(hugePath, { force: true });
 });
 
 test('content: missing file returns 404', async () => {

@@ -41,18 +41,50 @@ function stripAnsi(text) {
   return (text || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 }
 
+/** Drop a leading YAML frontmatter block (--- ... ---) — metadata, not content to render. */
+function stripFrontmatter(text) {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/, '');
+}
+
+/** GitHub-style heading slug, so a markdown link like `#installation` has a matching id to find. */
+function slugifyHeading(text) {
+  return text.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+}
+
+/** marked renders headings with no id by default, so `[text](#heading)` links have nothing to
+ *  jump to. Slugify each heading's text into an id, GitHub-style, deduping repeats. */
+function addHeadingIds(html) {
+  const seen = new Map();
+  return html.replace(/<(h[1-6])>([\s\S]*?)<\/\1>/g, (whole, tag, inner) => {
+    const plain = inner.replace(/<[^>]+>/g, '');
+    let slug = slugifyHeading(plain) || 'section';
+    const n = seen.get(slug) || 0;
+    seen.set(slug, n + 1);
+    if (n > 0) slug = `${slug}-${n}`;
+    return `<${tag} id="${slug}">${inner}</${tag}>`;
+  });
+}
+
 /** Render markdown to HTML using the marked library. */
 function renderMarkdown(text) {
-  const clean = stripAnsi(text);
+  const clean = stripAnsi(stripFrontmatter(text));
   if (typeof marked !== 'undefined') {
-    return marked.parse(clean, { breaks: true });
+    return addHeadingIds(marked.parse(clean, { breaks: true }));
   }
   return clean.replace(/</g, '&lt;').replace(/\n/g, '<br>');
 }
 
+/** Decode HTML entities back to literal characters (e.g. subagent task-notification content
+ *  sometimes stores code snippets pre-escaped, which would otherwise render as literal &lt;/&gt;). */
+function decodeHtmlEntities(str) {
+  const ta = document.createElement('textarea');
+  ta.innerHTML = str;
+  return ta.value;
+}
+
 /** Render markdown for chat messages, escaping any raw HTML in the source instead of injecting it (chat text is untrusted user/model content, not a document preview). */
 function renderChatMarkdown(text) {
-  const clean = stripAnsi(text);
+  const clean = decodeHtmlEntities(stripAnsi(text));
   if (typeof marked === 'undefined') {
     return clean.replace(/</g, '&lt;').replace(/\n/g, '<br>');
   }
@@ -131,6 +163,81 @@ function buildTable(cols, rows) {
     `<tr>${cells.map((v, i) => `<td${cols[i]?.cls ? ` class="${cols[i].cls}"` : ''}>${v}</td>`).join('')}</tr>`
   ).join('');
   return `<table class="usage-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+// --- Terminal self-repair ---
+// When a browser terminal's pty fails to spawn (e.g. a broken node-pty install on the user's
+// machine), the terminal panels offer a "Fix & Restart App" button. It hits this same repair
+// flow regardless of which panel (session terminal or git shell) triggered it.
+const TerminalRepair = {
+  POLL_MS: 1000,
+  POLL_MAX_ATTEMPTS: 90,
+
+  /** onUpdate(text, failed) — failed=true means the button should re-enable so the user can retry. */
+  async trigger(onUpdate) {
+    if (onUpdate) onUpdate('Repairing and restarting the app…', false);
+    try {
+      await api('/api/terminal/repair', { method: 'POST' });
+    } catch (e) {
+      if (onUpdate) onUpdate('Repair failed: ' + e.message, true);
+      return;
+    }
+    TerminalRepair._waitForServer(onUpdate, 0);
+  },
+
+  _waitForServer(onUpdate, attempt) {
+    fetch('/api/version').then(res => {
+      if (!res.ok) throw new Error('not ready');
+      location.reload();
+    }).catch(() => {
+      if (attempt >= TerminalRepair.POLL_MAX_ATTEMPTS) {
+        if (onUpdate) onUpdate('Still restarting — reload the page in a moment.', true);
+        return;
+      }
+      setTimeout(() => TerminalRepair._waitForServer(onUpdate, attempt + 1), TerminalRepair.POLL_MS);
+    });
+  }
+};
+
+/**
+ * DOM wiring shared by every terminal/shell panel: connection status text and the spawn-error
+ * "Fix & Restart App" overlay. One instance per panel — ids names that panel's own elements;
+ * describeError formats its panel-specific "X failed to start" message.
+ */
+function createTerminalPanelUI(ids, describeError) {
+  return {
+    setStatus(text, cls) {
+      const el = document.getElementById(ids.status);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.remove('connected', 'error');
+      if (cls) el.classList.add(cls);
+    },
+
+    showError(message, hint) {
+      const overlay = document.getElementById(ids.overlay);
+      const text = document.getElementById(ids.errorText);
+      const btn = document.getElementById(ids.fixBtn);
+      if (text) text.textContent = describeError(message, hint);
+      if (btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+      if (overlay) overlay.style.display = 'flex';
+    },
+
+    hideError() {
+      const overlay = document.getElementById(ids.overlay);
+      if (overlay) overlay.style.display = 'none';
+    },
+
+    runFix() {
+      const btn = document.getElementById(ids.fixBtn);
+      if (btn) { btn.disabled = true; btn.textContent = 'Restarting…'; }
+      TerminalRepair.trigger((status, failed) => {
+        const text = document.getElementById(ids.errorText);
+        if (text) text.textContent = status;
+        if (failed && btn) { btn.disabled = false; btn.textContent = 'Fix & Restart App'; }
+      });
+    }
+  };
 }
 
 // --- Theme ---
@@ -370,9 +477,27 @@ function renderSessionBadges(s, opts = {}) {
 function renderSessionCard(s, opts = {}) {
   const slug = opts.slug || s.slug;
 
-  const dotHtml = s.active
-    ? `<span class="session-active-dot session-active-dot--${s.activeKind || 'os'}" title="${s.activeKind === 'browser' ? 'Browser terminal active — click to reconnect' : 'OS terminal launched recently'}"></span>`
-    : '';
+  const dotTitles = {
+    browser: 'Browser terminal active — click to reconnect',
+    os: 'OS terminal launched recently',
+    readonly: 'Open read-only in another tab'
+  };
+  // A real process (browser/os) and read-only viewers are independent facts and can both be true
+  // at once. A card can only carry one onclick, and "reconnect the terminal" vs "view read-only"
+  // are different actions — so when both are active, render two separate cards, each clickable
+  // into the right one, instead of merging them into a single card with an ambiguous click target.
+  const activeKinds = Array.isArray(s.activeKinds) ? s.activeKinds : (s.active ? [s.activeKind || 'os'] : []);
+  if (activeKinds.length > 1) {
+    return activeKinds
+      .map(k => renderSessionCard(Object.assign({}, s, { activeKind: k, activeKinds: [k] }), opts))
+      .join('');
+  }
+  const onclick = activeKinds[0] === 'readonly'
+    ? `Sessions.openReadOnly('${slug}', '${s.sessionId}')`
+    : (opts.onclick || '');
+  const dotHtml = activeKinds
+    .map(k => `<span class="session-active-dot session-active-dot--${k}" title="${dotTitles[k] || dotTitles.os}"></span>`)
+    .join('');
   const remoteIcon = s.remoteControlled
     ? `<span class="session-remote-icon" title="Remote-controlled session (used mobile/web bridge)" aria-label="remote-controlled">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -414,7 +539,7 @@ function renderSessionCard(s, opts = {}) {
     : '';
 
   return `
-    <div class="session-card" style="cursor:pointer" data-session-id="${s.sessionId}" onclick="${opts.onclick || ''}">
+    <div class="session-card" style="cursor:pointer" data-session-id="${s.sessionId}" onclick="${onclick}">
       ${headerHtml}
       ${opts.snippets || ''}
       <div class="session-meta">
@@ -430,6 +555,7 @@ function renderSessionCard(s, opts = {}) {
             <div class="action-menu-panel">
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.resumeOS('${slug}', '${s.sessionId}')">Resume in OS terminal</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.resumeBrowser('${slug}', '${s.sessionId}')">Resume in browser terminal</button>
+              <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openReadOnly('${slug}', '${s.sessionId}')">Open (read-only)</button>
               <button class="action-menu-item" data-slug="${slug}" data-session="${s.sessionId}" data-title="${escapeHtml(s.summary || s.firstPrompt || '')}" onclick="event.stopPropagation(); Sessions.renameAction(this)">Rename</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.copyIdAction('${s.sessionId}')">Copy session ID</button>
               ${opts.archived

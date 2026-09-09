@@ -20,13 +20,12 @@ function loadPlanStems() {
 }
 
 function fileHasPlan(sessionId, filePath, planStems) {
-  const cached = planCache.get(sessionId);
-  if (cached !== undefined) return cached;
-  if (!planStems.length) { planCache.set(sessionId, false); return false; }
+  if (planCache.get(sessionId)) return true;
+  if (!planStems.length) return false;
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const hasPlan = planStems.some(stem => content.includes(stem));
-    planCache.set(sessionId, hasPlan);
+    if (hasPlan) planCache.set(sessionId, true);
     return hasPlan;
   } catch (_) { return false; }
 }
@@ -58,10 +57,20 @@ function findFirstMeaningfulPrompt(filePath) {
 }
 
 router.get('/active-count', wrapRoute((req, res) => {
+  // listAllActiveSessions() carries read-only viewer instances as separate additive rows (a
+  // session can have several), but the dashboard/project card for that session shows just one dot
+  // (getActiveKind's os/browser/readonly precedence). Dedupe by session here to match — one count
+  // per session regardless of how many rows/kinds contributed to it.
   const all = listAllActiveSessions();
+  const seen = new Set();
   const byProject = {};
-  for (const s of all) byProject[s.slug] = (byProject[s.slug] || 0) + 1;
-  res.json({ total: all.length, byProject });
+  for (const s of all) {
+    const key = `${s.slug}|${s.sessionId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    byProject[s.slug] = (byProject[s.slug] || 0) + 1;
+  }
+  res.json({ total: seen.size, byProject });
 }));
 
 /** Gather dashboard stats and recent sessions across all projects. */

@@ -112,10 +112,20 @@ const GitActions = {
       title: 'Git',
       cls: 'git-panel-modal',
       cancelLabel: 'Close',
+      resizable: { minWidth: 900, minHeight: 460 },
       body: '<div id="git-panel-modal-host"></div>',
+      buttons: [
+        { label: 'Open in new tab ↗', onClick: () => GitActions.openGitPanelInNewTab() }
+      ],
       onClose: () => GitPanel.unmount()
     });
     GitPanel.mount('git-panel-modal-host', GitActions._slug);
+  },
+
+  /** Same panel, opened as its own page in a new tab — nothing else from the app around it. */
+  openGitPanelInNewTab() {
+    if (!GitActions._slug) return;
+    window.open('/git-window.html?slug=' + encodeURIComponent(GitActions._slug), '_blank');
   },
 
   /** Commit (and optionally push), then repaint every view that shows git state. */

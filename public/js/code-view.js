@@ -8,6 +8,7 @@ const CodeView = {
   MIN_STRUCTURE_PX: 180,
   MIN_PANE_PX: 260,
   CLICK_THRESHOLD_PX: 4,
+  NEAR_BOTTOM_PX: 400,
 
   /** Markdown and HTML have a rendered form worth showing beside the source. */
   isPreviewable(filePath) {
@@ -51,10 +52,20 @@ const CodeView = {
       });
       if (opts.onChange) cm.on('change', opts.onChange);
       if (opts.trackChanges && opts.changedLines) CodeView._applyChangeMarkers(cm, host, opts.changedLines);
+      if (opts.onNearBottom) {
+        cm.on('scroll', () => {
+          const info = cm.getScrollInfo();
+          if (info.top + info.clientHeight >= info.height - CodeView.NEAR_BOTTOM_PX) opts.onNearBottom();
+        });
+      }
       let searchMarks = [];
       return {
         getValue: () => cm.getValue(),
         refresh: () => cm.refresh(),
+        appendText: text => {
+          const line = cm.lastLine();
+          cm.replaceRange(text, CodeMirror.Pos(line, cm.getLine(line).length));
+        },
         setChangedLines: lines => CodeView._applyChangeMarkers(cm, host, lines),
         getViewState: () => {
           const cursor = cm.getCursor();
@@ -85,9 +96,15 @@ const CodeView = {
         }
       });
     }
+    if (opts.onNearBottom) {
+      ta.addEventListener('scroll', () => {
+        if (ta.scrollTop + ta.clientHeight >= ta.scrollHeight - CodeView.NEAR_BOTTOM_PX) opts.onNearBottom();
+      });
+    }
     return {
       getValue: () => ta.value,
       refresh: () => {},
+      appendText: text => { ta.value += text; },
       setChangedLines: () => {},
       getViewState: () => ({ selectionStart: ta.selectionStart, selectionEnd: ta.selectionEnd, scrollTop: ta.scrollTop }),
       setViewState: state => {

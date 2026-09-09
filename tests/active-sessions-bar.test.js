@@ -26,24 +26,42 @@ const harness = {
 function makeEl() {
   return {
     innerHTML: '',
+    title: '',
     style: { display: '', cssText: '' },
     dataset: {},
+    classList: {
+      _set: new Set(),
+      toggle(cls, force) {
+        const has = this._set.has(cls);
+        const add = force === undefined ? !has : force;
+        if (add) this._set.add(cls); else this._set.delete(cls);
+        return add;
+      },
+      contains(cls) { return this._set.has(cls); },
+    },
     querySelectorAll: () => [],
     addEventListener() {},
     remove() {},
   };
 }
 
+const elementsById = {};
+const localStorageStore = {};
+
 const context = vm.createContext({
   document: {
     addEventListener: () => {},
-    getElementById: () => makeEl(),
+    getElementById: id => (elementsById[id] || (elementsById[id] = makeEl())),
     querySelector: () => null,
     querySelectorAll: sel => (sel.includes('.session-active-dot') ? harness.dots : []),
     createElement: () => makeEl(),
     body: { appendChild() {} },
   },
   window: { innerWidth: 1200, innerHeight: 800 },
+  localStorage: {
+    getItem: k => (k in localStorageStore ? localStorageStore[k] : null),
+    setItem: (k, v) => { localStorageStore[k] = v; },
+  },
   setInterval: () => 1,
   clearInterval: () => {},
   api: async url => { harness.apiCalls.push(url); return {}; },
@@ -66,6 +84,8 @@ beforeEach(() => {
   harness.terminalClosed = false;
   harness.autoRefreshStopped = false;
   harness.dashboardRendered = null;
+  Object.keys(elementsById).forEach(id => delete elementsById[id]);
+  Object.keys(localStorageStore).forEach(k => delete localStorageStore[k]);
 
   ActiveSessionsBar._sessions = [
     { slug: SLUG, sessionId: SESSION_A, kind: 'os', title: 'A' },
@@ -138,6 +158,40 @@ test('closing the session being viewed stops polling, closes the terminal and go
   assert.strictEqual(harness.navigations[0].opts.slug, SLUG);
 });
 
+test('defaults to the bottom position when nothing is stored', () => {
+  ActiveSessionsBar._applyPosition(context.localStorage.getItem(ActiveSessionsBar.POSITION_KEY) || 'bottom');
+  const bar = elementsById['active-sessions-bar'];
+  const toggle = elementsById['asb-position-toggle'];
+  assert.strictEqual(bar.classList.contains('asb-position-top'), false);
+  assert.strictEqual(toggle.title, 'Move to top');
+});
+
+test('toggling the position moves the bar to the top and persists the choice', () => {
+  ActiveSessionsBar._applyPosition('bottom');
+  ActiveSessionsBar._togglePosition();
+  const bar = elementsById['active-sessions-bar'];
+  const toggle = elementsById['asb-position-toggle'];
+  assert.strictEqual(bar.classList.contains('asb-position-top'), true);
+  assert.strictEqual(toggle.title, 'Move to bottom');
+  assert.strictEqual(context.localStorage.getItem(ActiveSessionsBar.POSITION_KEY), 'top');
+});
+
+test('toggling twice returns the bar to the bottom', () => {
+  ActiveSessionsBar._applyPosition('bottom');
+  ActiveSessionsBar._togglePosition();
+  ActiveSessionsBar._togglePosition();
+  const bar = elementsById['active-sessions-bar'];
+  assert.strictEqual(bar.classList.contains('asb-position-top'), false);
+  assert.strictEqual(context.localStorage.getItem(ActiveSessionsBar.POSITION_KEY), 'bottom');
+});
+
+test('start restores a previously stored top position', () => {
+  localStorageStore[ActiveSessionsBar.POSITION_KEY] = 'top';
+  ActiveSessionsBar.start();
+  const bar = elementsById['active-sessions-bar'];
+  assert.strictEqual(bar.classList.contains('asb-position-top'), true);
+});
+
 test('closing another session while viewing one leaves the current view alone', async () => {
   context.App.currentView = 'session-detail';
   context.Sessions.detailState = { slug: SLUG, sessionId: SESSION_A };
@@ -153,6 +207,99 @@ test('a terminal attached to a different session is left open', async () => {
   context.TerminalPanel.state = { slug: SLUG, sessionId: SESSION_B };
   await ActiveSessionsBar.close(SLUG, SESSION_A);
   assert.strictEqual(harness.terminalClosed, false);
+  assert.strictEqual(harness.navigations.length, 1);
+  assert.strictEqual(harness.navigations[0].view, 'project-detail');
+});
+
+test('closing a real session while viewing it read-only leaves the read-only view alone', async () => {
+  context.App.currentView = 'session-detail';
+  context.Sessions.detailState = { slug: SLUG, sessionId: SESSION_A, readOnly: true, readOnlyInstanceId: 'instance-1' };
+  await ActiveSessionsBar.close(SLUG, SESSION_A);
+  assert.strictEqual(harness.autoRefreshStopped, false);
+  assert.strictEqual(harness.terminalClosed, false);
+  assert.deepStrictEqual(harness.navigations, []);
+});
+
+// ── read-only instances ──────────────────────────────────────────────────────
+
+test('open() with readOnly navigates with the read-only flag set', () => {
+  ActiveSessionsBar.open(SLUG, SESSION_A, true);
+  assert.strictEqual(harness.navigations.length, 1);
+  assert.strictEqual(harness.navigations[0].opts.readOnly, true);
+});
+
+test('open() without readOnly navigates without the flag', () => {
+  ActiveSessionsBar.open(SLUG, SESSION_A);
+  assert.strictEqual(harness.navigations[0].opts.readOnly, false);
+});
+
+test('_isCurrent: a readonly pill matches only my own instance id', () => {
+  const pill = { sessionId: SESSION_A, kind: 'readonly', instanceId: 'instance-1' };
+  assert.strictEqual(ActiveSessionsBar._isCurrent(pill, SESSION_A, true, 'instance-1'), true);
+  assert.strictEqual(ActiveSessionsBar._isCurrent(pill, SESSION_A, true, 'instance-2'), false);
+  assert.strictEqual(ActiveSessionsBar._isCurrent(pill, SESSION_A, false, null), false);
+});
+
+test('_isCurrent: an os/browser pill does not match while I am viewing that session read-only', () => {
+  const pill = { sessionId: SESSION_A, kind: 'os' };
+  assert.strictEqual(ActiveSessionsBar._isCurrent(pill, SESSION_A, true, 'instance-1'), false);
+  assert.strictEqual(ActiveSessionsBar._isCurrent(pill, SESSION_A, false, null), true);
+});
+
+test('closeReadonly deactivates on the server and drops only the matching instance', async () => {
+  ActiveSessionsBar._sessions = [
+    { slug: SLUG, sessionId: SESSION_A, kind: 'readonly', instanceId: 'instance-1', title: 'A' },
+    { slug: SLUG, sessionId: SESSION_A, kind: 'readonly', instanceId: 'instance-2', title: 'A' },
+  ];
+  await ActiveSessionsBar.closeReadonly(SLUG, SESSION_A, 'instance-1');
+  assert.deepStrictEqual(harness.apiCalls, [`/api/projects/${SLUG}/sessions/${SESSION_A}/close-readonly`]);
+  assert.deepStrictEqual(ActiveSessionsBar._sessions.map(s => s.instanceId), ['instance-2']);
+});
+
+test('closing a real session preserves a readonly kind still present in the cache', async () => {
+  context.Sessions.cache[SLUG][0].activeKinds = ['os', 'readonly'];
+  await ActiveSessionsBar.close(SLUG, SESSION_A);
+  const cached = context.Sessions.cache[SLUG][0];
+  assert.deepStrictEqual(cached.activeKinds, ['readonly']);
+  assert.strictEqual(cached.active, true);
+  assert.strictEqual(cached.activeKind, 'readonly');
+});
+
+test('closing a real session with no readonly kind clears active entirely', async () => {
+  context.Sessions.cache[SLUG][0].activeKinds = ['os'];
+  await ActiveSessionsBar.close(SLUG, SESSION_A);
+  const cached = context.Sessions.cache[SLUG][0];
+  assert.deepStrictEqual(cached.activeKinds, []);
+  assert.strictEqual(cached.active, false);
+  assert.strictEqual(cached.activeKind, null);
+});
+
+test('closing a real session keeps the dashboard active-sessions row when readonly survives', async () => {
+  context.Dashboard._activeSessions = [
+    { slug: SLUG, sessionId: SESSION_A, activeKinds: ['os', 'readonly'] },
+    { slug: SLUG, sessionId: SESSION_B },
+  ];
+  await ActiveSessionsBar.close(SLUG, SESSION_A);
+  assert.deepStrictEqual(harness.dashboardRendered.map(s => s.sessionId), [SESSION_A, SESSION_B]);
+  const a = harness.dashboardRendered.find(s => s.sessionId === SESSION_A);
+  assert.strictEqual(a.activeKind, 'readonly');
+  assert.deepStrictEqual(a.activeKinds, ['readonly']);
+});
+
+test('closeReadonly navigates away only when closing the instance I am currently viewing', async () => {
+  ActiveSessionsBar._sessions = [
+    { slug: SLUG, sessionId: SESSION_A, kind: 'readonly', instanceId: 'instance-1', title: 'A' },
+  ];
+  context.App.currentView = 'session-detail';
+  context.Sessions.detailState = { slug: SLUG, sessionId: SESSION_A, readOnly: true, readOnlyInstanceId: 'instance-2' };
+  await ActiveSessionsBar.closeReadonly(SLUG, SESSION_A, 'instance-1');
+  assert.deepStrictEqual(harness.navigations, []);
+
+  context.Sessions.detailState.readOnlyInstanceId = 'instance-1';
+  ActiveSessionsBar._sessions = [
+    { slug: SLUG, sessionId: SESSION_A, kind: 'readonly', instanceId: 'instance-1', title: 'A' },
+  ];
+  await ActiveSessionsBar.closeReadonly(SLUG, SESSION_A, 'instance-1');
   assert.strictEqual(harness.navigations.length, 1);
   assert.strictEqual(harness.navigations[0].view, 'project-detail');
 });

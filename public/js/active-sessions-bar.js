@@ -1,17 +1,39 @@
 const ActiveSessionsBar = {
   POLL_MS: 15000,
+  POSITION_KEY: 'claude-manager-asb-position',
   _timer: null,
   _sessions: [],
   _lastSidebarKey: null,
   _projectBranches: {},
 
   start() {
+    ActiveSessionsBar._applyPosition(localStorage.getItem(ActiveSessionsBar.POSITION_KEY) || 'bottom');
+    const toggle = document.getElementById('asb-position-toggle');
+    if (toggle) toggle.addEventListener('click', e => { e.stopPropagation(); ActiveSessionsBar._togglePosition(); });
     ActiveSessionsBar.poll();
     ActiveSessionsBar._timer = setInterval(ActiveSessionsBar.poll, ActiveSessionsBar.POLL_MS);
     document.addEventListener('click', () => {
       const p = document.getElementById('asb-new-panel');
       if (p) p.remove();
     });
+  },
+
+  _applyPosition(position) {
+    const bar = document.getElementById('active-sessions-bar');
+    const toggle = document.getElementById('asb-position-toggle');
+    if (!bar) return;
+    bar.classList.toggle('asb-position-top', position === 'top');
+    if (toggle) {
+      toggle.innerHTML = position === 'top' ? '&#8595;' : '&#8593;';
+      toggle.title = position === 'top' ? 'Move to bottom' : 'Move to top';
+    }
+  },
+
+  _togglePosition() {
+    const current = localStorage.getItem(ActiveSessionsBar.POSITION_KEY) || 'bottom';
+    const next = current === 'top' ? 'bottom' : 'top';
+    localStorage.setItem(ActiveSessionsBar.POSITION_KEY, next);
+    ActiveSessionsBar._applyPosition(next);
   },
 
   _showNewPanel(btn, slug) {
@@ -88,8 +110,7 @@ const ActiveSessionsBar = {
 
     bar.style.display = 'flex';
 
-    const inSession = typeof App !== 'undefined' && App.currentView === 'session-detail';
-    const currentSessionId = inSession && typeof Sessions !== 'undefined' ? Sessions.detailState.sessionId : null;
+    const { currentSessionId, currentReadOnly, currentInstanceId } = ActiveSessionsBar._currentSelector();
 
     const slugOrder = [];
     const bySlug = {};
@@ -102,15 +123,17 @@ const ActiveSessionsBar = {
       const group = bySlug[slug];
       const pills = group.map(s => {
         const label = s.title || s.sessionId.slice(0, 12);
-        const isCurrent = s.sessionId === currentSessionId;
+        const isCurrent = ActiveSessionsBar._isCurrent(s, currentSessionId, currentReadOnly, currentInstanceId);
         const warn = ActiveSessionsBar._hasBranchMismatch(s);
         const warnIcon = warn ? `<span class="asb-branch-warn-icon" title="Branch mismatch: session on &quot;${escapeHtml(s.lastGitBranch)}&quot;, project on &quot;${escapeHtml(ActiveSessionsBar._projectBranches[s.slug])}&quot;">&#9888;</span>` : '';
         const archiveIcon = s.archived ? `<span class="asb-archive-icon" title="Session is archived">${ActiveSessionsBar._archiveIconSvg}</span>` : '';
-        return `<div class="asb-pill${isCurrent ? ' asb-pill--current' : ''}${warn ? ' asb-pill--branch-warn' : ''}" data-asb-session="${escapeHtml(s.sessionId)}" data-asb-slug="${escapeHtml(s.slug)}" title="${escapeHtml(s.title || s.sessionId)}">
+        const roTitle = s.kind === 'readonly' ? ' (read-only)' : '';
+        const instanceAttr = s.instanceId ? ` data-asb-instance="${escapeHtml(s.instanceId)}"` : '';
+        return `<div class="asb-pill${isCurrent ? ' asb-pill--current' : ''}${warn ? ' asb-pill--branch-warn' : ''}" data-asb-session="${escapeHtml(s.sessionId)}" data-asb-slug="${escapeHtml(s.slug)}" data-asb-kind="${escapeHtml(s.kind)}"${instanceAttr} title="${escapeHtml(s.title || s.sessionId)}${roTitle}">
           <span class="session-active-dot session-active-dot--${s.kind}"></span>
           ${warnIcon}${archiveIcon}
           <span class="asb-session">${escapeHtml(label)}</span>
-          <button class="asb-close" data-asb-close-session="${escapeHtml(s.sessionId)}" data-asb-close-slug="${escapeHtml(s.slug)}" title="Close session" aria-label="Close">&#215;</button>
+          <button class="asb-close" data-asb-close-session="${escapeHtml(s.sessionId)}" data-asb-close-slug="${escapeHtml(s.slug)}"${instanceAttr} title="Close session" aria-label="Close">&#215;</button>
         </div>`;
       }).join('');
       return `<div class="asb-group">
@@ -125,20 +148,41 @@ const ActiveSessionsBar = {
     container.innerHTML = groupsHtml;
 
     container.querySelectorAll('.asb-pill').forEach(el => {
-      el.addEventListener('click', () => ActiveSessionsBar.open(el.dataset.asbSlug, el.dataset.asbSession));
+      el.addEventListener('click', () => ActiveSessionsBar.open(el.dataset.asbSlug, el.dataset.asbSession, el.dataset.asbKind === 'readonly'));
     });
     container.querySelectorAll('[data-asb-close-session]').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        ActiveSessionsBar.close(btn.dataset.asbCloseSlug, btn.dataset.asbCloseSession);
+        if (btn.dataset.asbInstance) {
+          ActiveSessionsBar.closeReadonly(btn.dataset.asbCloseSlug, btn.dataset.asbCloseSession, btn.dataset.asbInstance);
+        } else {
+          ActiveSessionsBar.close(btn.dataset.asbCloseSlug, btn.dataset.asbCloseSession);
+        }
       });
     });
   },
 
-  _renderSidebar() {
+  // Which session (and, for read-only, which of possibly several tab instances) counts as "the one
+  // I'm currently looking at" — used to highlight the matching pill/sub-item.
+  _currentSelector() {
     const inSession = typeof App !== 'undefined' && App.currentView === 'session-detail';
-    const currentSessionId = inSession && typeof Sessions !== 'undefined' ? Sessions.detailState.sessionId : null;
-    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived).join(',') + '|' + currentSessionId;
+    const detail = inSession && typeof Sessions !== 'undefined' ? Sessions.detailState : null;
+    return {
+      currentSessionId: detail ? detail.sessionId : null,
+      currentReadOnly: !!(detail && detail.readOnly),
+      currentInstanceId: detail ? detail.readOnlyInstanceId : null
+    };
+  },
+
+  _isCurrent(s, currentSessionId, currentReadOnly, currentInstanceId) {
+    if (s.sessionId !== currentSessionId) return false;
+    if (s.kind === 'readonly') return currentReadOnly && s.instanceId === currentInstanceId;
+    return !currentReadOnly;
+  },
+
+  _renderSidebar() {
+    const { currentSessionId, currentReadOnly, currentInstanceId } = ActiveSessionsBar._currentSelector();
+    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
     if (key === ActiveSessionsBar._lastSidebarKey) return;
     ActiveSessionsBar._lastSidebarKey = key;
 
@@ -156,26 +200,30 @@ const ActiveSessionsBar = {
       let anchor = navItem;
       for (const s of sessions) {
         const label = (s.title || s.sessionId.slice(0, 16)).slice(0, 28);
-        const isCurrent = s.sessionId === currentSessionId;
+        const isCurrent = ActiveSessionsBar._isCurrent(s, currentSessionId, currentReadOnly, currentInstanceId);
         const div = document.createElement('div');
         div.className = 'nav-item project-active-sub' + (isCurrent ? ' active' : '');
-        div.title = s.title || s.sessionId;
+        div.title = (s.title || s.sessionId) + (s.kind === 'readonly' ? ' (read-only)' : '');
         const closeBtn = document.createElement('button');
         closeBtn.className = 'asb-close asb-close--sidebar';
         closeBtn.title = 'Close session';
         closeBtn.setAttribute('aria-label', 'Close');
         closeBtn.innerHTML = '&#215;';
-        closeBtn.addEventListener('click', (function(slug, sessionId) {
-          return e => { e.stopPropagation(); ActiveSessionsBar.close(slug, sessionId); };
-        }(s.slug, s.sessionId)));
+        closeBtn.addEventListener('click', (function(slug, sessionId, instanceId) {
+          return e => {
+            e.stopPropagation();
+            if (instanceId) ActiveSessionsBar.closeReadonly(slug, sessionId, instanceId);
+            else ActiveSessionsBar.close(slug, sessionId);
+          };
+        }(s.slug, s.sessionId, s.instanceId)));
         const warn = ActiveSessionsBar._hasBranchMismatch(s);
         const warnIcon = warn ? `<span class="asb-branch-warn-icon" title="Branch mismatch: session on &quot;${escapeHtml(s.lastGitBranch)}&quot;, project on &quot;${escapeHtml(ActiveSessionsBar._projectBranches[s.slug])}&quot;">&#9888;</span>` : '';
         const archiveIcon = s.archived ? `<span class="asb-archive-icon" title="Session is archived">${ActiveSessionsBar._archiveIconSvg}</span>` : '';
         div.innerHTML = `<span class="session-active-dot session-active-dot--${s.kind}"></span>${warnIcon}${archiveIcon}<span class="nav-label">${escapeHtml(label)}</span>`;
         div.appendChild(closeBtn);
-        div.addEventListener('click', (function(slug, sessionId) {
-          return () => ActiveSessionsBar.open(slug, sessionId);
-        }(s.slug, s.sessionId)));
+        div.addEventListener('click', (function(slug, sessionId, kind) {
+          return () => ActiveSessionsBar.open(slug, sessionId, kind === 'readonly');
+        }(s.slug, s.sessionId, s.kind)));
         anchor.insertAdjacentElement('afterend', div);
         anchor = div;
       }
@@ -198,17 +246,43 @@ const ActiveSessionsBar = {
     }
   },
 
+  // Shared tail for close()/closeReadonly(): drop matching entries from the local list and
+  // refresh every view that shows it.
+  _removeFromBar(predicate) {
+    ActiveSessionsBar._sessions = ActiveSessionsBar._sessions.filter(s => !predicate(s));
+    ActiveSessionsBar._render();
+    ActiveSessionsBar._renderSidebar();
+    if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
+  },
+
   async close(slug, sessionId) {
     try {
       await api(`/api/projects/${slug}/sessions/${sessionId}/deactivate`, { method: 'POST' });
     } catch (_) {}
-    ActiveSessionsBar._sessions = ActiveSessionsBar._sessions.filter(
-      s => !(s.slug === slug && s.sessionId === sessionId)
-    );
-    ActiveSessionsBar._render();
-    ActiveSessionsBar._renderSidebar();
-    if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
+    ActiveSessionsBar._removeFromBar(s => s.slug === slug && s.sessionId === sessionId);
     ActiveSessionsBar._clearActiveState(slug, sessionId);
+  },
+
+  // Read-only pills are per-instance (the same session can have several), so closing one must not
+  // touch other tabs' pills for that same session — match on instanceId, not just slug|sessionId.
+  async closeReadonly(slug, sessionId, instanceId) {
+    try {
+      await api(`/api/projects/${slug}/sessions/${sessionId}/close-readonly`, { method: 'POST', body: { instanceId } });
+    } catch (_) {}
+    ActiveSessionsBar._removeFromBar(s => s.slug === slug && s.sessionId === sessionId && s.instanceId === instanceId);
+
+    const inThisInstance = typeof App !== 'undefined' && App.currentView === 'session-detail'
+      && typeof Sessions !== 'undefined' && Sessions.detailState.readOnly
+      && Sessions.detailState.slug === slug && Sessions.detailState.sessionId === sessionId
+      && Sessions.detailState.readOnlyInstanceId === instanceId;
+    if (inThisInstance) App.navigate('project-detail', { slug });
+  },
+
+  // Closing here only tears down the real process (os/browser) — a read-only viewer on the same
+  // session is a separate, unrelated fact and must survive: drop just the real-process kind from
+  // cached activeKinds and keep the session listed/dotted if 'readonly' remains.
+  _dropRealKinds(kinds) {
+    return (kinds || []).filter(k => k !== 'browser' && k !== 'os');
   },
 
   // A closed session must stop looking active everywhere, not just in the bar: drop the cached
@@ -216,26 +290,42 @@ const ActiveSessionsBar = {
   _clearActiveState(slug, sessionId) {
     if (typeof Sessions !== 'undefined' && Sessions.cache && Sessions.cache[slug]) {
       const cached = Sessions.cache[slug].find(s => s.sessionId === sessionId);
-      if (cached) { cached.active = false; cached.activeKind = null; }
+      if (cached) {
+        cached.activeKinds = ActiveSessionsBar._dropRealKinds(cached.activeKinds);
+        cached.active = cached.activeKinds.length > 0;
+        cached.activeKind = cached.activeKinds[0] || null;
+      }
     }
 
     if (typeof Dashboard !== 'undefined') {
       (Dashboard._sessions || []).forEach(s => {
-        if (s.slug === slug && s.sessionId === sessionId) { s.active = false; s.activeKind = null; }
+        if (s.slug !== slug || s.sessionId !== sessionId) return;
+        s.activeKinds = ActiveSessionsBar._dropRealKinds(s.activeKinds);
+        s.active = s.activeKinds.length > 0;
+        s.activeKind = s.activeKinds[0] || null;
       });
       if (Dashboard._activeSessions) {
-        Dashboard._activeSessions = Dashboard._activeSessions.filter(
-          s => !(s.slug === slug && s.sessionId === sessionId)
-        );
+        // Note: built via .map()/.filter() chained directly off the existing array (not a fresh []
+        // literal) so the result stays a same-realm array — this file can run inside a vm sandbox
+        // in tests, where a literal [] created in that context is a foreign-realm object and fails
+        // assert.deepStrictEqual against a plain array despite matching content.
+        Dashboard._activeSessions = Dashboard._activeSessions
+          .map(s => {
+            if (s.slug !== slug || s.sessionId !== sessionId) return s;
+            const activeKinds = ActiveSessionsBar._dropRealKinds(s.activeKinds);
+            return Object.assign({}, s, { activeKinds, active: activeKinds.length > 0, activeKind: activeKinds[0] || null });
+          })
+          .filter(s => !(s.slug === slug && s.sessionId === sessionId) || s.active);
         Dashboard.renderActiveSessions(Dashboard._activeSessions);
       }
     }
 
-    document.querySelectorAll(`.session-card[data-session-id="${sessionId}"] .session-active-dot`)
-      .forEach(dot => dot.remove());
+    document.querySelectorAll(
+      `.session-card[data-session-id="${sessionId}"] .session-active-dot--browser, .session-card[data-session-id="${sessionId}"] .session-active-dot--os`
+    ).forEach(dot => dot.remove());
 
     const inSession = typeof App !== 'undefined' && App.currentView === 'session-detail'
-      && typeof Sessions !== 'undefined'
+      && typeof Sessions !== 'undefined' && !Sessions.detailState.readOnly
       && Sessions.detailState.slug === slug && Sessions.detailState.sessionId === sessionId;
     if (!inSession) return;
 
@@ -247,11 +337,11 @@ const ActiveSessionsBar = {
     App.navigate('project-detail', { slug });
   },
 
-  open(slug, sessionId) {
+  open(slug, sessionId, readOnly) {
     if (typeof Sessions !== 'undefined') Sessions.stopAutoRefresh();
     if (typeof TerminalPanel !== 'undefined' && TerminalPanel.isOpen()) TerminalPanel.close();
     const cached = (typeof Sessions !== 'undefined' && Sessions.cache[slug]) || [];
     const info = cached.find(s => s.sessionId === sessionId) || null;
-    App.navigate('session-detail', { slug, sessionId, sessionInfo: info });
+    App.navigate('session-detail', { slug, sessionId, sessionInfo: info, readOnly: !!readOnly });
   }
 };

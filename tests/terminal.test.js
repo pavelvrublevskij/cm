@@ -216,6 +216,91 @@ test('validateTerminal: shell mode resolves a project path without a session fil
   assert.strictEqual(claude.mode, 'claude');
 });
 
+test('_diagnoseSpawnFailure returns no diagnosis on win32 (no spawn-helper on that platform)', () => {
+  const { _diagnoseSpawnFailure } = require('../lib/terminal-server');
+  if (process.platform === 'win32') {
+    assert.strictEqual(_diagnoseSpawnFailure(), null);
+  }
+});
+
+test('_spawnHelperPath finds spawn-helper in the layout this node-pty actually ships', (t) => {
+  // spawn-helper is a macOS-only build target in node-pty's binding.gyp — Linux's pty.cc calls
+  // forkpty() directly and never produces this binary, even on a fully correct install.
+  if (process.platform !== 'darwin') return t.skip('spawn-helper only exists on macOS');
+  const { _spawnHelperPath, ptyAvailable } = require('../lib/terminal-server');
+  if (!ptyAvailable()) return t.skip('node-pty not installed');
+
+  const helper = _spawnHelperPath();
+  assert.ok(helper, 'expected a spawn-helper path');
+  assert.ok(fs.existsSync(helper), `spawn-helper not found at ${helper}`);
+});
+
+test('_diagnoseSpawnFailure does not claim spawn-helper is missing when it is present', (t) => {
+  if (process.platform === 'win32') return t.skip('no spawn-helper on win32');
+  const { _diagnoseSpawnFailure, _spawnHelperPath, ptyAvailable } = require('../lib/terminal-server');
+  if (!ptyAvailable() || !fs.existsSync(_spawnHelperPath() || '')) return t.skip('no spawn-helper to inspect');
+
+  assert.doesNotMatch(_diagnoseSpawnFailure() || '', /missing from the node-pty install/);
+});
+
+test('setupSession reports a spawn-error instead of spawning into a directory that is gone', () => {
+  const { _setupSession } = require('../lib/terminal-server');
+  const gone = path.join(paths.PROJECTS_DIR, 'this-directory-does-not-exist');
+  const ws = { readyState: 1, sent: [], closed: false, on() {}, send(p) { this.sent.push(p); }, close() { this.closed = true; } };
+
+  _setupSession(ws, gone, SLUG, '', 'claude');
+
+  assert.strictEqual(ws.sent.length, 1, 'expected exactly one message');
+  const payload = JSON.parse(ws.sent[0]);
+  assert.strictEqual(payload.t, 'spawn-error');
+  assert.strictEqual(payload.cmd, 'claude');
+  assert.match(payload.message, /no longer exists/);
+  assert.ok(payload.message.includes(gone), 'message should name the missing directory');
+  assert.ok(ws.closed, 'socket should be closed');
+});
+
+test('_terminalEnv drops the Claude Code session vars the server inherited', () => {
+  const { _terminalEnv } = require('../lib/terminal-server');
+
+  const env = _terminalEnv({
+    PATH: '/usr/bin',
+    CLAUDECODE: '1',
+    CLAUDE_CODE_SESSION_ID: 'abc-123',
+    CLAUDE_CODE_CHILD_SESSION: 'true',
+    CLAUDE_CODE_ENTRYPOINT: 'cli',
+    CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/sock',
+    CLAUDE_CODE_MESSAGING_TOKEN: 'secret',
+    CLAUDE_PID: '999'
+  });
+
+  for (const key of [
+    'CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT',
+    'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_PID'
+  ]) {
+    assert.ok(!(key in env), `${key} must not reach a spawned terminal`);
+  }
+});
+
+test('_terminalEnv keeps unrelated variables and sets TERM', () => {
+  const { _terminalEnv } = require('../lib/terminal-server');
+
+  const env = _terminalEnv({ PATH: '/usr/bin', HOME: '/home/x', ANTHROPIC_API_KEY: 'keep-me', TERM: 'dumb' });
+
+  assert.strictEqual(env.PATH, '/usr/bin');
+  assert.strictEqual(env.HOME, '/home/x');
+  assert.strictEqual(env.ANTHROPIC_API_KEY, 'keep-me');
+  assert.strictEqual(env.TERM, 'xterm-256color');
+});
+
+test('_terminalEnv does not mutate the environment it was given', () => {
+  const { _terminalEnv } = require('../lib/terminal-server');
+
+  const original = { PATH: '/usr/bin', CLAUDE_CODE_SESSION_ID: 'abc-123' };
+  _terminalEnv(original);
+
+  assert.strictEqual(original.CLAUDE_CODE_SESSION_ID, 'abc-123');
+});
+
 test('shellCommand targets the platform shell', () => {
   const { shellCommand } = require('../lib/terminal-server');
   const { cmd, args } = shellCommand();

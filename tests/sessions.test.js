@@ -280,6 +280,54 @@ test('GET /api/projects/:slug/sessions: browser-terminal beats OS in activeKind'
   activeSessions._reset();
 });
 
+test('GET /api/projects/:slug/sessions stamps active=true, activeKind=readonly for a read-only-only session', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  const terminalServer = require('../lib/terminal-server');
+  activeSessions._reset();
+  terminalServer._clearAll();
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  const res = await request(app).get(`/api/projects/${SLUG}/sessions`);
+  assert.strictEqual(res.status, 200);
+  const a = res.body.find(s => s.sessionId === SESSION_A);
+  assert.strictEqual(a.active, true);
+  assert.strictEqual(a.activeKind, 'readonly');
+  activeSessions._reset();
+});
+
+test('GET /api/projects/:slug/sessions: os and readonly both surface in activeKinds when present together', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  const terminalServer = require('../lib/terminal-server');
+  activeSessions._reset();
+  terminalServer._clearAll();
+  activeSessions.register(SLUG, SESSION_A, 'os-terminal');
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  const res = await request(app).get(`/api/projects/${SLUG}/sessions`);
+  assert.strictEqual(res.status, 200);
+  const a = res.body.find(s => s.sessionId === SESSION_A);
+  assert.strictEqual(a.active, true);
+  // activeKind (primary, single value) still favors the real process for callers that only look at one...
+  assert.strictEqual(a.activeKind, 'os');
+  // ...but activeKinds carries both, so the UI can render a dot for each.
+  assert.deepStrictEqual(a.activeKinds, ['os', 'readonly']);
+  activeSessions._reset();
+});
+
+test('GET /api/projects/:slug/sessions: browser and readonly both surface in activeKinds when present together', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  const terminalServer = require('../lib/terminal-server');
+  activeSessions._reset();
+  terminalServer._clearAll();
+  terminalServer._injectFakeEntry(SLUG, SESSION_A, { ws: null });
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  const res = await request(app).get(`/api/projects/${SLUG}/sessions`);
+  assert.strictEqual(res.status, 200);
+  const a = res.body.find(s => s.sessionId === SESSION_A);
+  assert.strictEqual(a.activeKind, 'browser');
+  assert.deepStrictEqual(a.activeKinds, ['browser', 'readonly']);
+  terminalServer._clearAll();
+  activeSessions._reset();
+});
+
 test('GET /api/projects/:slug/sessions/search returns empty when no match', async () => {
   const res = await request(app).get(`/api/projects/${SLUG}/sessions/search`).query({ q: 'zzznonexistentzzz' });
   assert.strictEqual(res.status, 200);
@@ -313,6 +361,18 @@ test('GET /api/projects/:slug/sessions/:sessionId stats.created is first user me
   const res = await request(app).get(`/api/projects/${SLUG}/sessions/${SESSION_A}`);
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.body.stats.created, '2026-01-01T10:00:00.000Z');
+});
+
+test('GET /api/projects/:slug/sessions/:sessionId stats.active is true for a read-only viewer instance', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  activeSessions._reset();
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+
+  const res = await request(app).get(`/api/projects/${SLUG}/sessions/${SESSION_A}`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.stats.active, true);
+
+  activeSessions._reset();
 });
 
 test('GET /api/projects/:slug/sessions/:sessionId stats.remoteControlled is false when no bridge entry', async () => {
@@ -695,6 +755,97 @@ test('GET /api/projects/active filters out sessions with traversal characters in
   assert.strictEqual(res.status, 200);
   const entry = res.body.find(s => s.sessionId === '../etc/passwd');
   assert.ok(!entry, 'sessionId with .. must be excluded from active list');
+
+  activeSessions._reset();
+});
+
+// ── POST open-readonly / close-readonly ───────────────────────────────────────
+
+test('POST /api/projects/:slug/sessions/:sessionId/open-readonly registers and shows up as kind "readonly"', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  activeSessions._reset();
+
+  const res = await request(app)
+    .post(`/api/projects/${SLUG}/sessions/${SESSION_A}/open-readonly`)
+    .send({ instanceId: 'instance-1' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.ok, true);
+
+  const list = await request(app).get('/api/projects/active');
+  const entry = list.body.find(s => s.slug === SLUG && s.sessionId === SESSION_A);
+  assert.ok(entry, 'readonly session should be present');
+  assert.strictEqual(entry.kind, 'readonly');
+  assert.strictEqual(entry.instanceId, 'instance-1');
+
+  activeSessions._reset();
+});
+
+test('open-readonly: the same session opened under two instance ids yields two separate entries', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  activeSessions._reset();
+
+  await request(app).post(`/api/projects/${SLUG}/sessions/${SESSION_A}/open-readonly`).send({ instanceId: 'instance-1' });
+  await request(app).post(`/api/projects/${SLUG}/sessions/${SESSION_A}/open-readonly`).send({ instanceId: 'instance-2' });
+
+  const list = await request(app).get('/api/projects/active');
+  const entries = list.body.filter(s => s.slug === SLUG && s.sessionId === SESSION_A && s.kind === 'readonly');
+  assert.strictEqual(entries.length, 2);
+  assert.deepStrictEqual(new Set(entries.map(e => e.instanceId)), new Set(['instance-1', 'instance-2']));
+
+  activeSessions._reset();
+});
+
+test('open-readonly: returns 400 for missing instanceId', async () => {
+  const res = await request(app)
+    .post(`/api/projects/${SLUG}/sessions/${SESSION_A}/open-readonly`)
+    .send({});
+  assert.strictEqual(res.status, 400);
+});
+
+test('open-readonly: returns 400 for invalid slug', async () => {
+  const res = await request(app)
+    .post('/api/projects/bad..slug/sessions/any-session/open-readonly')
+    .send({ instanceId: 'instance-1' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('open-readonly: returns 400 for traversal in sessionId', async () => {
+  const res = await request(app)
+    .post(`/api/projects/${SLUG}/sessions/..evil/open-readonly`)
+    .send({ instanceId: 'instance-1' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('close-readonly: removes only the matching instance, leaving others active', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  activeSessions._reset();
+
+  await request(app).post(`/api/projects/${SLUG}/sessions/${SESSION_A}/open-readonly`).send({ instanceId: 'instance-1' });
+  await request(app).post(`/api/projects/${SLUG}/sessions/${SESSION_A}/open-readonly`).send({ instanceId: 'instance-2' });
+
+  const res = await request(app)
+    .post(`/api/projects/${SLUG}/sessions/${SESSION_A}/close-readonly`)
+    .send({ instanceId: 'instance-1' });
+  assert.strictEqual(res.status, 200);
+
+  const list = await request(app).get('/api/projects/active');
+  const entries = list.body.filter(s => s.slug === SLUG && s.sessionId === SESSION_A && s.kind === 'readonly');
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].instanceId, 'instance-2');
+
+  activeSessions._reset();
+});
+
+test('readonly and a real os/browser session on the same id both appear, not deduped', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  activeSessions._reset();
+  activeSessions.register(SLUG, SESSION_A, 'os-terminal');
+  await request(app).post(`/api/projects/${SLUG}/sessions/${SESSION_A}/open-readonly`).send({ instanceId: 'instance-1' });
+
+  const list = await request(app).get('/api/projects/active');
+  const entries = list.body.filter(s => s.slug === SLUG && s.sessionId === SESSION_A);
+  assert.strictEqual(entries.length, 2);
+  assert.deepStrictEqual(new Set(entries.map(e => e.kind)), new Set(['os', 'readonly']));
 
   activeSessions._reset();
 });

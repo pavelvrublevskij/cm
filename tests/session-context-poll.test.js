@@ -40,7 +40,11 @@ const context = vm.createContext({
   },
   clearInterval: id => { harness.timers.delete(id); },
   requestAnimationFrame: fn => fn(),
-  api: async url => { harness.apiCalls.push(url); return harness.apiResponse; },
+  api: async url => {
+    harness.apiCalls.push(url);
+    if (harness.apiError) throw new Error(harness.apiError);
+    return harness.apiResponse;
+  },
   escapeHtml: s => String(s),
   debounce: fn => fn,
   toast: () => {},
@@ -76,6 +80,7 @@ beforeEach(() => {
   harness.store = {};
   harness.timers.clear();
   harness.apiCalls = [];
+  harness.apiError = null;
   harness.ctxEl = makeEl();
   harness.changedPaths = null;
   harness.opened = null;
@@ -286,6 +291,22 @@ test('pollContext re-renders when a plan is updated without changing the count',
   await Sessions.pollContext('proj', 's1');
 
   assert.ok(harness.ctxEl.innerHTML.includes('plan-a'));
+});
+
+test('loadContext shows an error state with a report link instead of silently switching tabs', async () => {
+  harness.apiError = 'network down';
+  await Sessions.loadContext('s1', {});
+
+  assert.ok(harness.ctxEl.innerHTML.includes('network down'), 'the actual error must be visible');
+  assert.ok(harness.ctxEl.innerHTML.includes('Report this issue'));
+  assert.strictEqual(Sessions._ctx, null);
+});
+
+test('loadContext still renders normally when the request succeeds', async () => {
+  harness.apiResponse = { files: [file('a.js', 100)], plans: [], projSlug: 'proj' };
+  await Sessions.loadContext('s1', {});
+
+  assert.ok(harness.ctxEl.innerHTML.includes('a.js'));
 });
 
 test('renderContext records an empty context for the session it rendered', () => {

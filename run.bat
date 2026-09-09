@@ -9,7 +9,7 @@ setlocal enabledelayedexpansion
 
 set PORT=3000
 set URL=http://127.0.0.1:%PORT%
-set MIN_NODE=16
+set MIN_NODE=18
 
 :: Header
 echo.
@@ -66,7 +66,13 @@ for /f "tokens=*" %%v in ('node -v') do echo   Node.js %%v found
 for /f "tokens=5" %%p in ('netstat -aon ^| findstr "127.0.0.1:%PORT% " ^| findstr "LISTENING"') do (
     echo   Port %PORT% in use ^(PID %%p^), stopping previous instance...
     taskkill /PID %%p /F >nul 2>&1
-    timeout /t 1 /nobreak >nul
+    call :wait_port_free
+    if !errorlevel! equ 0 (
+        echo   Previous instance stopped.
+    ) else (
+        echo   Could not stop the process on port %PORT% ^(PID %%p^). Close it manually and re-run.
+        goto :eof
+    )
 )
 
 :: Install dependencies
@@ -76,6 +82,8 @@ if exist "node_modules" (
     echo   Installing dependencies...
     call npm install
 )
+
+call :ensure_pty_works
 
 echo.
 echo   Starting server...
@@ -171,6 +179,43 @@ echo Bye!
 goto :eof
 
 :: ─── Helpers ────────────────────────────────────────────────────────
+
+:verify_pty
+node "%~dp0scripts\verify-pty.js" >nul 2>&1
+exit /b %errorlevel%
+
+:ensure_pty_works
+call :verify_pty
+if %errorlevel% equ 0 exit /b 0
+echo   In-app terminal support is broken, reinstalling...
+rmdir /s /q "node_modules\node-pty" >nul 2>&1
+call npm install >nul 2>&1
+call :verify_pty
+if %errorlevel% equ 0 (
+    echo   Terminal support fixed.
+    exit /b 0
+)
+echo   Rebuilding all dependencies ^(this may take a minute^)...
+rmdir /s /q "node_modules" >nul 2>&1
+del /q "package-lock.json" >nul 2>&1
+call npm install
+call :verify_pty
+if %errorlevel% equ 0 (
+    echo   Terminal support fixed.
+) else (
+    echo   Could not fix the in-app terminal automatically. The rest of the app will still work.
+)
+exit /b 0
+
+:wait_port_free
+set /a ATTEMPTS=0
+:wait_port_free_loop
+netstat -aon | findstr "127.0.0.1:%PORT% " | findstr "LISTENING" >nul 2>&1
+if errorlevel 1 exit /b 0
+set /a ATTEMPTS+=1
+if %ATTEMPTS% geq 5 exit /b 1
+timeout /t 1 /nobreak >nul
+goto :wait_port_free_loop
 
 :wait_for_server
 set /a ATTEMPTS=0

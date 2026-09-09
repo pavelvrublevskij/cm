@@ -624,11 +624,22 @@ const Sessions = {
     }
   }, 500),
 
-  open(slug, sessionId, index) {
+  _navigateToSession(slug, sessionId, info, readOnly) {
     Sessions.stopAutoRefresh();
     if (typeof TerminalPanel !== 'undefined' && TerminalPanel.isOpen()) TerminalPanel.close();
+    App.navigate('session-detail', { slug, sessionId, sessionInfo: info, readOnly: !!readOnly });
+  },
+
+  open(slug, sessionId, index) {
     const sessions = Sessions.cache[slug] || [];
-    App.navigate('session-detail', { slug, sessionId, sessionInfo: sessions[index] });
+    Sessions._navigateToSession(slug, sessionId, sessions[index], false);
+  },
+
+  openReadOnly(slug, sessionId) {
+    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
+    const cached = Sessions.cache[slug] || [];
+    const info = cached.find(s => s.sessionId === sessionId);
+    Sessions._navigateToSession(slug, sessionId, info, true);
   },
 
   goBack() {
@@ -667,6 +678,31 @@ const Sessions = {
   applyConversationHiddenState() {
     const body = document.getElementById('session-detail-body');
     if (body) body.classList.toggle('conversation-hidden', Sessions.isConversationHidden());
+  },
+
+  applyReadOnlyState() {
+    const readOnly = !!Sessions.detailState.readOnly;
+    const body = document.getElementById('session-detail-body');
+    if (body) body.classList.toggle('session-readonly', readOnly);
+    const resumeBtn = document.getElementById('session-detail-resume-btn');
+    if (resumeBtn) resumeBtn.style.display = readOnly ? 'none' : '';
+  },
+
+  READONLY_INSTANCE_KEY: 'claude-manager-readonly-instance-id',
+
+  // Stable per-tab id (sessionStorage survives reloads but not new tabs) so several tabs can each
+  // open the same session read-only and appear as separate, individually closable bar entries.
+  getReadonlyInstanceId() {
+    try {
+      let id = sessionStorage.getItem(Sessions.READONLY_INSTANCE_KEY);
+      if (!id) {
+        id = (crypto.randomUUID ? crypto.randomUUID() : 'ro-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+        sessionStorage.setItem(Sessions.READONLY_INSTANCE_KEY, id);
+      }
+      return id;
+    } catch (_) {
+      return 'ro-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    }
   },
 
   showToolDetails() {
@@ -788,7 +824,7 @@ const Sessions = {
     if (wrap) wrap.style.display = 'flex';
   },
 
-  async loadDetail(slug, sessionId, info) {
+  async loadDetail(slug, sessionId, info, readOnly) {
     const title = document.getElementById('session-detail-title');
     const container = document.getElementById('session-messages');
 
@@ -797,8 +833,9 @@ const Sessions = {
     title.title = titleText;
     Sessions._detailInfo = info || {};
     Sessions._detailHasPlan = false;
-    Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0 };
+    Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0, readOnly: !!readOnly, readOnlyInstanceId: null };
     Sessions.renderDetailMeta(null);
+    Sessions.applyReadOnlyState();
 
     const idValue = document.getElementById('session-detail-id-value');
     if (idValue) {
@@ -831,7 +868,7 @@ const Sessions = {
       if (ctxEl) ctxEl.innerHTML = '';
       const spEl = document.getElementById('session-scratchpad');
       if (spEl) spEl.innerHTML = '';
-      if (typeof TerminalPanel !== 'undefined') {
+      if (typeof TerminalPanel !== 'undefined' && !readOnly) {
         if (TerminalPanel.isOpen()) TerminalPanel.close();
         TerminalPanel.open(slug, null);
       }
@@ -839,6 +876,14 @@ const Sessions = {
       Sessions.applyToolDetailsState();
       Sessions._startDiscovery(slug);
       return;
+    }
+
+    if (readOnly) {
+      const instanceId = Sessions.getReadonlyInstanceId();
+      Sessions.detailState.readOnlyInstanceId = instanceId;
+      api(`/api/projects/${slug}/sessions/${sessionId}/open-readonly`, { method: 'POST', body: { instanceId } })
+        .then(() => { if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.poll(); })
+        .catch(() => {});
     }
 
     // Start on the Files tab; loadContext will switch to Conversation if nothing changed
@@ -852,7 +897,7 @@ const Sessions = {
     await Sessions.loadMore();
     Sessions.setupScroll();
 
-    if (typeof TerminalPanel !== 'undefined' && TerminalPanel.shouldAutoOpen() && !TerminalPanel.isOpen()) {
+    if (!readOnly && typeof TerminalPanel !== 'undefined' && TerminalPanel.shouldAutoOpen() && !TerminalPanel.isOpen()) {
       TerminalPanel.open(slug, sessionId);
     }
 
@@ -1273,10 +1318,13 @@ const Sessions = {
     const ids = Sessions._planSessionIds;
     if (!ids || !ids.size) return;
     for (const sessionId of ids) {
-      const card = document.querySelector(`.session-card[data-session-id="${sessionId}"]`);
-      if (!card || card.querySelector('.session-plan-badge')) continue;
-      const meta = card.querySelector('.session-meta');
-      if (meta) meta.insertAdjacentHTML('afterbegin', '<span class="session-plan-badge" title="Plans were active during this session">plan</span>');
+      // A session active in two ways (real terminal + read-only) renders as two cards sharing this
+      // id — update both, not just the first match.
+      document.querySelectorAll(`.session-card[data-session-id="${sessionId}"]`).forEach(card => {
+        if (card.querySelector('.session-plan-badge')) return;
+        const meta = card.querySelector('.session-meta');
+        if (meta) meta.insertAdjacentHTML('afterbegin', '<span class="session-plan-badge" title="Plans were active during this session">plan</span>');
+      });
     }
   },
 

@@ -22,6 +22,31 @@ const router = express.Router({ mergeParams: true });
 const _titleCache = new Map();
 const TITLE_CACHE_TTL = 60000;
 
+// Shared by the active-session routes (deactivate / open-readonly / close-readonly): validates
+// :slug and :sessionId from the URL, writing the 400 response itself on failure. Returns null on
+// failure so callers can `if (!p) return;` instead of repeating the checks.
+function validateSessionParams(req, res) {
+  const slug = req.params.slug;
+  if (!safeSlug(slug)) { res.status(400).json({ error: 'Invalid slug' }); return null; }
+  const sessionId = req.params.sessionId;
+  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+    res.status(400).json({ error: 'Invalid session ID' });
+    return null;
+  }
+  return { slug, sessionId };
+}
+
+// Validates the read-only viewer instance id carried in the request body, writing the 400
+// response itself on failure.
+function validateInstanceId(req, res) {
+  const instanceId = req.body && req.body.instanceId;
+  if (typeof instanceId !== 'string' || !instanceId || instanceId.length > 100) {
+    res.status(400).json({ error: 'Invalid instance ID' });
+    return null;
+  }
+  return instanceId;
+}
+
 function getCachedTitle(filePath) {
   const nowMs = Date.now();
   const cached = _titleCache.get(filePath);
@@ -102,7 +127,7 @@ router.get('/active', wrapRoute((req, res) => {
   const archivedBySlug = {};
   const result = all
     .filter(({ sessionId }) => !sessionId.includes('..') && !sessionId.includes('/') && !sessionId.includes('\\'))
-    .map(({ slug, sessionId, kind }) => {
+    .map(({ slug, sessionId, kind, instanceId }) => {
       const dir = safeSlug(slug);
       let title = '';
       let lastGitBranch = '';
@@ -114,7 +139,7 @@ router.get('/active', wrapRoute((req, res) => {
       }
       if (!archivedBySlug[slug]) archivedBySlug[slug] = getArchivedIds(slug);
       const archived = archivedBySlug[slug].has(sessionId);
-      return { slug, sessionId, title: title || '', kind, lastGitBranch, archived };
+      return { slug, sessionId, title: title || '', kind, instanceId, lastGitBranch, archived };
     });
   res.json(result);
 }));
@@ -389,16 +414,11 @@ router.get('/:slug/sessions/with-plans', wrapRoute((req, res) => {
   const sessionIds = [];
   for (const f of files) {
     const sessionId = f.replace('.jsonl', '');
-    const cached = planCache.get(sessionId);
-    if (cached !== undefined) {
-      if (cached) sessionIds.push(sessionId);
-      continue;
-    }
+    if (planCache.get(sessionId)) { sessionIds.push(sessionId); continue; }
     try {
       const content = fs.readFileSync(path.join(dir, f), 'utf-8');
       const hasPlan = planStems.some(stem => content.includes(stem));
-      planCache.set(sessionId, hasPlan);
-      if (hasPlan) sessionIds.push(sessionId);
+      if (hasPlan) { planCache.set(sessionId, true); sessionIds.push(sessionId); }
     } catch (_) {}
   }
   res.json(sessionIds);
@@ -423,8 +443,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
   let firstPrompt = '';
   let indexSummary = '';
   let created = null;
-  const cachedHasPlan = planCache.get(sessionId);
-  let hasPlan = cachedHasPlan === true;
+  let hasPlan = planCache.get(sessionId) === true;
 
   for (const line of lines) {
     try {
@@ -445,7 +464,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
         }
         if (raw && !isSkippablePrompt(raw)) firstPrompt = normalizePrompt(raw).slice(0, 200);
       }
-      if (!hasPlan && cachedHasPlan === undefined && entry.type === 'assistant') {
+      if (!hasPlan && entry.type === 'assistant') {
         const content = entry.message && entry.message.content;
         if (Array.isArray(content)) {
           for (const block of content) {
@@ -518,7 +537,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
   const lastGitBranch = gitBranches.length ? gitBranches[gitBranches.length - 1] : '';
   const usage = getSessionUsage(req.params.slug, sessionId);
   const customTitle = getCustomTitle(filePath);
-  if (cachedHasPlan === undefined) planCache.set(sessionId, hasPlan);
+  planCache.set(sessionId, hasPlan);
 
   const gitBranch = gitBranches[0] || '';
   const activeList = listAllActiveSessions();
@@ -684,14 +703,28 @@ router.post('/:slug/sessions/:sessionId/resume', wrapRoute((req, res) => {
 }));
 
 router.post('/:slug/sessions/:sessionId/deactivate', wrapRoute((req, res) => {
-  const slug = req.params.slug;
-  if (!safeSlug(slug)) return res.status(400).json({ error: 'Invalid slug' });
-  const sessionId = req.params.sessionId;
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
-  activeSessions.deactivate(slug, sessionId);
-  terminalServer.disconnectFor(slug, sessionId, 'Closed by user.');
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  activeSessions.deactivate(p.slug, p.sessionId);
+  terminalServer.disconnectFor(p.slug, p.sessionId, 'Closed by user.');
+  res.json({ ok: true });
+}));
+
+router.post('/:slug/sessions/:sessionId/open-readonly', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const instanceId = validateInstanceId(req, res);
+  if (!instanceId) return;
+  activeSessions.registerReadonly(p.slug, p.sessionId, instanceId);
+  res.json({ ok: true });
+}));
+
+router.post('/:slug/sessions/:sessionId/close-readonly', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const instanceId = validateInstanceId(req, res);
+  if (!instanceId) return;
+  activeSessions.deactivateReadonly(p.slug, p.sessionId, instanceId);
   res.json({ ok: true });
 }));
 

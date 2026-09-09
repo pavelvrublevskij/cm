@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const { wrapRoute } = require('../lib/file-helpers');
-const { resolveProjectPath, listDir, searchTree, readFileForEditor } = require('../lib/project-files');
+const { resolveProjectPath, listDir, searchTree, readFileChunk } = require('../lib/project-files');
 
 const router = express.Router();
 
@@ -32,7 +32,8 @@ router.get('/:slug/files/content', wrapRoute((req, res) => {
   if (!fs.existsSync(resolved.target) || !fs.statSync(resolved.target).isFile()) {
     return res.status(404).json({ error: 'File not found' });
   }
-  res.json({ path: resolved.rel, ...readFileForEditor(resolved.target) });
+  const offset = parseInt(req.query.offset, 10);
+  res.json({ path: resolved.rel, ...readFileChunk(resolved.target, Number.isFinite(offset) ? offset : 0) });
 }));
 
 router.put('/:slug/files/content', wrapRoute((req, res) => {

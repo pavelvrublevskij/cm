@@ -3,7 +3,6 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
 const request = require('supertest');
 const { app, paths, HOME } = require('./helpers/app');
 const { decodeSlug } = require('../lib/slug');
@@ -411,6 +410,67 @@ test('context: Edit-tool files without a snapshot still appear', async () => {
   assert.deepStrictEqual(editFile.versions, []);
 });
 
+// ── Bash rm/git rm fallback (Claude Code has no dedicated delete tool) ───────
+
+const BASH_RM_SESSION_ID = 'bashrmtest-6666-6666-6666-666666666666';
+// A project directory that really exists on disk, so the disk-existence check the route runs
+// (decodeSlug(projSlug) -> fs.existsSync) resolves to a writable path instead of guessing one
+// rooted at "/".
+const BASH_RM_PROJ_DIR = path.join(HOME, 'bash-rm-proj');
+const BASH_RM_SLUG = slugForPath(BASH_RM_PROJ_DIR);
+
+before(() => {
+  const projDir = path.join(paths.PROJECTS_DIR, BASH_RM_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+
+  // A file the rm command targets that is still on disk — must NOT be reported as deleted.
+  fs.mkdirSync(path.join(BASH_RM_PROJ_DIR, 'keep'), { recursive: true });
+  fs.writeFileSync(path.join(BASH_RM_PROJ_DIR, 'keep', 'still-here.js'), 'x');
+
+  const entries = [
+    { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'clean up' } },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'rm gone/leaf.txt' } },
+          { type: 'tool_use', id: 'b2', name: 'Bash', input: { command: 'cd sub && git rm -r --quiet leftover-dir && echo done' } },
+          { type: 'tool_use', id: 'b3', name: 'Bash', input: { command: 'rm keep/still-here.js' } }
+        ]
+      }
+    }
+  ];
+  fs.writeFileSync(
+    path.join(projDir, BASH_RM_SESSION_ID + '.jsonl'),
+    entries.map(e => JSON.stringify(e)).join('\n')
+  );
+});
+
+test('context: plain rm target absent from disk is reported deleted', async () => {
+  const res = await request(app).get(`/api/file-history/${BASH_RM_SESSION_ID}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'gone/leaf.txt');
+  assert.ok(f, 'rm target must be listed');
+  assert.strictEqual(f.isDeleted, true);
+  assert.strictEqual(f.isNew, false);
+  assert.strictEqual(f.hash, null);
+});
+
+test('context: git rm -r target resolved through a leading cd is reported deleted', async () => {
+  const res = await request(app).get(`/api/file-history/${BASH_RM_SESSION_ID}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'sub/leftover-dir');
+  assert.ok(f, 'git rm target resolved via the cd in the same command must be listed');
+  assert.strictEqual(f.isDeleted, true);
+});
+
+test('context: rm target still present on disk is not reported as deleted', async () => {
+  const res = await request(app).get(`/api/file-history/${BASH_RM_SESSION_ID}/context`);
+  assert.strictEqual(res.status, 200);
+  const f = res.body.files.find(f => f.path === 'keep/still-here.js');
+  assert.ok(!f, 'a still-present file must not be reported as a session change from a stray rm mention');
+});
+
 // ── backup mapping recovered when the transcript has no snapshot records ─────
 // Newer Claude Code versions write the backups but no file-history-snapshot records, so the
 // path -> backup mapping has to be recomputed as sha256(absolute path)[0..16].
@@ -532,73 +592,6 @@ test('context: session with no file-history dir and no tool writes returns empty
   const res = await request(app).get(`/api/file-history/${emptySessionId}/context`);
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(res.body.files, []);
-});
-
-// ── git-status fallback: files changed via Bash instead of Edit/Write/... ───
-// A session can land real changes via a Bash command (`cp`, a script, ...) rather than the
-// Write/Edit/MultiEdit/NotebookEdit tools scanned above. When the project is a git repo, a
-// locally-changed file whose mtime falls inside the session's time window is picked up too.
-
-const GIT_PROJ_DIR = path.join(HOME, 'git-fallback-proj');
-const GIT_SLUG = slugForPath(GIT_PROJ_DIR);
-const GIT_IN_RANGE_SESSION = 'gitfallbk-1111-1111-1111-111111111111';
-const GIT_OUT_RANGE_SESSION = 'gitoutwin-2222-2222-2222-222222222222';
-const GIT_NEW_FILE_SESSION = 'gitnewfil-3333-3333-3333-333333333333';
-
-before(() => {
-  fs.mkdirSync(GIT_PROJ_DIR, { recursive: true });
-  execSync('git init -q', { cwd: GIT_PROJ_DIR });
-  execSync('git config user.email test@example.com', { cwd: GIT_PROJ_DIR });
-  execSync('git config user.name test', { cwd: GIT_PROJ_DIR });
-  fs.writeFileSync(path.join(GIT_PROJ_DIR, 'report.prpt'), 'original\n');
-  execSync('git add report.prpt', { cwd: GIT_PROJ_DIR });
-  execSync('git commit -q -m baseline', { cwd: GIT_PROJ_DIR });
-
-  // Modified by a simulated Bash `cp`, mtime inside the in-range session's window
-  fs.writeFileSync(path.join(GIT_PROJ_DIR, 'report.prpt'), 'copied over by a script\n');
-  const inRange = new Date('2026-07-01T10:00:30.000Z');
-  fs.utimesSync(path.join(GIT_PROJ_DIR, 'report.prpt'), inRange, inRange);
-
-  // A new, untracked file also written by a script, mtime inside a different session's window
-  fs.writeFileSync(path.join(GIT_PROJ_DIR, 'new-from-bash.txt'), 'created by a script\n');
-  const inRange2 = new Date('2026-08-01T10:00:30.000Z');
-  fs.utimesSync(path.join(GIT_PROJ_DIR, 'new-from-bash.txt'), inRange2, inRange2);
-
-  const projDir = path.join(paths.PROJECTS_DIR, GIT_SLUG);
-  fs.mkdirSync(projDir, { recursive: true });
-
-  const session = (from, to) => [
-    { type: 'user', timestamp: from, message: { content: 'do the thing' } },
-    { type: 'user', timestamp: to, message: { content: 'tool result' } }
-  ].map(e => JSON.stringify(e)).join('\n');
-
-  fs.writeFileSync(path.join(projDir, GIT_IN_RANGE_SESSION + '.jsonl'), session('2026-07-01T10:00:00.000Z', '2026-07-01T10:01:00.000Z'));
-  fs.writeFileSync(path.join(projDir, GIT_OUT_RANGE_SESSION + '.jsonl'), session('2020-01-01T00:00:00.000Z', '2020-01-01T00:01:00.000Z'));
-  fs.writeFileSync(path.join(projDir, GIT_NEW_FILE_SESSION + '.jsonl'), session('2026-08-01T10:00:00.000Z', '2026-08-01T10:01:00.000Z'));
-});
-
-test('context: file changed via Bash (git-detected, not Edit/Write) appears when mtime is inside the session window', async () => {
-  const res = await request(app).get(`/api/file-history/${GIT_IN_RANGE_SESSION}/context`);
-  assert.strictEqual(res.status, 200);
-  const f = res.body.files.find(f => f.path === 'report.prpt');
-  assert.ok(f, 'a file changed via Bash and detected via git status must appear');
-  assert.strictEqual(f.isNew, false);
-  assert.strictEqual(f.hash, null, 'no snapshot backup exists for a Bash-driven change');
-});
-
-test('context: git-detected file with mtime outside the session window is not included', async () => {
-  const res = await request(app).get(`/api/file-history/${GIT_OUT_RANGE_SESSION}/context`);
-  assert.strictEqual(res.status, 200);
-  const f = res.body.files.find(f => f.path === 'report.prpt');
-  assert.ok(!f, 'a git change with mtime outside this session window must not be attributed to it');
-});
-
-test('context: git-detected untracked file is flagged isNew', async () => {
-  const res = await request(app).get(`/api/file-history/${GIT_NEW_FILE_SESSION}/context`);
-  assert.strictEqual(res.status, 200);
-  const f = res.body.files.find(f => f.path === 'new-from-bash.txt');
-  assert.ok(f, 'an untracked file created via a Bash-run script must appear');
-  assert.strictEqual(f.isNew, true);
 });
 
 // ── /diff-current additional cases ───────────────────────────────────────────
