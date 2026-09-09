@@ -89,6 +89,54 @@ test('GET /api/dashboard/active-count counts browser ptys and OS launches withou
   terminalServer._clearAll();
 });
 
+test('GET /api/dashboard/active-count dedupes a real process plus multiple read-only instances on one session', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  const terminalServer = require('../lib/terminal-server');
+  activeSessions._reset();
+  terminalServer._clearAll();
+
+  const SLUG_A = 'dash-active-ro';
+  const SID_A1 = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+  fs.mkdirSync(path.join(paths.PROJECTS_DIR, SLUG_A), { recursive: true });
+  fs.writeFileSync(path.join(paths.PROJECTS_DIR, SLUG_A, SID_A1 + '.jsonl'), '{"type":"user","message":{"content":"x"}}\n');
+
+  // A session with a real OS launch plus two read-only viewer instances is still ONE session —
+  // the card for it shows a single dot (os wins), so the badge must count it once, not three times.
+  activeSessions.register(SLUG_A, SID_A1, 'os-terminal');
+  activeSessions.registerReadonly(SLUG_A, SID_A1, 'instance-1');
+  activeSessions.registerReadonly(SLUG_A, SID_A1, 'instance-2');
+
+  const res = await request(app).get('/api/dashboard/active-count');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.total, 1);
+  assert.strictEqual(res.body.byProject[SLUG_A], 1);
+
+  activeSessions._reset();
+  terminalServer._clearAll();
+});
+
+test('GET /api/dashboard/active-count counts a read-only-only session (no real process)', async () => {
+  const activeSessions = require('../lib/active-sessions');
+  const terminalServer = require('../lib/terminal-server');
+  activeSessions._reset();
+  terminalServer._clearAll();
+
+  const SLUG_A = 'dash-active-ro-only';
+  const SID_A1 = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+  fs.mkdirSync(path.join(paths.PROJECTS_DIR, SLUG_A), { recursive: true });
+  fs.writeFileSync(path.join(paths.PROJECTS_DIR, SLUG_A, SID_A1 + '.jsonl'), '{"type":"user","message":{"content":"x"}}\n');
+
+  activeSessions.registerReadonly(SLUG_A, SID_A1, 'instance-1');
+
+  const res = await request(app).get('/api/dashboard/active-count');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.total, 1);
+  assert.strictEqual(res.body.byProject[SLUG_A], 1);
+
+  activeSessions._reset();
+  terminalServer._clearAll();
+});
+
 test('GET /api/dashboard returns activeSessions array (empty when nothing is active)', async () => {
   const activeSessions = require('../lib/active-sessions');
   const terminalServer = require('../lib/terminal-server');

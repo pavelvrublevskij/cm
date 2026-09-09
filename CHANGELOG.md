@@ -1,3 +1,10 @@
+## v1.5.2
+
+### Features
+
+- **Open a session read-only** — "Open (read-only)" in a session's ⋮ menu opens Files/Conversation/Activity/Scratchpad without starting a terminal; the same session can be opened read-only from several tabs at once, each tracked and closable separately.
+- **Active Sessions now shows read-only viewers too** — Dashboard, project lists, and the Active Sessions bar/sidebar mark a read-only session with its own blue dot; a session that's both genuinely active and read-only-viewed shows as two separate, independently-clickable cards instead of one merged, misleading indicator.
+
 ## v1.5.1
 
 ### Bug fixes

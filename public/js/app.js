@@ -66,6 +66,17 @@ const App = {
 
     if (typeof ActiveCount !== 'undefined') ActiveCount.start();
     if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.start();
+
+    // Best-effort: drop this tab's read-only registration for the session it's currently on when
+    // the tab actually closes. Read-only views on sessions this tab already navigated away from
+    // are left registered on purpose — the bar entry stays clickable until the user closes it.
+    window.addEventListener('beforeunload', () => {
+      if (typeof Sessions === 'undefined' || !navigator.sendBeacon) return;
+      const { slug, sessionId, readOnly, readOnlyInstanceId } = Sessions.detailState || {};
+      if (!readOnly || !slug || !sessionId || !readOnlyInstanceId) return;
+      const blob = new Blob([JSON.stringify({ instanceId: readOnlyInstanceId })], { type: 'application/json' });
+      navigator.sendBeacon(`/api/projects/${slug}/sessions/${sessionId}/close-readonly`, blob);
+    });
   },
 
   toggleSidebar() {
@@ -85,6 +96,7 @@ const App = {
     let hash = '#' + view;
     if (opts.slug) hash += '/' + opts.slug;
     if (opts.sessionId) hash += '/' + opts.sessionId;
+    if (opts.readOnly) hash += '/readonly';
     if (window.location.hash !== hash) {
       history.replaceState(null, '', hash);
     }
@@ -100,16 +112,17 @@ const App = {
     const view = parts[0];
     const slug = parts[1] || null;
     const sessionId = parts[2] || null;
+    const readOnly = parts[3] === 'readonly';
 
     if (view === 'session-detail' && slug && sessionId) {
       const sessions = Sessions.cache[slug] || [];
       const info = sessions.find(s => s.sessionId === sessionId);
       if (info) {
-        App.navigate('session-detail', { slug, sessionId, sessionInfo: info }, true);
+        App.navigate('session-detail', { slug, sessionId, sessionInfo: info, readOnly }, true);
       } else {
         Sessions.load(slug).then(() => {
           const loaded = (Sessions.cache[slug] || []).find(s => s.sessionId === sessionId);
-          App.navigate('session-detail', { slug, sessionId, sessionInfo: loaded }, true);
+          App.navigate('session-detail', { slug, sessionId, sessionInfo: loaded, readOnly }, true);
         });
       }
     } else if (view === 'project-detail' && slug) {
@@ -227,7 +240,7 @@ const App = {
     } else if (view === 'session-detail') {
       document.getElementById('view-session-detail').classList.add('active');
       App.currentProject = opts.slug;
-      Sessions.loadDetail(opts.slug, opts.sessionId, opts.sessionInfo);
+      Sessions.loadDetail(opts.slug, opts.sessionId, opts.sessionInfo, !!opts.readOnly);
       if (typeof GitActions !== 'undefined') GitActions.init(opts.slug).then(() => {
         if (typeof Sessions !== 'undefined' && App.currentView === 'session-detail') {
           Sessions.updateBranchWarning(Sessions.detailState.lastGitBranch || '');

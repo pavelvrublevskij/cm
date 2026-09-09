@@ -22,6 +22,31 @@ const router = express.Router({ mergeParams: true });
 const _titleCache = new Map();
 const TITLE_CACHE_TTL = 60000;
 
+// Shared by the active-session routes (deactivate / open-readonly / close-readonly): validates
+// :slug and :sessionId from the URL, writing the 400 response itself on failure. Returns null on
+// failure so callers can `if (!p) return;` instead of repeating the checks.
+function validateSessionParams(req, res) {
+  const slug = req.params.slug;
+  if (!safeSlug(slug)) { res.status(400).json({ error: 'Invalid slug' }); return null; }
+  const sessionId = req.params.sessionId;
+  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+    res.status(400).json({ error: 'Invalid session ID' });
+    return null;
+  }
+  return { slug, sessionId };
+}
+
+// Validates the read-only viewer instance id carried in the request body, writing the 400
+// response itself on failure.
+function validateInstanceId(req, res) {
+  const instanceId = req.body && req.body.instanceId;
+  if (typeof instanceId !== 'string' || !instanceId || instanceId.length > 100) {
+    res.status(400).json({ error: 'Invalid instance ID' });
+    return null;
+  }
+  return instanceId;
+}
+
 function getCachedTitle(filePath) {
   const nowMs = Date.now();
   const cached = _titleCache.get(filePath);
@@ -102,7 +127,7 @@ router.get('/active', wrapRoute((req, res) => {
   const archivedBySlug = {};
   const result = all
     .filter(({ sessionId }) => !sessionId.includes('..') && !sessionId.includes('/') && !sessionId.includes('\\'))
-    .map(({ slug, sessionId, kind }) => {
+    .map(({ slug, sessionId, kind, instanceId }) => {
       const dir = safeSlug(slug);
       let title = '';
       let lastGitBranch = '';
@@ -114,7 +139,7 @@ router.get('/active', wrapRoute((req, res) => {
       }
       if (!archivedBySlug[slug]) archivedBySlug[slug] = getArchivedIds(slug);
       const archived = archivedBySlug[slug].has(sessionId);
-      return { slug, sessionId, title: title || '', kind, lastGitBranch, archived };
+      return { slug, sessionId, title: title || '', kind, instanceId, lastGitBranch, archived };
     });
   res.json(result);
 }));
@@ -678,14 +703,28 @@ router.post('/:slug/sessions/:sessionId/resume', wrapRoute((req, res) => {
 }));
 
 router.post('/:slug/sessions/:sessionId/deactivate', wrapRoute((req, res) => {
-  const slug = req.params.slug;
-  if (!safeSlug(slug)) return res.status(400).json({ error: 'Invalid slug' });
-  const sessionId = req.params.sessionId;
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
-  activeSessions.deactivate(slug, sessionId);
-  terminalServer.disconnectFor(slug, sessionId, 'Closed by user.');
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  activeSessions.deactivate(p.slug, p.sessionId);
+  terminalServer.disconnectFor(p.slug, p.sessionId, 'Closed by user.');
+  res.json({ ok: true });
+}));
+
+router.post('/:slug/sessions/:sessionId/open-readonly', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const instanceId = validateInstanceId(req, res);
+  if (!instanceId) return;
+  activeSessions.registerReadonly(p.slug, p.sessionId, instanceId);
+  res.json({ ok: true });
+}));
+
+router.post('/:slug/sessions/:sessionId/close-readonly', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const instanceId = validateInstanceId(req, res);
+  if (!instanceId) return;
+  activeSessions.deactivateReadonly(p.slug, p.sessionId, instanceId);
   res.json({ ok: true });
 }));
 

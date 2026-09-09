@@ -477,9 +477,27 @@ function renderSessionBadges(s, opts = {}) {
 function renderSessionCard(s, opts = {}) {
   const slug = opts.slug || s.slug;
 
-  const dotHtml = s.active
-    ? `<span class="session-active-dot session-active-dot--${s.activeKind || 'os'}" title="${s.activeKind === 'browser' ? 'Browser terminal active — click to reconnect' : 'OS terminal launched recently'}"></span>`
-    : '';
+  const dotTitles = {
+    browser: 'Browser terminal active — click to reconnect',
+    os: 'OS terminal launched recently',
+    readonly: 'Open read-only in another tab'
+  };
+  // A real process (browser/os) and read-only viewers are independent facts and can both be true
+  // at once. A card can only carry one onclick, and "reconnect the terminal" vs "view read-only"
+  // are different actions — so when both are active, render two separate cards, each clickable
+  // into the right one, instead of merging them into a single card with an ambiguous click target.
+  const activeKinds = Array.isArray(s.activeKinds) ? s.activeKinds : (s.active ? [s.activeKind || 'os'] : []);
+  if (activeKinds.length > 1) {
+    return activeKinds
+      .map(k => renderSessionCard(Object.assign({}, s, { activeKind: k, activeKinds: [k] }), opts))
+      .join('');
+  }
+  const onclick = activeKinds[0] === 'readonly'
+    ? `Sessions.openReadOnly('${slug}', '${s.sessionId}')`
+    : (opts.onclick || '');
+  const dotHtml = activeKinds
+    .map(k => `<span class="session-active-dot session-active-dot--${k}" title="${dotTitles[k] || dotTitles.os}"></span>`)
+    .join('');
   const remoteIcon = s.remoteControlled
     ? `<span class="session-remote-icon" title="Remote-controlled session (used mobile/web bridge)" aria-label="remote-controlled">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -521,7 +539,7 @@ function renderSessionCard(s, opts = {}) {
     : '';
 
   return `
-    <div class="session-card" style="cursor:pointer" data-session-id="${s.sessionId}" onclick="${opts.onclick || ''}">
+    <div class="session-card" style="cursor:pointer" data-session-id="${s.sessionId}" onclick="${onclick}">
       ${headerHtml}
       ${opts.snippets || ''}
       <div class="session-meta">
@@ -537,6 +555,7 @@ function renderSessionCard(s, opts = {}) {
             <div class="action-menu-panel">
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.resumeOS('${slug}', '${s.sessionId}')">Resume in OS terminal</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.resumeBrowser('${slug}', '${s.sessionId}')">Resume in browser terminal</button>
+              <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openReadOnly('${slug}', '${s.sessionId}')">Open (read-only)</button>
               <button class="action-menu-item" data-slug="${slug}" data-session="${s.sessionId}" data-title="${escapeHtml(s.summary || s.firstPrompt || '')}" onclick="event.stopPropagation(); Sessions.renameAction(this)">Rename</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.copyIdAction('${s.sessionId}')">Copy session ID</button>
               ${opts.archived

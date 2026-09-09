@@ -148,3 +148,62 @@ test('listActive: does not sweep ignored entries still within TTL', () => {
   activeSessions.listActive();
   assert.strictEqual(activeSessions._ignoredSize(), 1);
 });
+
+// ── read-only viewer instances ───────────────────────────────────────────────
+
+test('registerReadonly: listReadonly reflects a registered instance', () => {
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  assert.deepStrictEqual(activeSessions.listReadonly(), [
+    { slug: SLUG, sessionId: SESSION_A, instanceId: 'instance-1' }
+  ]);
+});
+
+test('registerReadonly: the same session can have multiple simultaneous instances', () => {
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-2');
+  const list = activeSessions.listReadonly();
+  assert.strictEqual(list.length, 2);
+  assert.deepStrictEqual(new Set(list.map(e => e.instanceId)), new Set(['instance-1', 'instance-2']));
+});
+
+test('registerReadonly: is a no-op for missing slug, sessionId, or instanceId', () => {
+  activeSessions.registerReadonly('', SESSION_A, 'instance-1');
+  activeSessions.registerReadonly(SLUG, '', 'instance-1');
+  activeSessions.registerReadonly(SLUG, SESSION_A, '');
+  assert.strictEqual(activeSessions.listReadonly().length, 0);
+});
+
+test('deactivateReadonly: removes only the matching instance', () => {
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-2');
+  activeSessions.deactivateReadonly(SLUG, SESSION_A, 'instance-1');
+  assert.deepStrictEqual(activeSessions.listReadonly(), [
+    { slug: SLUG, sessionId: SESSION_A, instanceId: 'instance-2' }
+  ]);
+});
+
+test('readonly instances never expire on their own (no TTL heuristic applies)', () => {
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  // listActive()/isActive() TTL machinery is unrelated to readonly instances.
+  assert.strictEqual(activeSessions.listReadonly().length, 1);
+});
+
+test('hasReadonly: true once any instance is registered for that session', () => {
+  assert.strictEqual(activeSessions.hasReadonly(SLUG, SESSION_A), false);
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  assert.strictEqual(activeSessions.hasReadonly(SLUG, SESSION_A), true);
+});
+
+test('hasReadonly: false after the last instance for a session is deactivated', () => {
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-2');
+  activeSessions.deactivateReadonly(SLUG, SESSION_A, 'instance-1');
+  assert.strictEqual(activeSessions.hasReadonly(SLUG, SESSION_A), true);
+  activeSessions.deactivateReadonly(SLUG, SESSION_A, 'instance-2');
+  assert.strictEqual(activeSessions.hasReadonly(SLUG, SESSION_A), false);
+});
+
+test('hasReadonly: does not match a different session in the same project', () => {
+  activeSessions.registerReadonly(SLUG, SESSION_A, 'instance-1');
+  assert.strictEqual(activeSessions.hasReadonly(SLUG, SESSION_B), false);
+});

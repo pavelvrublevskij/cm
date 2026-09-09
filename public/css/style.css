@@ -554,6 +554,10 @@ body {
   flex: 1 1 auto !important;
   max-width: none !important;
 }
+.session-detail-body.session-readonly .terminal-pane,
+.session-detail-body.session-readonly .terminal-splitter {
+  display: none !important;
+}
 .terminal-splitter {
   flex: 0 0 16px;
   background: var(--border);
@@ -1673,6 +1677,18 @@ mark.search-highlight {
   background: transparent;
   border: 1.5px solid #2ea043;
   box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.4);
+}
+
+.session-active-dot--readonly {
+  background: #58a6ff;
+  animation-name: session-dot-pulse-readonly;
+  box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.6);
+}
+
+@keyframes session-dot-pulse-readonly {
+  0%   { box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.6); }
+  70%  { box-shadow: 0 0 0 6px rgba(88, 166, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(88, 166, 255, 0); }
 }
 
 @keyframes session-dot-pulse {
