@@ -142,7 +142,10 @@ const context = vm.createContext({
   escapeHtml: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;'),
   escapeAttr: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;')
     .split('"').join('&quot;').split("'").join('&#39;'),
-  showLoading: (container, text) => { container.innerHTML = text; },
+  showLoading: (container, text) => {
+    if (typeof container === 'string') container = el(container);
+    container.innerHTML = `<div class="loading"><div class="spinner"></div>${text}</div>`;
+  },
   FileHistory: {
     renderDiff: (container, result, filePath) => {
       harness.diffRenders.push({ result, filePath });
@@ -412,6 +415,26 @@ test('a recipe clicked while the socket is closed sends nothing', () => {
 });
 
 // ── rendering ────────────────────────────────────────────────────────────────
+
+test('mount shows a loading indicator while git info is being fetched', async () => {
+  let releaseInfo;
+  let callCount = 0;
+  harness.apiHandler = () => {
+    callCount++;
+    if (callCount === 1) return new Promise(resolve => { releaseInfo = () => resolve({ available: true }); });
+    return { available: true, running: false };
+  };
+
+  const mountPromise = GitPanel.mount(HOST, 'proj');
+  // mount() is async and calls showLoading() before its first await, so by the time this line
+  // runs (synchronously, right after calling mount) the spinner is already in the DOM.
+  assert.match(el(HOST).innerHTML, /class="loading"/);
+  assert.match(el(HOST).innerHTML, /class="spinner"/);
+
+  releaseInfo();
+  await mountPromise;
+  assert.doesNotMatch(el(HOST).innerHTML, /class="loading"/, 'spinner is replaced once real content renders');
+});
 
 test('a non-repo project renders an empty state and no shell', async () => {
   harness.apiHandler = () => ({ available: false });

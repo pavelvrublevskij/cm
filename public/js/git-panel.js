@@ -79,6 +79,7 @@ const GitPanel = {
       GitPanel._openCategories = new Set([GitRecipes.CATEGORIES[0].name]);
     }
 
+    showLoading(hostId, 'Loading git status...');
     GitPanel._info = await GitApi.info(slug) || { available: false };
     GitPanel._shellInfo = await GitApi.shellInfo(slug) || { available: false, running: false };
 
