@@ -147,6 +147,7 @@ const TerminalPanel = {
 
   close() {
     if (this.state.view) this.state.view.dispose();
+    if (typeof TerminalSkills !== 'undefined') TerminalSkills.close();
 
     const pane = document.getElementById('terminal-pane');
     if (pane) pane.classList.remove('connected');
