@@ -304,9 +304,12 @@ body {
   padding-left: 8px;
 }
 
+/* --tree-indent is set inline per row from its depth in the group tree (Projects.renderNav,
+   ActiveSessionsBar._renderSidebar). Kept as a custom property rather than an inline padding so the
+   collapsed-sidebar rule's padding shorthand can still reset it — an inline padding would win. */
 .project-list .nav-item {
   font-size: 12px;
-  padding: 6px 12px 6px 20px;
+  padding: 6px 12px 6px var(--tree-indent, 20px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1077,6 +1080,7 @@ input[type="radio"] + label {
 }
 
 .project-card .project-path {
+  display: block;           /* rendered as a span, shared with the group card's member rows */
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 12px;
@@ -1108,6 +1112,93 @@ input[type="radio"] + label {
 .stat-value {
   color: var(--text-primary);
   font-weight: 600;
+}
+
+/* --- Project grouping (worktrees, symlinked repos) --- */
+
+.badge {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.project-card--group {
+  cursor: default;
+}
+
+.project-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+.project-card-header .project-name {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.project-group-caret {
+  font-size: 9px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.project-group-members {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-group-member {
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.project-group-member:hover .project-group-member-name {
+  color: var(--accent);
+}
+
+.project-group-member-name {
+  display: block;
+  font-weight: 500;
+}
+
+.project-group-member-path {
+  display: block;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.nav-item--group-header {
+  font-weight: 500;
+}
+
+/* Indentation itself is set inline per row, from the member's depth in the group's folder tree. */
+.nav-item--sub {
+  padding-left: 28px;
+}
+
+.nav-item--sub .nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-group-count {
+  margin-left: auto;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 500;
 }
 
 /* --- Editor --- */
@@ -5222,8 +5313,10 @@ mark.search-highlight {
 
 /* Sidebar active session sub-items */
 
-.project-active-sub {
-  padding-left: 32px !important;
+/* Indent comes from --tree-indent, set inline from the owning project's depth plus one level (see
+   ActiveSessionsBar._renderSidebar); 32px is the flat fallback for an ungrouped project. */
+.project-list .nav-item.project-active-sub {
+  padding-left: var(--tree-indent, 32px);
 }
 
 .project-active-sub .nav-label {

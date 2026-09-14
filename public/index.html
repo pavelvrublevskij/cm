@@ -456,6 +456,10 @@
               <input type="checkbox" id="filter-plan-only" onchange="Sessions.setPlanFilter(this.checked)">
               With plan
             </label>
+            <label class="filter-plan-label" id="filter-group-scope-label" for="filter-group-scope" style="display:none">
+              <input type="checkbox" id="filter-group-scope" onchange="Sessions.toggleGroupScope()">
+              Subprojects
+            </label>
             <button class="btn btn-sm filter-clear-all" onclick="ProjectUsage.clearFilter()">Clear</button>
           </div>
           <div id="project-detail-usage" class="project-usage-bar"></div>

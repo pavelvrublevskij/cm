@@ -197,12 +197,20 @@ const ActiveSessionsBar = {
     for (const [slug, sessions] of Object.entries(bySlug)) {
       const navItem = document.querySelector(`.project-list .nav-item[data-slug="${slug}"]`);
       if (!navItem) continue;
+      // A project grouped with its worktrees sits at its own depth in the sidebar tree. Session rows
+      // have to follow that depth rather than use a fixed indent, or a nested project's sessions
+      // render further left than the project they belong to. Read --tree-indent rather than the
+      // computed padding: while the sidebar is collapsed the padding is flattened to 0, but the
+      // custom property still carries the row's real depth.
+      const ownIndent = parseFloat(getComputedStyle(navItem).getPropertyValue('--tree-indent')) || TREE_INDENT_ROOT;
+      const indent = ownIndent + TREE_INDENT_STEP;
       let anchor = navItem;
       for (const s of sessions) {
         const label = (s.title || s.sessionId.slice(0, 16)).slice(0, 28);
         const isCurrent = ActiveSessionsBar._isCurrent(s, currentSessionId, currentReadOnly, currentInstanceId);
         const div = document.createElement('div');
         div.className = 'nav-item project-active-sub' + (isCurrent ? ' active' : '');
+        div.style.setProperty('--tree-indent', indent + 'px');
         div.title = (s.title || s.sessionId) + (s.kind === 'readonly' ? ' (read-only)' : '');
         const closeBtn = document.createElement('button');
         closeBtn.className = 'asb-close asb-close--sidebar';
@@ -230,6 +238,7 @@ const ActiveSessionsBar = {
 
       const newDiv = document.createElement('div');
       newDiv.className = 'nav-item project-active-sub project-active-sub--new';
+      newDiv.style.setProperty('--tree-indent', indent + 'px');
       newDiv.title = 'New session';
 
       const newBtn = document.createElement('button');

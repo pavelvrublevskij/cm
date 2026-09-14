@@ -10,6 +10,7 @@
     "pretest": "node tests/helpers/clean-tmp.js",
     "test": "node --test --test-concurrency=1",
     "posttest": "node tests/helpers/clean-tmp.js",
+    "demo:worktree-group": "node scripts/build-worktree-demo.js",
     "bench": "node bench/index.js"
   },
   "dependencies": {
