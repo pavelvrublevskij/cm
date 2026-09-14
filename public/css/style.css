@@ -96,6 +96,15 @@ body {
   min-width: 48px;
 }
 
+.app.sidebar-resizing .sidebar {
+  transition: none;
+}
+
+.app.sidebar-resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+
 .app.sidebar-collapsed .nav-label {
   display: none;
 }
@@ -138,7 +147,7 @@ body {
   border: none;
   border-left: 1px solid var(--border);
   color: var(--text-muted);
-  cursor: pointer;
+  cursor: col-resize;
   font-size: 12px;
   padding: 0;
   display: flex;
@@ -146,6 +155,10 @@ body {
   justify-content: center;
   transition: background 0.15s, color 0.15s;
   user-select: none;
+}
+
+.app.sidebar-collapsed .sidebar-toggle {
+  cursor: pointer;
 }
 
 .sidebar-toggle:hover {
