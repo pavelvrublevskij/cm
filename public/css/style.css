@@ -674,6 +674,87 @@ body {
 .terminal-host .xterm-viewport,
 .terminal-host .xterm-screen { height: 100% !important; }
 
+/* Skills popover — project skills typed into the session terminal */
+.terminal-skills-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+}
+.terminal-skills-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.terminal-skills-popover {
+  position: absolute;
+  top: 34px;
+  left: 8px;
+  right: 8px;
+  z-index: 90;
+  max-height: 60%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.terminal-skills-filter {
+  flex: 0 0 auto;
+  margin: 8px;
+  padding: 5px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+}
+.terminal-skills-body { flex: 1 1 auto; overflow-y: auto; padding: 0 4px 6px; }
+.terminal-skills-section {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.terminal-skills-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.terminal-skills-item:hover { background: var(--bg-tertiary); }
+.terminal-skills-name { color: var(--accent); font-family: var(--font-mono); font-size: 12px; }
+.terminal-skills-kind {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+.terminal-skills-count { margin-left: 6px; color: var(--text-muted); font-size: 10px; }
+.terminal-skills-desc {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.terminal-skills-empty { padding: 12px; color: var(--text-muted); font-size: 12px; }
+
 .term-error-overlay {
   position: absolute;
   inset: 0;
