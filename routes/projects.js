@@ -5,8 +5,31 @@ const { execFile, spawn } = require('child_process');
 const { wrapRoute, safeSlug } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
 const { PROJECTS_DIR } = require('../lib/paths');
+const { computeGroups } = require('../lib/project-grouping');
+const { listProjectDirs } = require('../lib/project-list');
 
 const router = express.Router();
+
+const UNGROUPED = {
+  groupId: null,
+  groupLabel: null,
+  groupPrimary: false,
+  groupParentSlug: null,
+  groupRelPath: null
+};
+
+/** Count directory entries matching `predicate`, or 0 when the directory is missing/unreadable. */
+function countEntries(dir, predicate) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true }).filter(predicate).length;
+  } catch (_) {
+    return 0;     // missing directory, or no permission to read it
+  }
+}
+
+const isMarkdown = d => d.isFile() && d.name.endsWith('.md');
+const isJsonl = d => d.isFile() && d.name.endsWith('.jsonl');
+const isDirectory = d => d.isDirectory();
 
 function openFolder(folderPath) {
   const platform = process.platform;
@@ -20,59 +43,25 @@ function openFolder(folderPath) {
 }
 
 router.get('/', wrapRoute((req, res) => {
-  const dirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory());
-
-  const projects = dirs.map(d => {
-    const slug = d.name;
-    const projectDir = path.join(PROJECTS_DIR, slug);
-    const memoryDir = path.join(projectDir, 'memory');
-    let memoryCount = 0;
-    let hasMemory = false;
-
-    if (fs.existsSync(memoryDir)) {
-      hasMemory = true;
-      try {
-        memoryCount = fs.readdirSync(memoryDir).filter(f => f.endsWith('.md')).length;
-      } catch (_) { /* empty dir or permission error */ }
-    }
-
-    let sessionCount = 0;
-    try {
-      sessionCount = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl')).length;
-    } catch (_) { /* empty dir or permission error */ }
-
-    const decodedPath = decodeSlug(slug);
-    const projectClaudeMd = path.join(decodedPath, 'CLAUDE.md');
-    const hasClaudeMd = fs.existsSync(projectClaudeMd);
-
-    const aiMemoryDir = path.join(decodedPath, '.ai_project_memory');
-    const hasAiMemory = fs.existsSync(aiMemoryDir);
-
-    const projSkillsDir = path.join(decodedPath, '.claude', 'skills');
-    let skillsCount = 0;
-    if (fs.existsSync(projSkillsDir)) {
-      try { skillsCount = fs.readdirSync(projSkillsDir, { withFileTypes: true }).filter(d => d.isDirectory()).length; } catch (_) {}
-    }
-
-    const projStylesDir = path.join(decodedPath, '.claude', 'output-styles');
-    let outputStylesCount = 0;
-    if (fs.existsSync(projStylesDir)) {
-      try { outputStylesCount = fs.readdirSync(projStylesDir).filter(f => f.endsWith('.md')).length; } catch (_) {}
-    }
+  const projects = listProjectDirs().map(({ slug, path: projectPath }) => {
+    const stateDir = path.join(PROJECTS_DIR, slug);
+    const memoryDir = path.join(stateDir, 'memory');
 
     return {
       slug,
-      path: decodedPath,
-      memoryCount,
-      hasMemory,
-      sessionCount,
-      skillsCount,
-      outputStylesCount,
-      hasClaudeMd,
-      hasAiMemory
+      path: projectPath,
+      hasMemory: fs.existsSync(memoryDir),
+      memoryCount: countEntries(memoryDir, isMarkdown),
+      sessionCount: countEntries(stateDir, isJsonl),
+      skillsCount: countEntries(path.join(projectPath, '.claude', 'skills'), isDirectory),
+      outputStylesCount: countEntries(path.join(projectPath, '.claude', 'output-styles'), isMarkdown),
+      hasClaudeMd: fs.existsSync(path.join(projectPath, 'CLAUDE.md')),
+      hasAiMemory: fs.existsSync(path.join(projectPath, '.ai_project_memory'))
     };
   });
+
+  const groups = computeGroups(projects);
+  for (const p of projects) Object.assign(p, groups.get(p.slug) || UNGROUPED);
 
   res.json(projects);
 }));

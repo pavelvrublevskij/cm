@@ -104,8 +104,6 @@ const Sessions = {
 
   renderGroup(slug, group, collapsed, idx) {
     const isCollapsed = collapsed.has(group.key);
-    const allSessions = Sessions.cache[slug] || [];
-    const hasPlanIds = Sessions._planSessionIds;
 
     const desc = [...group.sessions].reverse();
     let bodyHtml = '';
@@ -114,12 +112,10 @@ const Sessions = {
         const gapMs = new Date(desc[i - 1].created || 0) - new Date(s.modified || s.created || 0);
         if (gapMs > 1800000) bodyHtml += Sessions.renderGapRow(gapMs);
       }
-      const ci = allSessions.findIndex(x => x.sessionId === s.sessionId);
-      const hasPlan = !!(hasPlanIds && hasPlanIds.has(s.sessionId));
-      bodyHtml += renderSessionCard(s, {
-        onclick: `Sessions.open('${slug}', '${s.sessionId}', ${ci >= 0 ? ci : i})`,
-        slug, dates: true, sidechain: true, hasPlan, archived: Sessions._showArchived
-      });
+      // Through renderCard, not renderSessionCard directly: it is the single place that resolves a
+      // session's owning project, which under group scope decides both the badge and where the card
+      // navigates. Building the card here instead silently dropped both for every grouped session.
+      bodyHtml += Sessions.renderCard(slug, s, i);
     });
 
     const dateRange = Sessions._groupDateRange(group.sessions);
@@ -154,18 +150,21 @@ const Sessions = {
     if (Sessions._searchSlug !== slug) {
       Sessions._planFilter = false;
       Sessions._showArchived = false;
+      Sessions._groupScope = false;
       const cb = document.getElementById('filter-plan-only');
       if (cb) cb.checked = false;
     }
     Sessions._planSessionIds = null;
     Sessions._searchSlug = slug;
+    Sessions.syncGroupScopeFilter(slug);
     const container = document.getElementById('sessions-list');
     showLoading(container, 'Loading sessions...');
 
     try {
-      const url = Sessions._showArchived
-        ? `/api/projects/${slug}/sessions?archived=true`
-        : `/api/projects/${slug}/sessions`;
+      const params = [];
+      if (Sessions._showArchived) params.push('archived=true');
+      if (Sessions._groupScopeActive(slug)) params.push('scope=group');
+      const url = `/api/projects/${slug}/sessions${params.length ? '?' + params.join('&') : ''}`;
       const sessions = await api(url);
       Sessions.cache[slug] = sessions;
       Sessions.renderList(slug, Sessions.applyFilters(sessions));
@@ -325,13 +324,69 @@ const Sessions = {
     }
   },
 
+  /** The project entry Projects.load cached, or null before that has happened. */
+  _project(slug) {
+    if (typeof Projects === 'undefined') return null;
+    return (Projects.data || []).find(x => x.slug === slug) || null;
+  },
+
+  /** The group this project belongs to, or null when it stands alone. */
+  _group(slug) {
+    const p = Sessions._project(slug);
+    return p && p.groupId ? p : null;
+  },
+
+  _groupScope: false,
+
+  /** Whether this project's sessions are currently widened to its whole group. Scope only means
+   *  anything for a grouped project, so both the list and search gate on it together. */
+  _groupScopeActive(slug) {
+    return Sessions._groupScope && !!Sessions._group(slug);
+  },
+
+  /** Short name for a project within its group — its path relative to its parent project, so a
+   *  linked-in repo reads as "linked-repos/service" rather than its whole filesystem path. */
+  _projectLabel(slug) {
+    const p = Sessions._project(slug);
+    if (p && typeof Projects._memberLabel === 'function') return Projects._memberLabel(p);
+    return decodeName(slug);
+  },
+
+  /** Show the "Subprojects" filter only for a project that actually has siblings to fold in. */
+  syncGroupScopeFilter(slug) {
+    const label = document.getElementById('filter-group-scope-label');
+    const box = document.getElementById('filter-group-scope');
+    if (!label || !box) return;
+    const group = Sessions._group(slug);
+    label.style.display = group ? '' : 'none';
+    label.title = group ? `Include sessions from every project in "${group.groupLabel}"` : '';
+    box.checked = !!(group && Sessions._groupScope);
+  },
+
+  /** Fold every project grouped with this one into the session list — and therefore into search
+   *  too, since search runs over whatever the list is showing. */
+  async setGroupScope(on, slug) {
+    const target = slug || App.currentProject;
+    if (!target || Sessions._groupScope === on) return;
+    Sessions._groupScope = on;
+    await Sessions.load(target);
+    const input = document.getElementById('session-search-input');
+    const value = input ? input.value : '';
+    if (value.trim().length >= 2) Sessions.onSearch(target, value);
+  },
+
+  toggleGroupScope(slug) {
+    return Sessions.setGroupScope(!Sessions._groupScope, slug);
+  },
+
   renderSearchBar(slug) {
     const archivedBtnClass = Sessions._showArchived ? 'btn btn-sm btn-secondary btn-active' : 'btn btn-sm btn-secondary';
     const archivedBtnTitle = Sessions._showArchived ? 'Showing archived sessions — click to show active' : 'Show archived sessions';
+    const group = Sessions._group(slug);
     return `<div class="session-search-wrap">
       <div class="session-search-container" onmouseenter="Sessions._cancelHideHistoryDropdown()" onmouseleave="Sessions._hideHistoryDropdownDelayed()">
         <input type="text" class="session-search" id="session-search-input"
-          placeholder="Search sessions..."
+          placeholder="${Sessions._groupScope && group ? `Search sessions across ${escapeAttr(group.groupLabel)}...` : 'Search sessions...'}"
           oninput="Sessions._hideHistoryDropdown(); Sessions.onSearch('${slug}', this.value)"
           onfocus="Sessions.showHistory('${slug}')"
           onblur="Sessions._hideHistoryDropdownDelayed()">
@@ -559,18 +614,49 @@ const Sessions = {
       const roleHtml = roleTag ? `<span class="snippet-role snippet-role-${sn.role}">${roleTag}</span> ` : '';
       return `<div class="session-snippet snippet-${sn.role}">${roleHtml}${label}${Sessions.highlightMatch(sn.text, Sessions._lastQuery)}</div>`;
     }).join('');
-    const cached = Sessions.cache[slug] || [];
+    // Under group scope the list and search both mix sessions from sibling projects, so every card
+    // is badged with the project it belongs to — badging only the foreign ones would leave the
+    // unbadged majority ambiguous. Foreign ones also open against their own project, not this one.
+    const foreign = s.slug && s.slug !== slug;
+    const cardSlug = foreign ? s.slug : slug;
+    const cached = Sessions.cache[cardSlug] || [];
     const correctIndex = cached.findIndex(x => x.sessionId === s.sessionId);
     const hasPlan = !!(Sessions._planSessionIds && Sessions._planSessionIds.has(s.sessionId));
     return renderSessionCard(s, {
-      onclick: `Sessions.open('${slug}', '${s.sessionId}', ${correctIndex >= 0 ? correctIndex : i})`,
-      slug,
+      onclick: foreign
+        ? `Sessions.openGroupedSession('${cardSlug}', '${s.sessionId}')`
+        : `Sessions.open('${slug}', '${s.sessionId}', ${correctIndex >= 0 ? correctIndex : i})`,
+      slug: cardSlug,
+      project: Sessions._groupScope ? Sessions._projectLabel(cardSlug) : undefined,
       dates: true,
       sidechain: true,
       snippets: snippetsHtml,
       hasPlan,
       archived: Sessions._showArchived
     });
+  },
+
+  _searchResults: {},
+
+  /** A session is only unique across a group when keyed by its own project as well as its id. */
+  _sessionKey(slug, sessionId) { return `${slug}|${sessionId}`; },
+
+  /** Locate a session belonging to `slug` wherever we already hold it: a stashed search hit, or any
+   *  cached list — under group scope a project's cache holds its whole group's sessions. */
+  _findSession(slug, sessionId) {
+    const stashed = Sessions._searchResults[Sessions._sessionKey(slug, sessionId)];
+    if (stashed) return stashed;
+    for (const list of Object.values(Sessions.cache)) {
+      const hit = (list || []).find(s => s.sessionId === sessionId && (s.slug || slug) === slug);
+      if (hit) return hit;
+    }
+    return undefined;
+  },
+
+  /** Open a session belonging to another project in the group. Its own project's list was never
+   *  loaded under its own cache key, so navigate with the entry we already have. */
+  openGroupedSession(slug, sessionId) {
+    Sessions._navigateToSession(slug, sessionId, Sessions._findSession(slug, sessionId), false);
   },
 
   _lastQuery: '',
@@ -600,8 +686,15 @@ const Sessions = {
     }
 
     try {
-      let results = await api(`/api/projects/${slug}/sessions/search?q=${encodeURIComponent(q)}`);
+      const scope = Sessions._groupScopeActive(slug) ? '&scope=group' : '';
+      let results = await api(`/api/projects/${slug}/sessions/search?q=${encodeURIComponent(q)}${scope}`);
       if (Sessions._lastQuery !== q) return;
+      // Results from a sibling project aren't in this project's session cache, so stash them for
+      // the card's click handler to navigate with.
+      Sessions._searchResults = {};
+      for (const r of results) {
+        if (r.slug && r.slug !== slug) Sessions._searchResults[Sessions._sessionKey(r.slug, r.sessionId)] = r;
+      }
       results = Sessions.filterByDateRange(results);
       if (Sessions._planFilter && Sessions._planSessionIds) {
         results = results.filter(s => Sessions._planSessionIds.has(s.sessionId));

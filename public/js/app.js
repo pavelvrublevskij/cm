@@ -13,6 +13,8 @@ const App = {
       });
     });
 
+    if (typeof SidebarResize !== 'undefined') SidebarResize.init();
+
     // Restore sidebar collapsed state
     if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1') {
       document.querySelector('.app').classList.add('sidebar-collapsed');
@@ -80,6 +82,7 @@ const App = {
   },
 
   toggleSidebar() {
+    if (typeof SidebarResize !== 'undefined' && SidebarResize.consumeDrag()) return;
     const app = document.querySelector('.app');
     const btn = document.getElementById('sidebar-toggle');
     const collapsed = app.classList.toggle('sidebar-collapsed');

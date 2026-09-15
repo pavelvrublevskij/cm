@@ -16,6 +16,7 @@ const { stampActive, listAllActiveSessions } = require('../lib/session-status');
 const { MAX_SNIPPETS, extractEntrySnippets, extractMetaSnippet } = require('../lib/session-search');
 const { collectFromJsonl, collectFromDir } = require('../lib/session-activity');
 const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/session-archive');
+const { groupMemberSlugs } = require('../lib/project-grouping');
 
 const router = express.Router({ mergeParams: true });
 
@@ -144,18 +145,24 @@ router.get('/active', wrapRoute((req, res) => {
   res.json(result);
 }));
 
-router.get('/:slug/sessions', wrapRoute((req, res) => {
-  const dir = safeSlug(req.params.slug);
-  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
+/** Newest first, tolerating entries whose timestamp never got recorded. */
+function byNewestFirst(a, b) {
+  return new Date(b.modified || 0) - new Date(a.modified || 0);
+}
 
-  const showArchived = req.query.archived === 'true';
-  const archivedIds = getArchivedIds(req.params.slug);
+/**
+ * One project's session list. Every entry carries its own `slug` so a group-wide listing can tell
+ * the caller which project each session belongs to.
+ */
+function listProjectSessions(slug, dir, showArchived) {
+  const archivedIds = getArchivedIds(slug);
 
   const indexFile = path.join(dir, 'sessions-index.json');
   if (fs.existsSync(indexFile)) {
     try {
       const data = JSON.parse(fs.readFileSync(indexFile, 'utf-8'));
       const sessions = (data.entries || []).map(e => ({
+        slug,
         sessionId: e.sessionId,
         summary: e.summary || '',
         firstPrompt: e.firstPrompt || '',
@@ -178,14 +185,14 @@ router.get('/:slug/sessions', wrapRoute((req, res) => {
         s.remoteControlled = hasBridgeSession(filePath);
         if (isSkippablePrompt(s.firstPrompt)) s.firstPrompt = findFirstMeaningfulPrompt(filePath);
       });
-      const usageMap = getProjectUsageMap(req.params.slug);
+      const usageMap = getProjectUsageMap(slug);
       sessions.forEach(s => {
         const u = usageMap[s.sessionId];
         if (u) { s.tokens = u.totals; s.cost = u.cost; s.models = Object.keys(u.byModel || {}); }
       });
-      sessions.sort((a, b) => new Date(b.modified || 0) - new Date(a.modified || 0));
-      stampActive(req.params.slug, sessions);
-      return res.json(sessions);
+      sessions.sort(byNewestFirst);
+      stampActive(slug, sessions);
+      return sessions;
     } catch (_) { /* malformed index, fall through to JSONL parsing */ }
   }
 
@@ -195,6 +202,7 @@ router.get('/:slug/sessions', wrapRoute((req, res) => {
     const filePath = path.join(dir, f);
     const stat = fs.statSync(filePath);
     const session = {
+      slug,
       sessionId: f.replace('.jsonl', ''),
       summary: '',
       firstPrompt: '',
@@ -252,26 +260,51 @@ router.get('/:slug/sessions', wrapRoute((req, res) => {
     return session;
   });
 
-  const usageMap = getProjectUsageMap(req.params.slug);
+  const usageMap = getProjectUsageMap(slug);
   const filtered = sessions.filter(s => s.messageCount > 0 && (showArchived ? archivedIds.has(s.sessionId) : !archivedIds.has(s.sessionId)));
   filtered.forEach(s => {
     const u = usageMap[s.sessionId];
     if (u) { s.tokens = u.totals; s.cost = u.cost; s.models = Object.keys(u.byModel || {}); }
   });
-  filtered.sort((a, b) => new Date(b.modified) - new Date(a.modified));
-  stampActive(req.params.slug, filtered);
-  res.json(filtered);
+  filtered.sort(byNewestFirst);
+  stampActive(slug, filtered);
+  return filtered;
+}
+
+/** Runs `fn` for this project, or for every project grouped with it when scope=group. */
+/**
+ * Collects `fn(slug, dir)` across this project alone, or across every project grouped with it when
+ * the request asks for scope=group — which folds in sibling worktrees and linked-in repos so their
+ * sessions are listed and searched alongside this project's own. Assumes the request's own slug has
+ * already been validated; members resolved from the group are validated here.
+ */
+function forProjectScope(req, fn) {
+  const ownSlug = req.params.slug;
+  const slugs = req.query.scope === 'group' ? groupMemberSlugs(ownSlug) : [ownSlug];
+
+  const out = [];
+  for (const memberSlug of slugs) {
+    const memberDir = safeSlug(memberSlug);
+    if (!memberDir || !fs.existsSync(memberDir)) continue;
+    out.push(...fn(memberSlug, memberDir));
+  }
+  return out;
+}
+
+router.get('/:slug/sessions', wrapRoute((req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+
+  const showArchived = req.query.archived === 'true';
+  const sessions = forProjectScope(req, (slug, dir) => listProjectSessions(slug, dir, showArchived));
+  res.json(sessions.sort(byNewestFirst));
 }));
 
-router.get('/:slug/sessions/search', wrapRoute((req, res) => {
-  const dir = safeSlug(req.params.slug);
-  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
-
-  const q = (req.query.q || '').trim();
-  if (q.length < 2) return res.json([]);
-
-  const qLower = q.toLowerCase();
-  const archivedIds = getArchivedIds(req.params.slug);
+/**
+ * Full-text search over one project's sessions. Every result carries its own `slug` so a
+ * group-wide search can tell the caller which project each hit came from.
+ */
+function searchProjectSessions(slug, dir, q, qLower) {
+  const archivedIds = getArchivedIds(slug);
 
   // Load index metadata if available
   const indexMeta = {};
@@ -373,6 +406,7 @@ router.get('/:slug/sessions/search', wrapRoute((req, res) => {
     if (snippets.length === 0) continue;
 
     const session = {
+      slug,
       sessionId,
       summary: customTitle || meta?.summary || '',
       firstPrompt: meta?.firstPrompt || firstPrompt,
@@ -388,13 +422,23 @@ router.get('/:slug/sessions/search', wrapRoute((req, res) => {
     results.push(session);
   }
 
-  const usageMap = getProjectUsageMap(req.params.slug);
+  const usageMap = getProjectUsageMap(slug);
   results.forEach(s => {
     const u = usageMap[s.sessionId];
     if (u) { s.tokens = u.totals; s.cost = u.cost; s.models = Object.keys(u.byModel || {}); }
   });
-  results.sort((a, b) => new Date(b.modified || 0) - new Date(a.modified || 0));
-  res.json(results);
+  return results;
+}
+
+router.get('/:slug/sessions/search', wrapRoute((req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) return res.json([]);
+  const qLower = q.toLowerCase();
+
+  const results = forProjectScope(req, (slug, dir) => searchProjectSessions(slug, dir, q, qLower));
+  res.json(results.sort(byNewestFirst));
 }));
 
 router.get('/:slug/sessions/with-plans', wrapRoute((req, res) => {

@@ -68,7 +68,10 @@ const ProjectUsage = {
   clearFilter() {
     ProjectUsage.applyDatePresetState('today');
     ProjectUsage.render();
-    if (typeof Sessions !== 'undefined') Sessions.setPlanFilter(false);
+    if (typeof Sessions !== 'undefined') {
+      Sessions.setPlanFilter(false);
+      Sessions.setGroupScope(false);
+    }
   }
 };
 

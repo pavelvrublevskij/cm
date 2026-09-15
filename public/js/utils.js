@@ -589,3 +589,15 @@ const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'];
 const KB_CONTEXTS = ['Chat', 'Global', 'Autocomplete', 'Settings', 'Confirmation', 'Tabs', 'Help', 'Transcript', 'HistorySearch', 'Task'];
 const MCP_TYPES = ['stdio', 'sse', 'http'];
 const VALUE_TYPES = ['string', 'number', 'boolean', 'object', 'array'];
+
+// Indentation of the sidebar project tree, shared by Projects.renderNav (project rows) and
+// ActiveSessionsBar._renderSidebar (the session rows hanging off them). Both must agree or a
+// project's sessions stop lining up underneath it.
+const TREE_INDENT_ROOT = 20;   // an ungrouped project — matches `.project-list .nav-item`'s default
+const TREE_INDENT_BASE = 28;   // a grouped project at depth 0, indented under its group header
+const TREE_INDENT_STEP = 14;   // one level deeper
+
+/** Left padding for a row at `depth` in a group's project tree. */
+function treeIndent(depth) {
+  return TREE_INDENT_BASE + depth * TREE_INDENT_STEP;
+}
