@@ -14,7 +14,7 @@ const Tour = {
     {
       element: '.sidebar-nav',
       title: 'Navigation',
-      text: 'Switch between views here. The sidebar collapses to icon-only mode using the toggle strip on the right edge.',
+      text: 'Switch between views here. The toggle strip on the right edge collapses the sidebar to icon-only mode — drag it instead to resize the sidebar, and the width sticks.',
       position: 'right'
     },
     {
@@ -50,6 +50,19 @@ const Tour = {
       text: 'Group charts and the usage table by Hour, Day, Week, Month, or Year using these tabs.',
       position: 'bottom',
       view: 'usage'
+    },
+    {
+      element: '#projects-grid',
+      title: 'Projects and Worktrees',
+      text: 'Every project Claude Code has seen. Git worktrees and linked repos of the same codebase are grouped into one entry, and the Sessions list gets a "Subprojects" filter to fold every session in the group into one list.',
+      position: 'bottom',
+      view: 'projects'
+    },
+    {
+      element: null,
+      title: 'Skills in the Terminal',
+      text: 'Inside a session, the Skills button next to the terminal restart and close controls lists the skills and slash commands the project itself provides, with your most-used pinned on top. Click one to type it into the running claude, then add arguments yourself.',
+      position: 'center'
     },
   ],
 

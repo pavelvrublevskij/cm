@@ -1,3 +1,15 @@
+## v1.6.0
+
+### Features
+
+- **Skills palette in the session terminal** — a Skills button lists the project's `.claude/skills/` and `.claude/commands/` entries, with a filter box and the five most-used pinned on top; clicking one types `/name ` into the running claude.
+- **Git worktrees and linked repos grouped under one project** — worktrees, symlink aliases, and workspaces linking sibling repos now show as a single nested group, with a "Subprojects" filter that folds the group's sessions into the list and search.
+- **Drag-to-resize sidebar** — the collapse toggle doubles as a drag handle, and the width persists; a plain click still collapses.
+
+### Bug fixes
+
+- **The Git tab looked stuck while loading** — the initial status fetch now shows a loading spinner instead of a blank panel.
+
 ## v1.5.2
 
 ### Features
