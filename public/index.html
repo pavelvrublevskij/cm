@@ -638,10 +638,12 @@
               <span class="terminal-pane-title">Terminal</span>
               <span class="terminal-pane-status" id="terminal-status">disconnected</span>
               <div class="terminal-pane-actions">
+                <button class="terminal-skills-btn terminal-action-when-connected" id="terminal-skills-btn" onclick="TerminalSkills.toggle()" title="Project skills" aria-label="Project skills">Skills</button>
                 <button class="icon-btn terminal-action-when-connected" onclick="TerminalPanel.reconnect()" title="Restart claude in this panel" aria-label="Restart">&#x21bb;</button>
                 <button class="icon-btn terminal-action-when-connected" onclick="TerminalPanel.closeFromUser()" title="Close terminal" aria-label="Close">&#x2715;</button>
               </div>
             </div>
+            <div class="terminal-skills-popover" id="terminal-skills-popover" style="display:none"></div>
             <div class="terminal-pane-note">Recommended: keep only one terminal open per session to avoid conflicts.</div>
             <div class="terminal-disconnected" id="terminal-disconnected">
               <button class="btn btn-primary" onclick="TerminalPanel.openFromSession()">Open Terminal</button>
@@ -846,6 +848,7 @@
   <script src="/js/usage-charts.js"></script>
   <script src="/js/term-view.js"></script>
   <script src="/js/terminal.js"></script>
+  <script src="/js/terminal-skills.js"></script>
   <script src="/js/manager-settings.js"></script>
   <script src="/js/file-history.js"></script>
   <script src="/js/tour.js"></script>

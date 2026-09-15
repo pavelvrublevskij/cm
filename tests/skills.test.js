@@ -8,6 +8,7 @@ const { app, HOME, paths } = require('./helpers/app');
 const PROJECT_NAME = 'skills-test-proj';
 const PROJECT_ROOT = path.join(HOME, PROJECT_NAME);
 const PROJECT_SKILLS_DIR = path.join(PROJECT_ROOT, '.claude', 'skills');
+const PROJECT_COMMANDS_DIR = path.join(PROJECT_ROOT, '.claude', 'commands');
 
 function buildSlug(fullPath) {
   if (process.platform === 'win32') {
@@ -38,6 +39,17 @@ before(() => {
     path.join(seedProj, 'SKILL.md'),
     '---\nname: seed-proj-skill\ndescription: Seeded project\n---\nProj body'
   );
+
+  fs.mkdirSync(path.join(PROJECT_COMMANDS_DIR, 'ns'), { recursive: true });
+  fs.writeFileSync(
+    path.join(PROJECT_COMMANDS_DIR, 'seed-command.md'),
+    '---\ndescription: Seeded command\n---\nCommand body'
+  );
+  fs.writeFileSync(
+    path.join(PROJECT_COMMANDS_DIR, 'ns', 'nested-command.md'),
+    '---\ndescription: Nested command\n---\nNested body'
+  );
+  fs.writeFileSync(path.join(PROJECT_COMMANDS_DIR, 'notes.txt'), 'not a command');
 });
 
 after(() => {
@@ -180,4 +192,72 @@ test('PUT/GET/DELETE /api/skills/project/:slug/:name roundtrip', async () => {
 test('DELETE /api/skills/project/:slug/:name returns 404 when missing', async () => {
   const res = await request(app).delete(`/api/skills/project/${SLUG}/never-there`);
   assert.strictEqual(res.status, 404);
+});
+
+test('GET /api/skills/palette/:slug lists project skills and commands with usage counts', async () => {
+  const res = await request(app).get(`/api/skills/palette/${SLUG}`);
+  assert.strictEqual(res.status, 200);
+
+  const skill = res.body.find(s => s.name === 'seed-proj-skill');
+  assert.ok(skill, 'project skill missing from palette');
+  assert.strictEqual(skill.kind, 'skill');
+  assert.strictEqual(skill.usageCount, 0);
+
+  const cmd = res.body.find(s => s.name === 'seed-command');
+  assert.ok(cmd, 'project command missing from palette');
+  assert.strictEqual(cmd.kind, 'command');
+  assert.strictEqual(cmd.description, 'Seeded command');
+
+  const nested = res.body.find(s => s.name === 'ns:nested-command');
+  assert.ok(nested, 'namespaced command missing from palette');
+  assert.strictEqual(nested.kind, 'command');
+
+  assert.ok(!res.body.some(s => s.name === 'notes'), 'non-md file listed as a command');
+});
+
+test('the project Skills tab listing stays skills-only', async () => {
+  const res = await request(app).get(`/api/skills/project/${SLUG}`);
+  assert.ok(res.body.every(s => s.name !== 'seed-command'), 'commands leaked into the skills listing');
+});
+
+test('POST /api/skills/usage/:slug/:name counts clicks and feeds the palette', async () => {
+  const first = await request(app).post(`/api/skills/usage/${SLUG}/seed-proj-skill`);
+  assert.strictEqual(first.status, 200);
+  assert.strictEqual(first.body.count, 1);
+
+  const second = await request(app).post(`/api/skills/usage/${SLUG}/seed-proj-skill`);
+  assert.strictEqual(second.body.count, 2);
+
+  const list = await request(app).get(`/api/skills/palette/${SLUG}`);
+  assert.strictEqual(list.body.find(s => s.name === 'seed-proj-skill').usageCount, 2);
+
+  const dbFile = path.join(paths.DATA_DIR, 'skill-usage.json');
+  assert.ok(fs.existsSync(dbFile), 'usage db not written to data/');
+  const db = JSON.parse(fs.readFileSync(dbFile, 'utf-8'));
+  assert.strictEqual(db[SLUG]['seed-proj-skill'], 2);
+});
+
+test('POST /api/skills/usage/:slug/:name counts a command too, namespaced ones included', async () => {
+  const flat = await request(app).post(`/api/skills/usage/${SLUG}/seed-command`);
+  assert.strictEqual(flat.status, 200);
+
+  const nested = await request(app).post(`/api/skills/usage/${SLUG}/${encodeURIComponent('ns:nested-command')}`);
+  assert.strictEqual(nested.status, 200);
+
+  const list = await request(app).get(`/api/skills/palette/${SLUG}`);
+  assert.strictEqual(list.body.find(s => s.name === 'seed-command').usageCount, 1);
+  assert.strictEqual(list.body.find(s => s.name === 'ns:nested-command').usageCount, 1);
+});
+
+test('POST /api/skills/usage/:slug/:name refuses a name the project does not have', async () => {
+  const res = await request(app).post(`/api/skills/usage/${SLUG}/not-a-real-skill`);
+  assert.strictEqual(res.status, 404);
+});
+
+test('POST /api/skills/usage/:slug/:name refuses a traversing name', async () => {
+  const res = await request(app).post(`/api/skills/usage/${SLUG}/${encodeURIComponent('../../evil')}`);
+  assert.ok(res.status === 400 || res.status === 404, `unexpected status ${res.status}`);
+
+  const escaping = await request(app).post(`/api/skills/usage/${SLUG}/${encodeURIComponent('..:..:evil')}`);
+  assert.ok(escaping.status === 400 || escaping.status === 404, `unexpected status ${escaping.status}`);
 });
