@@ -1,3 +1,9 @@
+## v1.6.1
+
+### Features
+
+- **Read-only-by-default setting** — a Manager Settings toggle to open sessions read-only by default (off by default).
+
 ## v1.6.0
 
 ### Features

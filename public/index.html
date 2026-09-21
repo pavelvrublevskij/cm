@@ -683,6 +683,15 @@
                 <select id="theme-select" onchange="ManagerSettings.onThemeChange(this.value)"></select>
               </div>
 
+              <h3 style="margin-top:24px">Session Opening</h3>
+              <div class="subtitle" style="margin:0 0 12px">
+                When on, clicking a session card opens it in read-only mode instead of an interactive session.
+              </div>
+              <label class="session-tool-toggle" for="default-readonly-enabled" style="margin:0">
+                <input type="checkbox" id="default-readonly-enabled" onchange="ManagerSettings.saveDefaultReadOnly(this.checked)">
+                Open sessions read-only by default
+              </label>
+
               <h3 style="margin-top:24px">Conversation Refresh Rate</h3>
               <div class="subtitle" style="margin:0 0 12px">How often the open session view polls for new messages. Minimum 1 second.</div>
               <div style="display:flex;gap:8px;align-items:center">

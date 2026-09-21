@@ -656,7 +656,7 @@ const Sessions = {
   /** Open a session belonging to another project in the group. Its own project's list was never
    *  loaded under its own cache key, so navigate with the entry we already have. */
   openGroupedSession(slug, sessionId) {
-    Sessions._navigateToSession(slug, sessionId, Sessions._findSession(slug, sessionId), false);
+    Sessions._navigateToSession(slug, sessionId, Sessions._findSession(slug, sessionId), Sessions.defaultReadOnly());
   },
 
   _lastQuery: '',
@@ -725,7 +725,7 @@ const Sessions = {
 
   open(slug, sessionId, index) {
     const sessions = Sessions.cache[slug] || [];
-    Sessions._navigateToSession(slug, sessionId, sessions[index], false);
+    Sessions._navigateToSession(slug, sessionId, sessions[index], Sessions.defaultReadOnly());
   },
 
   openReadOnly(slug, sessionId) {
@@ -748,7 +748,16 @@ const Sessions = {
   REFRESH_INTERVAL_MIN_MS: 1000,
   CONVERSATION_HIDDEN_KEY: 'claude-manager-conversation-hidden',
   SHOW_TOOL_DETAILS_KEY: 'claude-manager-show-tool-details',
+  DEFAULT_READONLY_KEY: 'claude-manager-default-readonly',
   _refreshTimer: null,
+
+  defaultReadOnly() {
+    return localStorage.getItem(Sessions.DEFAULT_READONLY_KEY) === '1';
+  },
+
+  setDefaultReadOnly(on) {
+    localStorage.setItem(Sessions.DEFAULT_READONLY_KEY, on ? '1' : '0');
+  },
 
   refreshIntervalMs() {
     const raw = parseInt(localStorage.getItem(Sessions.REFRESH_INTERVAL_KEY), 10);

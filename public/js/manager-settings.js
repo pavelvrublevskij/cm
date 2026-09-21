@@ -23,6 +23,7 @@ const ManagerSettings = {
       ManagerSettings.renderTable();
       ManagerSettings.loadRefreshRate();
       ManagerSettings.loadAutosave();
+      ManagerSettings.loadDefaultReadOnly();
     } catch (e) {
       toast('Failed to load manager settings: ' + e.message, 'error');
     }
@@ -284,6 +285,18 @@ const ManagerSettings = {
     if (typeof Sessions !== 'undefined') Sessions.setRefreshIntervalMs(Sessions.REFRESH_INTERVAL_DEFAULT_MS);
     input.value = String(Math.round((typeof Sessions !== 'undefined' ? Sessions.REFRESH_INTERVAL_DEFAULT_MS : 5000) / 1000));
     toast('Refresh rate reset to default');
+  },
+
+  loadDefaultReadOnly() {
+    const toggle = document.getElementById('default-readonly-enabled');
+    if (!toggle || typeof Sessions === 'undefined') return;
+    toggle.checked = Sessions.defaultReadOnly();
+  },
+
+  saveDefaultReadOnly(on) {
+    if (typeof Sessions === 'undefined') return;
+    Sessions.setDefaultReadOnly(on);
+    toast(on ? 'Sessions will open read-only by default' : 'Sessions will open interactively by default');
   },
 
   loadAutosave() {
