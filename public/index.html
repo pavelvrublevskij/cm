@@ -677,7 +677,16 @@
           <div class="settings-content">
 
             <section class="settings-panel active" data-section="general">
-              <h3>Theme</h3>
+              <h3>Startup</h3>
+              <div class="subtitle" style="margin:0 0 12px">
+                Start Claude Manager automatically in the background when you log in, and open it in your browser.
+              </div>
+              <label class="session-tool-toggle" for="autostart-enabled" style="margin:0">
+                <input type="checkbox" id="autostart-enabled" onchange="ManagerSettings.saveAutostart(this.checked)">
+                Start automatically at login
+              </label>
+
+              <h3 style="margin-top:24px">Theme</h3>
               <div class="subtitle" style="margin:0 0 12px">Choose a color scheme for the UI.</div>
               <div style="display:flex;gap:8px;align-items:center">
                 <select id="theme-select" onchange="ManagerSettings.onThemeChange(this.value)"></select>
@@ -859,6 +868,7 @@
   <script src="/js/terminal.js"></script>
   <script src="/js/terminal-skills.js"></script>
   <script src="/js/manager-settings.js"></script>
+  <script src="/js/autostart.js"></script>
   <script src="/js/file-history.js"></script>
   <script src="/js/tour.js"></script>
   <script src="/js/git-api.js"></script>

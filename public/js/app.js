@@ -39,6 +39,8 @@ const App = {
       App.restoreRoute();
     });
 
+    if (typeof Autostart !== 'undefined') Autostart.checkFirstRun();
+
     // Listen for back/forward
     window.addEventListener('hashchange', () => App.restoreRoute());
 

@@ -2,6 +2,7 @@
 
 ### Features
 
+- **Autostart at login** — asks once on first launch whether to start Claude Manager automatically at login (Windows/macOS/Linux); toggle it anytime in Manager Settings.
 - **Read-only-by-default setting** — a Manager Settings toggle to open sessions read-only by default (off by default).
 
 ## v1.6.0

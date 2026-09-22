@@ -24,6 +24,7 @@ const ManagerSettings = {
       ManagerSettings.loadRefreshRate();
       ManagerSettings.loadAutosave();
       ManagerSettings.loadDefaultReadOnly();
+      ManagerSettings.loadAutostart();
     } catch (e) {
       toast('Failed to load manager settings: ' + e.message, 'error');
     }
@@ -297,6 +298,26 @@ const ManagerSettings = {
     if (typeof Sessions === 'undefined') return;
     Sessions.setDefaultReadOnly(on);
     toast(on ? 'Sessions will open read-only by default' : 'Sessions will open interactively by default');
+  },
+
+  async loadAutostart() {
+    const toggle = document.getElementById('autostart-enabled');
+    if (!toggle) return;
+    try {
+      const status = await api('/api/autostart');
+      toggle.checked = status.enabled;
+      toggle.disabled = !status.supported;
+    } catch (_) {}
+  },
+
+  async saveAutostart(on) {
+    try {
+      await api(on ? '/api/autostart/enable' : '/api/autostart/disable', { method: 'POST' });
+      toast(on ? 'Claude Manager will start automatically at login' : 'Autostart disabled');
+    } catch (e) {
+      toast('Failed to update autostart: ' + e.message, 'error');
+      ManagerSettings.loadAutostart();
+    }
   },
 
   loadAutosave() {
