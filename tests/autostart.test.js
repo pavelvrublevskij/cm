@@ -60,15 +60,19 @@ test('Linux: enable/disable manage an XDG autostart .desktop entry under the (fa
   });
 });
 
-test('Windows: enable/disable drive the registry Run key via a hidden-launch .vbs wrapper (child_process mocked — never touches the real registry)', (t) => {
+test('Windows: enable/disable manage a Startup-folder shortcut (child_process mocked — never touches the real Startup folder or shells out for real)', (t) => {
   withPlatform('win32', () => {
+    const lnkPath = path.join(HOME, 'AppData', 'Roaming', 'Microsoft', 'Windows',
+      'Start Menu', 'Programs', 'Startup', 'Claude Manager.lnk');
+    fs.rmSync(lnkPath, { force: true });
+
     const calls = [];
-    let queryShouldSucceed = false;
     t.mock.method(cp, 'execFileSync', (cmd, args) => {
       calls.push({ cmd, args });
-      if (cmd === 'reg' && args[0] === 'query') {
-        if (!queryShouldSucceed) throw new Error('not found');
-        return Buffer.from('');
+      if (cmd === 'powershell.exe') {
+        // Simulate the CreateShortcut COM call actually writing the .lnk file.
+        fs.mkdirSync(path.dirname(lnkPath), { recursive: true });
+        fs.writeFileSync(lnkPath, '');
       }
       return Buffer.from('');
     });
@@ -76,22 +80,18 @@ test('Windows: enable/disable drive the registry Run key via a hidden-launch .vb
     assert.strictEqual(autostartLib.isEnabled(), false);
 
     autostartLib.enable();
-    const addCall = calls.find(c => c.cmd === 'reg' && c.args[0] === 'add');
-    assert.ok(addCall, 'reg add was called');
-    assert.ok(addCall.args.includes('ClaudeManager'));
-    const vbsPath = path.join(__dirname, '..', 'scripts', 'autostart-launcher.vbs');
-    assert.strictEqual(fs.existsSync(vbsPath), true);
-    const vbsContent = fs.readFileSync(vbsPath, 'utf-8');
-    assert.ok(vbsContent.includes('CM_AUTOSTART_OPEN'));
-    assert.ok(vbsContent.includes('WScript.Shell'));
-
-    queryShouldSucceed = true;
+    const psCall = calls.find(c => c.cmd === 'powershell.exe');
+    assert.ok(psCall, 'powershell.exe was invoked to create the shortcut');
+    const script = psCall.args.join(' ');
+    assert.ok(script.includes('CreateShortcut'));
+    assert.ok(script.includes('--autostart-open'));
+    assert.ok(script.includes('WindowStyle = 7'));
+    assert.strictEqual(fs.existsSync(lnkPath), true);
     assert.strictEqual(autostartLib.isEnabled(), true);
 
     autostartLib.disable();
-    const deleteCall = calls.find(c => c.cmd === 'reg' && c.args[0] === 'delete');
-    assert.ok(deleteCall, 'reg delete was called');
-    assert.strictEqual(fs.existsSync(vbsPath), false);
+    assert.strictEqual(fs.existsSync(lnkPath), false);
+    assert.strictEqual(autostartLib.isEnabled(), false);
   });
 });
 

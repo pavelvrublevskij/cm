@@ -283,6 +283,7 @@ app.use('/api/output-styles', require('./routes/output-styles'));
 app.use('/api/plugins', require('./routes/plugins'));
 app.use('/api/project-settings', require('./routes/project-settings'));
 app.use('/api/usage', require('./routes/usage'));
+app.use('/api/artifacts', require('./routes/artifacts'));
 app.use('/api/plans', require('./routes/plans'));
 app.use('/api/file-history', require('./routes/file-history'));
 app.use('/api/projects', require('./routes/git'));
@@ -313,9 +314,10 @@ if (require.main === module) {
   server.listen(PORT, HOST, () => {
     console.log(`CM running at http://${HOST}:${PORT}`);
 
-    // Set only by the OS-native autostart launcher (registry/LaunchAgent/XDG entry) — a plain
-    // `npm start` never opens the browser, and autostart only fires once per OS login.
-    if (process.env.CM_AUTOSTART_OPEN === '1') {
+    // Set only by the OS-native autostart launcher (Startup shortcut on Windows, env var from the
+    // LaunchAgent/XDG entry on macOS/Linux) — a plain `npm start` never opens the browser, and
+    // autostart only fires once per OS login.
+    if (process.env.CM_AUTOSTART_OPEN === '1' || process.argv.includes('--autostart-open')) {
       require('./lib/os-open').openUrl(`http://${HOST}:${PORT}`);
     }
 
