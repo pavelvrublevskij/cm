@@ -1,3 +1,9 @@
+## v1.7.0
+
+### Features
+
+- **Open a session in a new browser tab** — "Open in new tab ↗" in a session's ⋮ menu (list and detail view) pops it out read-only, so it doesn't compete with the current tab for the terminal.
+
 ## v1.6.1
 
 ### Features
