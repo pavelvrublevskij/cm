@@ -1,9 +1,10 @@
 const { Router } = require('express');
 const { safeSlug, wrapRoute } = require('../lib/file-helpers');
-const { decodeSlug } = require('../lib/slug');
-const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus, diffNumstat } = require('../lib/git');
+const { decodeSlug, encodeSlug } = require('../lib/slug');
+const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus, diffNumstat, isValidBranchName, worktreeAdd } = require('../lib/git');
 const { computeDiff } = require('../lib/diff');
 const { resolveProjectPath } = require('../lib/project-files');
+const { launchTerminal } = require('../lib/os-terminal');
 const fs = require('fs');
 const path = require('path');
 
@@ -190,6 +191,65 @@ router.post('/:slug/git/push', wrapRoute(async (req, res) => {
 
   const output = await git(args, projectPath);
   res.json({ ok: true, output });
+}));
+
+/** Sibling folder for a new worktree: the repo's own folder name plus the branch, with any slash
+ * in the branch (e.g. "fix/123") flattened so it can't create a nested directory. */
+function deriveWorktreePath(projectPath, branch) {
+  const repoName = path.basename(projectPath);
+  const flatBranch = branch.replace(/[\\/]/g, '-');
+  return path.join(path.dirname(projectPath), `${repoName}-${flatBranch}`);
+}
+
+/** Real path on disk, or the given path unchanged when it can't be resolved (e.g. doesn't exist). */
+function realpathOrSelf(target) {
+  try { return fs.realpathSync(target); } catch (_) { return target; }
+}
+
+/**
+ * The slug the new worktree directory would resolve back to, or null when encoding it can't be
+ * trusted — decodeSlug is a fuzzy, disk-based reverse of the same substitution, so the forward
+ * encoding is verified by decoding it right back and checking it lands on the same directory
+ * before it's ever handed to the terminal websocket.
+ */
+function verifiedSlug(worktreePath) {
+  const candidate = encodeSlug(worktreePath);
+  const decoded = decodeSlug(candidate);
+  return decoded && realpathOrSelf(decoded) === realpathOrSelf(worktreePath) ? candidate : null;
+}
+
+/**
+ * Creates a sibling git worktree on a new branch, so a second ticket can be worked in parallel
+ * with no git commands typed by the user. Prefers handing back a slug the client can open as a
+ * browser terminal, same as any other project's "New Session"; when that can't be verified, falls
+ * back to opening an OS terminal directly, same as the existing OS-terminal session launcher.
+ */
+router.post('/:slug/git/worktree', wrapRoute(async (req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const projectPath = decodeSlug(req.params.slug);
+  if (!projectPath) return res.status(400).json({ error: 'Cannot resolve project path' });
+  if (!(await gitOk(projectPath))) return res.status(400).json({ error: GIT_UNAVAILABLE });
+
+  const branch = (req.body.branch || '').toString().trim();
+  if (!isValidBranchName(branch)) return res.status(400).json({ error: 'Invalid branch name' });
+
+  const worktreePath = deriveWorktreePath(projectPath, branch);
+  if (fs.existsSync(worktreePath)) {
+    return res.status(400).json({ error: `${worktreePath} already exists` });
+  }
+
+  try {
+    await worktreeAdd(projectPath, worktreePath, branch);
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+
+  const slug = verifiedSlug(worktreePath);
+  if (slug) return res.json({ ok: true, path: worktreePath, slug });
+
+  let terminalError;
+  try { launchTerminal(worktreePath, 'claude'); } catch (e) { terminalError = e.message; }
+  res.json({ ok: true, path: worktreePath, terminalError });
 }));
 
 module.exports = router;

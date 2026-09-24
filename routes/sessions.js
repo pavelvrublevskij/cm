@@ -1,7 +1,6 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
 const { safeSlug, wrapRoute, backup } = require('../lib/file-helpers');
 const { CLAUDE_DIR } = require('../lib/paths');
 const planCache = require('../lib/plan-cache');
@@ -18,6 +17,7 @@ const { collectFromJsonl, collectFromDir } = require('../lib/session-activity');
 const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/session-archive');
 const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
+const { launchTerminal } = require('../lib/os-terminal');
 
 const router = express.Router({ mergeParams: true });
 
@@ -85,43 +85,6 @@ function findFirstMeaningfulPrompt(filePath) {
     }
   } catch (_) {}
   return '';
-}
-
-function safeSpawn(cmd, args, opts) {
-  const proc = spawn(cmd, args, opts);
-  // Without an 'error' listener, an async spawn failure crashes Node.
-  proc.on('error', () => { /* swallowed; caller decides what to do */ });
-  return proc;
-}
-
-function launchTerminal(projectPath, cmd) {
-  if (process.env.__CLAUDE_MANAGER_TEST_HOME) return;
-  const platform = process.platform;
-  if (platform === 'win32') {
-    const wtArgs = ['-d', projectPath, 'cmd.exe', '/k', cmd];
-    const proc = spawn('wt.exe', wtArgs, { detached: true, stdio: 'ignore' });
-    proc.on('error', () => {
-      safeSpawn('cmd.exe', ['/c', `start "" cmd.exe /k "cd /d ${projectPath} && ${cmd}"`], { shell: true, detached: true, stdio: 'ignore' }).unref();
-    });
-    proc.unref();
-  } else if (platform === 'darwin') {
-    const script = `tell application "Terminal" to do script "cd '${projectPath}' && ${cmd}"`;
-    const proc = safeSpawn('osascript', ['-e', script]);
-    proc.unref();
-  } else {
-    const terminals = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
-    for (const term of terminals) {
-      try {
-        const args = term === 'gnome-terminal'
-          ? ['--', 'bash', '-c', `cd '${projectPath}' && ${cmd}; exec bash`]
-          : ['-e', `bash -c "cd '${projectPath}' && ${cmd}; exec bash"`];
-        const proc = safeSpawn(term, args);
-        proc.unref();
-        return;
-      } catch (_) { continue; }
-    }
-    throw new Error('No supported terminal found');
-  }
 }
 
 router.get('/active', wrapRoute((req, res) => {

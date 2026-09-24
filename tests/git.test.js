@@ -5,7 +5,8 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const request = require('supertest');
 const { app, HOME } = require('./helpers/app');
-const { git, gitRaw, gitOk, gitInstalled, headInfo, upstreamStatus, unpushedCommits, incomingCommits, parseStatus, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
+const { git, gitRaw, gitOk, gitInstalled, headInfo, upstreamStatus, unpushedCommits, incomingCommits, parseStatus, isValidBranchName, GIT_ENV, GIT_TIMEOUT_MS } = require('../lib/git');
+const { decodeSlug } = require('../lib/slug');
 
 function slugForPath(p) {
   const win = p.match(/^([A-Za-z]):[\\\/](.*)/);
@@ -420,6 +421,80 @@ test('a remote operation on a directory with no repository is refused, not attem
   assert.strictEqual(res.body.error, 'Git is not available for this project');
 });
 
+// ── worktree ──────────────────────────────────────────────────────────────
+// Creating a parallel worktree so two tickets can be worked at once, each on its own branch.
+
+const WTPROJ = path.join(HOME, 'git-worktree-proj');
+
+before(() => {
+  fs.rmSync(WTPROJ, { recursive: true, force: true });
+  fs.rmSync(`${WTPROJ}-feature-123`, { recursive: true, force: true });
+  fs.rmSync(`${WTPROJ}-taken`, { recursive: true, force: true });
+  fs.mkdirSync(WTPROJ, { recursive: true });
+  run(['init', '-q'], WTPROJ);
+  identity(WTPROJ);
+  commit(WTPROJ, 'a.txt', 'one\n', 'baseline');
+});
+
+test('isValidBranchName accepts ordinary names and rejects what git or the filesystem would refuse', () => {
+  for (const name of ['fix/123', 'feature-456', 'main', 'a']) {
+    assert.strictEqual(isValidBranchName(name), true, name);
+  }
+  for (const name of ['', '   ', '-leading-dash', 'has..dots', 'trailing/', 'a~b', 'a^b', 'a:b', 'a?b', 'a*b', 'a[b', 'a\\b', 'a b', 'x'.repeat(201)]) {
+    assert.strictEqual(isValidBranchName(name), false, name);
+  }
+});
+
+test('creating a worktree checks out a new branch in a sibling folder and hands back a browser-terminal slug', async () => {
+  const res = await request(app).post(`/api/projects/${slugForPath(WTPROJ)}/git/worktree`)
+    .send({ branch: 'feature/123' });
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.ok, true);
+  const worktreePath = `${WTPROJ}-feature-123`;
+  assert.strictEqual(res.body.path, worktreePath);
+  assert.strictEqual(res.body.terminalError, undefined);
+  assert.ok(fs.existsSync(worktreePath));
+  assert.strictEqual(currentBranch(worktreePath), 'feature/123');
+
+  // No OS terminal fallback needed: the slug it hands back must resolve to the worktree itself,
+  // the same guarantee the terminal websocket relies on to open a browser session for it.
+  assert.ok(res.body.slug, 'a verified slug is returned so the client can open a browser terminal');
+  assert.strictEqual(path.resolve(decodeSlug(res.body.slug)), path.resolve(worktreePath));
+
+  const list = await git(['worktree', 'list', '--porcelain'], WTPROJ);
+  assert.ok(list.includes(worktreePath.replace(/\\/g, '/')) || list.includes(worktreePath), 'registered as a worktree of the repo');
+});
+
+test('a worktree branch name git would reject is refused before touching git', async () => {
+  const res = await request(app).post(`/api/projects/${slugForPath(WTPROJ)}/git/worktree`)
+    .send({ branch: '-not-a-branch' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Invalid branch name');
+});
+
+test('a worktree is refused when its target folder already exists', async () => {
+  const takenPath = `${WTPROJ}-taken`;
+  fs.mkdirSync(takenPath, { recursive: true });
+  const res = await request(app).post(`/api/projects/${slugForPath(WTPROJ)}/git/worktree`)
+    .send({ branch: 'taken' });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /already exists/);
+});
+
+test('a worktree is refused on a directory with no repository', async () => {
+  const res = await request(app).post(`/api/projects/${slugForPath(NOGIT)}/git/worktree`)
+    .send({ branch: 'feature/whatever' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Git is not available for this project');
+});
+
+test('worktree creation rejects a traversal slug', async () => {
+  const res = await request(app).post(`/api/projects/bad..slug/git/worktree`).send({ branch: 'x' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Invalid slug');
+});
+
 // ── file diff ────────────────────────────────────────────────────────────────
 // HEAD versus the working tree: exactly what committing the file would record.
 
@@ -712,6 +787,7 @@ test('every git route refuses cleanly with no git installed', async () => {
       request(app).post(`/api/projects/${slug}/git/push`),
       request(app).post(`/api/projects/${slug}/git/pull`),
       request(app).post(`/api/projects/${slug}/git/fetch`),
+      request(app).post(`/api/projects/${slug}/git/worktree`).send({ branch: 'whatever' }),
     ];
 
     for (const res of await Promise.all(calls)) {

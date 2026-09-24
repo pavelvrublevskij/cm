@@ -54,6 +54,11 @@ const GitApi = {
   fetch(slug) {
     return api(`${GitApi.base(slug)}/git/fetch`, { method: 'POST' });
   },
+
+  /** Creates a sibling worktree on a new branch and opens a terminal into it running claude. */
+  createWorktree(slug, branch) {
+    return api(`${GitApi.base(slug)}/git/worktree`, { method: 'POST', body: { branch } });
+  },
 };
 
 window.GitApi = GitApi;

@@ -2,7 +2,7 @@ const { test, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { decodeSlug } = require('../lib/slug');
+const { decodeSlug, encodeSlug } = require('../lib/slug');
 
 const TMP_BASE = path.join(__dirname, 'tmp', `slug-test-${process.pid}`);
 
@@ -80,6 +80,42 @@ test('decodeSlug resolves a path running through a symlinked directory', () => {
     : target.replace(/^\//, '').replace(/\//g, '-');
 
   assert.strictEqual(path.resolve(decodeSlug(slug)), path.resolve(target));
+});
+
+test('encodeSlug round-trips through decodeSlug for an ordinary sibling worktree path', () => {
+  const root = mkTmpRoot('encode-worktree');
+  const repoDir = path.join(root, 'main-repo');
+  const worktreeDir = path.join(root, 'main-repo-feature-123');
+  fs.mkdirSync(repoDir, { recursive: true });
+  fs.mkdirSync(worktreeDir, { recursive: true });
+
+  const slug = encodeSlug(worktreeDir);
+  assert.strictEqual(path.resolve(decodeSlug(slug)), path.resolve(worktreeDir));
+});
+
+test('encodeSlug round-trips for a branch name containing dots, underscores and a slash', () => {
+  const root = mkTmpRoot('encode-punctuation');
+  const worktreeDir = path.join(root, 'my_repo-fix.42-v2');
+  fs.mkdirSync(worktreeDir, { recursive: true });
+
+  const slug = encodeSlug(worktreeDir);
+  assert.strictEqual(path.resolve(decodeSlug(slug)), path.resolve(worktreeDir));
+});
+
+test('encodeSlug is not guaranteed to round-trip when a dot/dash sibling collision exists', () => {
+  // "my.repo" and "my-repo" both encode to the same slug segment. decodeSlug's matchName checks
+  // for a literal name match before falling back to the fuzzy one, so when both exist, the slug
+  // for "my.repo" actually resolves to the unrelated "my-repo" — exactly what a caller must verify
+  // (by decoding its own candidate slug) before trusting it, rather than assume the encoding held.
+  const root = mkTmpRoot('encode-collision');
+  const dotDir = path.join(root, 'my.repo');
+  const dashDir = path.join(root, 'my-repo');
+  fs.mkdirSync(dotDir, { recursive: true });
+  fs.mkdirSync(dashDir, { recursive: true });
+
+  const slug = encodeSlug(dotDir);
+  assert.notStrictEqual(path.resolve(decodeSlug(slug)), path.resolve(dotDir));
+  assert.strictEqual(path.resolve(decodeSlug(slug)), path.resolve(dashDir));
 });
 
 after(() => {

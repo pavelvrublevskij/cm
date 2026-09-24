@@ -4,6 +4,7 @@
 
 - **Jump from diff to source** — hover a line in a file's diff view for a "→ source" button that opens the file in Source mode at that line.
 - **Clearer read-only diffs** — diff views now note they're read-only, and the Files-tab footer's Save/autosave controls are hidden while viewing a diff.
+- **New Worktree from the Git panel** — creates a sibling git worktree on a new branch and opens a session for it, so parallel tickets no longer need the command line.
 
 ## v1.6.1
 
