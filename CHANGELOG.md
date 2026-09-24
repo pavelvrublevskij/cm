@@ -1,3 +1,10 @@
+## v1.7.0
+
+### Features
+
+- **Jump from diff to source** — hover a line in a file's diff view for a "→ source" button that opens the file in Source mode at that line.
+- **Clearer read-only diffs** — diff views now note they're read-only, and the Files-tab footer's Save/autosave controls are hidden while viewing a diff.
+
 ## v1.6.1
 
 ### Features

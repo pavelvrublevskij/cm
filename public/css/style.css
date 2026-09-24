@@ -5087,6 +5087,20 @@ mark.search-highlight {
 
 /* --- Diff View --- */
 
+.diff-readonly-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.diff-readonly-note strong { color: var(--text-secondary); font-weight: 600; }
+
 .diff-stats {
   display: flex;
   gap: 12px;
@@ -5123,6 +5137,7 @@ mark.search-highlight {
 }
 
 .diff-line {
+  position: relative;
   display: flex;
   padding: 1px 0;
   white-space: pre;
@@ -5130,6 +5145,31 @@ mark.search-highlight {
 
 .diff-line-add { background: rgba(63, 185, 80, 0.1); }
 .diff-line-del { background: rgba(248, 81, 73, 0.1); }
+
+.diff-goto-btn {
+  position: absolute;
+  top: 1px;
+  right: 6px;
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.diff-line:hover .diff-goto-btn {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 
 .diff-linenum {
   width: 36px;

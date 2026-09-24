@@ -468,7 +468,7 @@ const SessionFiles = {
             ${hasPreview ? modeBtn('preview', 'Preview') : ''}
             ${hasDiff ? modeBtn('diff', 'Diff') : ''}
           </div>` : ''}
-          <button class="btn btn-sm btn-primary" id="sf-save-btn" onclick="SessionFiles.save()" disabled>Save</button>
+          ${isDiff ? '' : '<button class="btn btn-sm btn-primary" id="sf-save-btn" onclick="SessionFiles.save()" disabled>Save</button>'}
           <div class="action-menu">
             <button class="btn btn-sm action-menu-btn" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)" aria-label="File actions">&#8942;</button>
             <div class="action-menu-panel">
@@ -481,14 +481,14 @@ const SessionFiles = {
         </div>
       </div>
       <div class="sf-pane-body" id="sf-pane-body"></div>
-      <div class="sf-status-bar">
+      ${isDiff ? '' : `<div class="sf-status-bar">
         <span class="sf-status-state" id="sf-status-state"></span>
         <span class="sf-status-sep">&middot;</span>
         <span id="sf-status-autosave"></span>
         <span class="sf-status-sep">&middot;</span>
         <span class="sf-status-hint">Ctrl+S to save</span>
         <span class="sf-status-chunk" id="sf-status-chunk" style="display:none"></span>
-      </div>`;
+      </div>`}`;
 
     // The body is rebuilt below, so any editor mounted in it is gone; _mountEditor re-creates it.
     SessionFiles.editor = null;
@@ -585,7 +585,7 @@ const SessionFiles = {
       });
       if (SessionFiles.open !== open || open.mode !== 'diff') return;
       open._diffResult = result;
-      FileHistory.renderDiff(body, result, open.path);
+      FileHistory.renderDiff(body, result, open.path, { onGotoSource: line => SessionFiles.gotoSource(open.path, line) });
     } catch (e) {
       if (SessionFiles.open !== open || open.mode !== 'diff') return;
       body.innerHTML = `<div class="empty-state"><p>Could not load diff: ${escapeHtml(e.message)}</p></div>`;
@@ -623,6 +623,21 @@ const SessionFiles = {
     });
   },
 
+  /** Open `path` in Source and jump to `line` — used by the diff view's "go to source" hover.
+   *  If the file isn't fully loaded yet, the jump is applied once _mountEditor runs. */
+  gotoSource(path, line) {
+    if (!path) return;
+    if (!SessionFiles.open || SessionFiles.open.path !== path) SessionFiles.openFile(path, {});
+    const open = SessionFiles.open;
+    if (!open || open.path !== path || open.isDeleted) return;
+    if (open.mode !== 'source') {
+      SessionFiles._stashBuffer();
+      open.mode = 'source';
+    }
+    open._pendingGotoLine = line;
+    SessionFiles.renderPane();
+  },
+
   reloadFile() {
     const open = SessionFiles.open;
     if (!open) return;
@@ -643,6 +658,10 @@ const SessionFiles = {
     });
     if (SessionFiles.editor && SessionFiles.editor.setViewState) {
       SessionFiles.editor.setViewState(FileViewCache.get(SessionFiles._projSlug(), open.path));
+    }
+    if (open._pendingGotoLine != null) {
+      if (SessionFiles.editor && SessionFiles.editor.revealLine) SessionFiles.editor.revealLine(open._pendingGotoLine);
+      open._pendingGotoLine = null;
     }
   },
 

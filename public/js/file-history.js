@@ -45,6 +45,14 @@ const FileHistory = {
     await FileHistory._loadDiff(overlay, sessionId, hash, version, projSlug, filePath, { isNew, isDeleted });
   },
 
+  /** Switch the Files pane to Source on the modal's current file and jump to `line`, closing the modal. */
+  _gotoSource(overlay, line) {
+    const path = overlay._fhState && overlay._fhState.filePath;
+    if (!path) return;
+    overlay.remove();
+    SessionFiles.gotoSource(path, line);
+  },
+
   _updateActionButtons(overlay, state) {
     overlay.querySelectorAll('.btn-group .btn').forEach(btn => {
       if (btn.textContent === 'Show in explorer' || btn.textContent === 'Open in editor') {
@@ -93,7 +101,7 @@ const FileHistory = {
     try {
       const result = await FileHistory.fetchDiffCurrent(sessionId, hash, version, projSlug, filePath, { isNew });
       const body = overlay.querySelector('#fh-diff-body');
-      if (body) FileHistory.renderDiff(body, result, filePath);
+      if (body) FileHistory.renderDiff(body, result, filePath, { onGotoSource: line => FileHistory._gotoSource(overlay, line) });
     } catch (e) {
       const body = overlay.querySelector('#fh-diff-body');
       if (body) body.innerHTML = `<div class="empty-state"><p>Could not load diff: ${escapeHtml(e.message)}</p></div>`;
@@ -129,12 +137,17 @@ const FileHistory = {
     });
   },
 
-  /** Render just the diff — syntax-coloured per line, using the file's CodeMirror mode. */
-  renderDiff(container, result, filePath) {
+  /** Render just the diff — syntax-coloured per line, using the file's CodeMirror mode.
+   *  opts.onGotoSource(line), when given, adds a hover affordance on lines that still exist in
+   *  the current file (i.e. have a new-side line number) to jump straight to that line in Source. */
+  renderDiff(container, result, filePath, opts = {}) {
     if (result.tooLarge) { container.innerHTML = '<div class="empty-state"><p>The differing region of this file is too large to diff (&gt;8000 lines)</p></div>'; return; }
     if (!result.hunks.length) { container.innerHTML = '<div class="empty-state"><p>No differences found</p></div>'; return; }
 
     const mode = codeModeFor(filePath);
+    const canGoto = typeof opts.onGotoSource === 'function';
+    const note = `<div class="diff-readonly-note">Read-only — comparing the recorded snapshot to the current file on disk.${
+      canGoto ? ' Hover a line for <strong>&rarr; source</strong> to open it there.' : ''}</div>`;
     const stats = `<div class="diff-stats">
       <span class="diff-added">+${result.stats.added} added</span>
       <span class="diff-removed">-${result.stats.removed} removed</span>
@@ -147,14 +160,28 @@ const FileHistory = {
         const prefix = l.type === '+' ? '+' : l.type === '-' ? '-' : ' ';
         const oldNum = l.type === '+' ? '' : oldLine++;
         const newNum = l.type === '-' ? '' : newLine++;
-        return `<div class="diff-line ${cls}">`
+        const gotoAttr = canGoto && newNum !== '' ? ` data-goto-line="${newNum}"` : '';
+        const gotoBtn = canGoto && newNum !== ''
+          ? `<button type="button" class="diff-goto-btn" title="Go to source, line ${newNum}">&rarr; source</button>` : '';
+        return `<div class="diff-line ${cls}"${gotoAttr}>`
           + `<span class="diff-linenum diff-linenum-old">${oldNum}</span>`
           + `<span class="diff-linenum diff-linenum-new">${newNum}</span>`
-          + `<span class="diff-prefix">${prefix}</span><span class="diff-content">${highlightCode(l.content, mode)}</span></div>`;
+          + `<span class="diff-prefix">${prefix}</span><span class="diff-content">${highlightCode(l.content, mode)}</span>${gotoBtn}</div>`;
       }).join('');
       return `<div class="diff-hunk-header">@@ -${hunk.oldStart} +${hunk.newStart} @@</div>` + lines;
     }).join('<div class="diff-separator"></div>');
 
-    container.innerHTML = stats + `<div class="diff-view code-colors">${hunks}</div>`;
+    container.innerHTML = note + stats + `<div class="diff-view code-colors">${hunks}</div>`;
+
+    if (canGoto) {
+      const view = container.querySelector('.diff-view');
+      if (view) view.addEventListener('click', e => {
+        const btn = e.target.closest('.diff-goto-btn');
+        if (!btn) return;
+        const row = btn.closest('.diff-line');
+        const line = row && parseInt(row.dataset.gotoLine, 10);
+        if (line) opts.onGotoSource(line);
+      });
+    }
   }
 };

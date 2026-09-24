@@ -67,6 +67,12 @@ const CodeView = {
           cm.replaceRange(text, CodeMirror.Pos(line, cm.getLine(line).length));
         },
         setChangedLines: lines => CodeView._applyChangeMarkers(cm, host, lines),
+        revealLine: line => {
+          const idx = Math.max(0, Math.min(line - 1, cm.lastLine()));
+          cm.setCursor(idx, 0);
+          cm.scrollIntoView({ line: idx, ch: 0 }, 120);
+          cm.focus();
+        },
         getViewState: () => {
           const cursor = cm.getCursor();
           return { cursor: { line: cursor.line, ch: cursor.ch }, scrollTop: cm.getScrollInfo().top };
@@ -106,6 +112,15 @@ const CodeView = {
       refresh: () => {},
       appendText: text => { ta.value += text; },
       setChangedLines: () => {},
+      revealLine: line => {
+        const lines = ta.value.split('\n');
+        let pos = 0;
+        for (let i = 0; i < Math.min(line - 1, lines.length); i++) pos += lines[i].length + 1;
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+        const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 18;
+        ta.scrollTop = Math.max(0, (line - 5) * lineHeight);
+      },
       getViewState: () => ({ selectionStart: ta.selectionStart, selectionEnd: ta.selectionEnd, scrollTop: ta.scrollTop }),
       setViewState: state => {
         if (!state) return;
