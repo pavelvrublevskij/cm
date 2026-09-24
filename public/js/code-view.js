@@ -19,7 +19,7 @@ const CodeView = {
   preview(container, text, filePath) {
     const lower = filePath.toLowerCase();
     if (lower.endsWith('.html') || lower.endsWith('.htm')) {
-      container.innerHTML = `<iframe class="sf-preview-frame" sandbox srcdoc="${escapeHtml(text)}" title="Preview of ${escapeHtml(filePath)}"></iframe>`;
+      container.innerHTML = `<iframe class="sf-preview-frame" sandbox srcdoc="${escapeAttr(text)}" title="Preview of ${escapeHtml(filePath)}"></iframe>`;
       return;
     }
     container.innerHTML = `<div class="sf-preview-pane markdown-body">${renderMarkdown(text)}</div>`;

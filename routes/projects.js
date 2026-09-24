@@ -7,6 +7,7 @@ const { decodeSlug } = require('../lib/slug');
 const { PROJECTS_DIR } = require('../lib/paths');
 const { computeGroups } = require('../lib/project-grouping');
 const { listProjectDirs } = require('../lib/project-list');
+const { getProjectArtifacts } = require('../lib/artifact-index');
 
 const router = express.Router();
 
@@ -64,6 +65,28 @@ router.get('/', wrapRoute((req, res) => {
   for (const p of projects) Object.assign(p, groups.get(p.slug) || UNGROUPED);
 
   res.json(projects);
+}));
+
+router.get('/:slug/artifacts', wrapRoute((req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const artifacts = getProjectArtifacts(req.params.slug);
+
+  const groups = new Map();
+  for (const a of artifacts) {
+    const key = a.ticket || '';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(a);
+  }
+
+  const result = Array.from(groups.entries())
+    .map(([ticket, items]) => ({ ticket: ticket || null, artifacts: items }))
+    .sort((a, b) => {
+      if (!a.ticket) return 1;
+      if (!b.ticket) return -1;
+      return new Date(b.artifacts[0].updatedAt) - new Date(a.artifacts[0].updatedAt);
+    });
+
+  res.json({ total: artifacts.length, groups: result });
 }));
 
 router.post('/:slug/open-folder', wrapRoute((req, res) => {

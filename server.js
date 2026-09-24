@@ -283,11 +283,13 @@ app.use('/api/output-styles', require('./routes/output-styles'));
 app.use('/api/plugins', require('./routes/plugins'));
 app.use('/api/project-settings', require('./routes/project-settings'));
 app.use('/api/usage', require('./routes/usage'));
+app.use('/api/artifacts', require('./routes/artifacts'));
 app.use('/api/plans', require('./routes/plans'));
 app.use('/api/file-history', require('./routes/file-history'));
 app.use('/api/projects', require('./routes/git'));
 app.use('/api/projects', require('./routes/scratchpad'));
 app.use('/api/projects', require('./routes/project-files'));
+app.use('/api/autostart', require('./routes/autostart'));
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -311,6 +313,13 @@ if (require.main === module) {
   });
   server.listen(PORT, HOST, () => {
     console.log(`CM running at http://${HOST}:${PORT}`);
+
+    // Set only by the OS-native autostart launcher (Startup shortcut on Windows, env var from the
+    // LaunchAgent/XDG entry on macOS/Linux) — a plain `npm start` never opens the browser, and
+    // autostart only fires once per OS login.
+    if (process.env.CM_AUTOSTART_OPEN === '1' || process.argv.includes('--autostart-open')) {
+      require('./lib/os-open').openUrl(`http://${HOST}:${PORT}`);
+    }
 
     // Auto-fetch pricing on startup if stale (>24h) or missing
     const lastFetch = pricing.getLastFetchedAt();

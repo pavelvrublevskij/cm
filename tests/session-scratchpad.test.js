@@ -291,11 +291,15 @@ test('polling falls back to the empty state when every file is gone', async () =
   assert.ok(el('session-scratchpad').innerHTML.includes('No scratchpad files'));
 });
 
-test('polling is skipped until the tab has been opened', async () => {
+test('polling still refreshes tab visibility before the tab has been opened, but does not render the panel', async () => {
   Sessions._scratchpadLoaded = false;
+  const before = el('session-scratchpad').innerHTML;
   harness.apiHandler = () => ({ exists: true, files: FILES });
   await Sessions.pollScratchpad();
-  assert.strictEqual(harness.apiCalls.length, 0);
+
+  assert.strictEqual(harness.apiCalls.length, 1, 'still polls so the tab can appear/disappear live');
+  assert.strictEqual(el('tab-btn-scratchpad').style.display, '', 'tab becomes visible once files exist');
+  assert.strictEqual(el('session-scratchpad').innerHTML, before, 'panel itself is not rendered until opened');
 });
 
 // ── OS actions still reachable ────────────────────────────────────────────────

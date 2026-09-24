@@ -68,6 +68,19 @@ Object.assign(Sessions, {
     }
   },
 
+  async annotateArtifacts(sessions) {
+    if (!sessions.length) { Sessions._artifactSessionIds = new Set(); return; }
+    const slug = Sessions._searchSlug;
+    if (!slug) { Sessions._artifactSessionIds = new Set(); return; }
+    try {
+      const ids = await api(`/api/projects/${encodeURIComponent(slug)}/sessions/with-artifacts`);
+      Sessions._artifactSessionIds = new Set(ids);
+      Sessions._rerenderArtifacts();
+    } catch (_) {
+      Sessions._artifactSessionIds = new Set();
+    }
+  },
+
   async loadContext(sessionId, info) {
     const el = document.getElementById('sf-changed');
     if (!el) return;

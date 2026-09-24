@@ -141,6 +141,7 @@ const context = vm.createContext({
     return harness.apiHandler ? harness.apiHandler(url, opts) : {};
   },
   escapeHtml: s => String(s).split('<').join('&lt;'),
+  escapeAttr: s => String(s).split('<').join('&lt;').split('"').join('&quot;').split("'").join('&#39;'),
   formatBytes: n => `${n} B`,
   codeModeFor: p => (p.endsWith('.java') ? 'text/x-java' : p.endsWith('.js') ? 'javascript' : null),
   renderMarkdown: s => 'MD:' + s,

@@ -5,6 +5,7 @@ const Sessions = {
   _searchSlug: null,
   _planFilter: false,
   _planSessionIds: null,
+  _artifactSessionIds: null,
   _renderedGroups: [],
   _showArchived: false,
   GROUP_COLLAPSED_KEY: 'claude-manager-collapsed-groups',
@@ -155,6 +156,7 @@ const Sessions = {
       if (cb) cb.checked = false;
     }
     Sessions._planSessionIds = null;
+    Sessions._artifactSessionIds = null;
     Sessions._searchSlug = slug;
     Sessions.syncGroupScopeFilter(slug);
     const container = document.getElementById('sessions-list');
@@ -605,6 +607,9 @@ const Sessions = {
     if (Sessions._planSessionIds === null) {
       Sessions.annotatePlans(Sessions.cache[slug] || sessions);
     }
+    if (Sessions._artifactSessionIds === null) {
+      Sessions.annotateArtifacts(Sessions.cache[slug] || sessions);
+    }
   },
 
   renderCard(slug, s, i) {
@@ -622,6 +627,7 @@ const Sessions = {
     const cached = Sessions.cache[cardSlug] || [];
     const correctIndex = cached.findIndex(x => x.sessionId === s.sessionId);
     const hasPlan = !!(Sessions._planSessionIds && Sessions._planSessionIds.has(s.sessionId));
+    const hasArtifact = !!(Sessions._artifactSessionIds && Sessions._artifactSessionIds.has(s.sessionId));
     return renderSessionCard(s, {
       onclick: foreign
         ? `Sessions.openGroupedSession('${cardSlug}', '${s.sessionId}')`
@@ -632,6 +638,7 @@ const Sessions = {
       sidechain: true,
       snippets: snippetsHtml,
       hasPlan,
+      hasArtifact,
       archived: Sessions._showArchived
     });
   },
@@ -656,7 +663,7 @@ const Sessions = {
   /** Open a session belonging to another project in the group. Its own project's list was never
    *  loaded under its own cache key, so navigate with the entry we already have. */
   openGroupedSession(slug, sessionId) {
-    Sessions._navigateToSession(slug, sessionId, Sessions._findSession(slug, sessionId), false);
+    Sessions._navigateToSession(slug, sessionId, Sessions._findSession(slug, sessionId), Sessions.defaultReadOnly());
   },
 
   _lastQuery: '',
@@ -709,6 +716,7 @@ const Sessions = {
         container.innerHTML = Sessions.renderSearchBar(slug) +
           results.map((s, i) => Sessions.renderCard(slug, s, i)).join('');
         Sessions.annotatePlans(results);
+        Sessions.annotateArtifacts(results);
       }
       const newInput = document.getElementById('session-search-input');
       if (newInput) { newInput.value = value; newInput.focus(); newInput.selectionStart = newInput.selectionEnd = cursorPos; }
@@ -725,7 +733,7 @@ const Sessions = {
 
   open(slug, sessionId, index) {
     const sessions = Sessions.cache[slug] || [];
-    Sessions._navigateToSession(slug, sessionId, sessions[index], false);
+    Sessions._navigateToSession(slug, sessionId, sessions[index], Sessions.defaultReadOnly());
   },
 
   openReadOnly(slug, sessionId) {
@@ -748,7 +756,16 @@ const Sessions = {
   REFRESH_INTERVAL_MIN_MS: 1000,
   CONVERSATION_HIDDEN_KEY: 'claude-manager-conversation-hidden',
   SHOW_TOOL_DETAILS_KEY: 'claude-manager-show-tool-details',
+  DEFAULT_READONLY_KEY: 'claude-manager-default-readonly',
   _refreshTimer: null,
+
+  defaultReadOnly() {
+    return localStorage.getItem(Sessions.DEFAULT_READONLY_KEY) === '1';
+  },
+
+  setDefaultReadOnly(on) {
+    localStorage.setItem(Sessions.DEFAULT_READONLY_KEY, on ? '1' : '0');
+  },
 
   refreshIntervalMs() {
     const raw = parseInt(localStorage.getItem(Sessions.REFRESH_INTERVAL_KEY), 10);
@@ -944,6 +961,9 @@ const Sessions = {
     Sessions._activityItems = [];
     Sessions._activityFilter = null;
     Sessions._scratchpadLoaded = false;
+    Sessions._updateScratchpadTabVisibility(false);
+    Sessions._artifactsLoaded = false;
+    Sessions._updateArtifactsTabVisibility(false);
     if (typeof SessionFiles !== 'undefined') SessionFiles.reset(slug);
     container.innerHTML = '';
 
@@ -961,6 +981,8 @@ const Sessions = {
       if (ctxEl) ctxEl.innerHTML = '';
       const spEl = document.getElementById('session-scratchpad');
       if (spEl) spEl.innerHTML = '';
+      const artEl = document.getElementById('session-artifacts');
+      if (artEl) artEl.innerHTML = '';
       if (typeof TerminalPanel !== 'undefined' && !readOnly) {
         if (TerminalPanel.isOpen()) TerminalPanel.close();
         TerminalPanel.open(slug, null);
@@ -985,7 +1007,11 @@ const Sessions = {
     if (ctxEl) { ctxEl.innerHTML = ''; }
     const spEl = document.getElementById('session-scratchpad');
     if (spEl) { spEl.innerHTML = ''; }
+    const artEl = document.getElementById('session-artifacts');
+    if (artEl) { artEl.innerHTML = ''; }
     Sessions.loadContext(sessionId, info);
+    Sessions.checkScratchpad();
+    Sessions.checkArtifacts();
 
     await Sessions.loadMore();
     Sessions.setupScroll();
@@ -1372,22 +1398,28 @@ const Sessions = {
     const msgs = document.getElementById('session-messages-wrap');
     const act = document.getElementById('session-activity');
     const sp = document.getElementById('session-scratchpad');
+    const art = document.getElementById('session-artifacts');
     const fcBtn = document.getElementById('tab-btn-file-changes');
     const cvBtn = document.getElementById('tab-btn-conversation');
     const acBtn = document.getElementById('tab-btn-activity');
     const spBtn = document.getElementById('tab-btn-scratchpad');
+    const artBtn = document.getElementById('tab-btn-artifacts');
     if (!ctx || !msgs || !fcBtn || !cvBtn) return;
     const isFC = tab === 'file-changes';
     const isAct = tab === 'activity';
     const isSP = tab === 'scratchpad';
+    const isArt = tab === 'artifacts';
     ctx.style.display = isFC ? 'flex' : 'none';
-    msgs.style.display = isAct || isFC || isSP ? 'none' : '';
+    msgs.style.display = isAct || isFC || isSP || isArt ? 'none' : '';
     if (act) act.style.display = isAct ? 'flex' : 'none';
     if (sp) sp.style.display = isSP ? 'flex' : 'none';
+    if (art) art.style.display = isArt ? '' : 'none';
     fcBtn.classList.toggle('active', isFC);
-    cvBtn.classList.toggle('active', !isFC && !isAct && !isSP);
+    cvBtn.classList.toggle('active', !isFC && !isAct && !isSP && !isArt);
     if (acBtn) acBtn.classList.toggle('active', isAct);
     if (spBtn) spBtn.classList.toggle('active', isSP);
+    if (artBtn) artBtn.classList.toggle('active', isArt);
+    if (isArt && !Sessions._artifactsLoaded) Sessions.loadArtifactsTab();
     if (isFC && Sessions._pendingFlash !== undefined) {
       const pending = Sessions._pendingFlash;
       Sessions._pendingFlash = undefined;
@@ -1417,6 +1449,24 @@ const Sessions = {
         if (card.querySelector('.session-plan-badge')) return;
         const meta = card.querySelector('.session-meta');
         if (meta) meta.insertAdjacentHTML('afterbegin', '<span class="session-plan-badge" title="Plans were active during this session">plan</span>');
+      });
+    }
+  },
+
+  _rerenderArtifacts() {
+    const slug = Sessions._searchSlug;
+    const projectView = document.getElementById('view-project-detail');
+    if (slug && Sessions.cache[slug] && projectView && projectView.classList.contains('active') && !Sessions._lastQuery) {
+      Sessions.rerenderWithFilter();
+      return;
+    }
+    const ids = Sessions._artifactSessionIds;
+    if (!ids || !ids.size) return;
+    for (const sessionId of ids) {
+      document.querySelectorAll(`.session-card[data-session-id="${sessionId}"]`).forEach(card => {
+        if (card.querySelector('.session-artifact-badge')) return;
+        const meta = card.querySelector('.session-meta');
+        if (meta) meta.insertAdjacentHTML('afterbegin', '<span class="session-artifact-badge" title="This session published a Claude artifact">&#128206; artifact</span>');
       });
     }
   },
