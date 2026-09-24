@@ -544,6 +544,7 @@ function renderSessionCard(s, opts = {}) {
       ${opts.snippets || ''}
       <div class="session-meta">
         ${opts.hasPlan ? '<span class="session-plan-badge" title="Plans were active during this session">plan</span>' : ''}
+        ${opts.hasArtifact ? '<span class="session-artifact-badge" title="This session published a Claude artifact">&#128206; artifact</span>' : ''}
         ${opts.project ? `<span class="project-badge">${escapeHtml(opts.project)}</span>` : ''}
         ${idBadge}
         ${opts.dates ? `<div class="meta-item">Created <span class="meta-value">${s.created ? new Date(s.created).toLocaleString() : '—'}</span></div>

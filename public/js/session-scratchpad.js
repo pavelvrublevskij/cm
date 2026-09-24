@@ -26,6 +26,23 @@ Object.assign(Sessions, {
     }
   },
 
+  async checkScratchpad() {
+    const { slug, sessionId } = Sessions.detailState;
+    if (!slug || !sessionId) return;
+    try {
+      const data = await api(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/scratchpad`);
+      if (Sessions.detailState.slug !== slug || Sessions.detailState.sessionId !== sessionId) return;
+      Sessions._updateScratchpadTabVisibility(!!(data.exists && data.files.length));
+    } catch (_) {}
+  },
+
+  _updateScratchpadTabVisibility(hasFiles) {
+    const btn = document.getElementById('tab-btn-scratchpad');
+    if (!btn) return;
+    btn.style.display = hasFiles ? '' : 'none';
+    if (!hasFiles && btn.classList.contains('active')) Sessions.switchTab('file-changes');
+  },
+
   renderScratchpad(el, data) {
     if (!data.exists || !data.files.length) {
       el.innerHTML = `<div class="scratchpad-empty">
@@ -174,14 +191,16 @@ Object.assign(Sessions, {
 
   /** Refresh the file list on the detail view's poll tick, keeping the open file in place. */
   async pollScratchpad() {
-    const el = document.getElementById('session-scratchpad');
-    if (!el || !Sessions._scratchpadLoaded) return;
     const { slug, sessionId } = Sessions.detailState;
     if (!slug || !sessionId) return;
 
     try {
       const data = await api(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/scratchpad`);
       if (Sessions.detailState.slug !== slug || Sessions.detailState.sessionId !== sessionId) return;
+      Sessions._updateScratchpadTabVisibility(!!(data.exists && data.files.length));
+
+      const el = document.getElementById('session-scratchpad');
+      if (!el || !Sessions._scratchpadLoaded) return;
       if (Sessions._scratchpadKey(data) === Sessions._scratchpadKey(Sessions._scratchpadData)) return;
 
       const prev = Sessions._scratchpadData;

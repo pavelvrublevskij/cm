@@ -70,6 +70,7 @@ const App = {
 
     if (typeof ActiveCount !== 'undefined') ActiveCount.start();
     if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.start();
+    if (typeof Artifacts !== 'undefined') Artifacts.checkGlobalVisibility();
 
     // Best-effort: drop this tab's read-only registration for the session it's currently on when
     // the tab actually closes. Read-only views on sessions this tab already navigated away from
@@ -176,6 +177,7 @@ const App = {
     const simpleViews = {
       'dashboard': () => Dashboard.load(),
       'usage': () => Usage.load(),
+      'artifacts': () => Artifacts.load(),
       'settings': () => Settings.load(),
       'global-claude-md': () => ClaudeMd.loadGlobal(),
       'projects': () => Projects.load(),
@@ -238,6 +240,7 @@ const App = {
       // Load per-project token usage in header
       ProjectUsage.load(opts.slug);
       if (typeof GitActions !== 'undefined') GitActions.init(opts.slug);
+      if (typeof Artifacts !== 'undefined') Artifacts.initProject(opts.slug);
       // Highlight in sidebar
       document.querySelectorAll('.project-list .nav-item').forEach(el => {
         el.classList.toggle('active', el.dataset.slug === opts.slug);

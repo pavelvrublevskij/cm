@@ -17,6 +17,7 @@ const { MAX_SNIPPETS, extractEntrySnippets, extractMetaSnippet } = require('../l
 const { collectFromJsonl, collectFromDir } = require('../lib/session-activity');
 const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/session-archive');
 const { groupMemberSlugs } = require('../lib/project-grouping');
+const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
 
 const router = express.Router({ mergeParams: true });
 
@@ -466,6 +467,17 @@ router.get('/:slug/sessions/with-plans', wrapRoute((req, res) => {
     } catch (_) {}
   }
   res.json(sessionIds);
+}));
+
+router.get('/:slug/sessions/with-artifacts', wrapRoute((req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  res.json([...new Set(getProjectArtifacts(req.params.slug).map(a => a.sessionId))]);
+}));
+
+router.get('/:slug/sessions/:sessionId/artifacts', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  res.json(getSessionArtifacts(p.slug, p.sessionId));
 }));
 
 router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {

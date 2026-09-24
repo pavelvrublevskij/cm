@@ -96,7 +96,8 @@ const ProjectTabs = {
       'proj-skills': () => ProjectSkills.load(App.currentProject),
       'proj-output-styles': () => ProjectOutputStyles.load(App.currentProject),
       'claude-md': () => ClaudeMd.loadProject(App.currentProject),
-      'git': () => GitPanel.mount('git-tab-body', App.currentProject)
+      'git': () => GitPanel.mount('git-tab-body', App.currentProject),
+      'proj-artifacts': () => Artifacts.renderProjectTab(App.currentProject)
     };
     if (loaders[tab]) loaders[tab]();
   },
