@@ -144,7 +144,6 @@ const GitPanel = {
             <button class="sf-mode-btn" id="git-pane-tab-history" onclick="GitPanel.showPane('history')">History</button>
           </div>
           <span class="git-shell-cwd" id="git-pane-subject">${escapeHtml(GitPanel._branchLabel())}</span>
-          <button class="btn btn-sm" onclick="GitPanel.newWorktree()" title="Create a sibling worktree on a new branch">New Worktree</button>
           <span class="terminal-pane-status" id="git-shell-status">disconnected</span>
           <div class="git-shell-actions">
             <button class="icon-btn" onclick="GitPanel.reconnect()" title="Restart shell" aria-label="Restart shell">&#x21bb;</button>
@@ -578,40 +577,6 @@ const GitPanel = {
 
   fetch() {
     return GitPanel._withBusy('fetch', () => GitActions.fetch());
-  },
-
-  /** Prompt for a branch name, then create a sibling worktree on it and open a terminal there. */
-  newWorktree() {
-    const body = formGroup('Branch name', '<input type="text" id="git-wt-branch" placeholder="feature/123" autofocus>')
-      + '<p style="color:var(--text-muted);margin-top:8px">'
-      + 'Creates a sibling folder checked out to this new branch, based on the current branch, and opens a new Claude Code session there.</p>';
-
-    openModal({
-      title: 'New Worktree',
-      body,
-      buttons: [{
-        label: 'Create',
-        primary: true,
-        onClick: async () => {
-          const branch = document.getElementById('git-wt-branch').value.trim();
-          if (!branch) { toast('Branch name is required', 'error'); return false; }
-          try {
-            const result = await GitApi.createWorktree(GitPanel._slug, branch);
-            if (result.slug) {
-              toast(`Worktree created at ${result.path}`);
-              Sessions.newSessionBrowser(result.slug);
-            } else if (result.terminalError) {
-              toast(`Worktree created at ${result.path} — could not open a terminal: ${result.terminalError}`, 'error');
-            } else {
-              toast(`Worktree created at ${result.path} — opened in an OS terminal`);
-            }
-          } catch (e) {
-            toast('Failed to create worktree: ' + e.message, 'error');
-            return false;
-          }
-        }
-      }]
-    });
   },
 
   /** Read the next page of history. Called on first view of the tab, and by Load more. */
