@@ -557,6 +557,7 @@ function renderSessionCard(s, opts = {}) {
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.resumeOS('${slug}', '${s.sessionId}')">Resume in OS terminal</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.resumeBrowser('${slug}', '${s.sessionId}')">Resume in browser terminal</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openReadOnly('${slug}', '${s.sessionId}')">Open (read-only)</button>
+              <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openInNewTab('${slug}', '${s.sessionId}')">Open in new tab &#8599;</button>
               <button class="action-menu-item" data-slug="${slug}" data-session="${s.sessionId}" data-title="${escapeHtml(s.summary || s.firstPrompt || '')}" onclick="event.stopPropagation(); Sessions.renameAction(this)">Rename</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.copyIdAction('${s.sessionId}')">Copy session ID</button>
               ${opts.archived

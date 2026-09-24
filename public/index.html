@@ -587,6 +587,7 @@
                 <div class="action-menu-panel">
                   <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.renameDetail()">Rename</button>
                   <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.copyIdDetail()">Copy session ID</button>
+                  <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openInNewTab(Sessions.detailState.slug, Sessions.detailState.sessionId)">Open in new tab &#8599;</button>
                   <button class="action-menu-item" id="session-detail-resume-btn" onclick="event.stopPropagation(); Sessions.resumeFromMenu()">Resume in OS Terminal</button>
                   <button class="action-menu-item" id="session-detail-archive-btn" onclick="event.stopPropagation(); Sessions.archiveDetail()">Archive</button>
                   <button class="action-menu-item" id="session-detail-unarchive-btn" style="display:none" onclick="event.stopPropagation(); Sessions.unarchiveDetail()">Unarchive</button>

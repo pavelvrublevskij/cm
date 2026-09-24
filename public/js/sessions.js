@@ -743,6 +743,14 @@ const Sessions = {
     Sessions._navigateToSession(slug, sessionId, info, true);
   },
 
+  // Opened read-only, same as Sessions.openReadOnly — a second tab on the same session mustn't
+  // fight the first one for the terminal's WebSocket connection.
+  openInNewTab(slug, sessionId) {
+    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
+    if (!slug || !sessionId) return;
+    window.open(location.pathname + '#session-detail/' + slug + '/' + sessionId + '/readonly', '_blank');
+  },
+
   goBack() {
     Sessions.stopAutoRefresh();
     const slug = App.currentProject;
