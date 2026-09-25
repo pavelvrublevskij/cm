@@ -234,7 +234,10 @@ Object.assign(Sessions, {
     });
     const openPath = typeof SessionFiles !== 'undefined' && SessionFiles.open ? SessionFiles.open.path : null;
     node.files.forEach(f => {
-      const status = f.isNew ? 'new' : (f.isDeleted ? 'deleted' : 'edited');
+      // isDeleted wins over isNew: a file created and then removed later in the same session
+      // (e.g. moved to another path) has no current source to show, so it must read as deleted,
+      // not new — otherwise the badge promises source that a click won't be able to produce.
+      const status = f.isDeleted ? 'deleted' : (f.isNew ? 'new' : 'edited');
       html += `<div class="sf-row sf-row-file ctx-file-item ctx-file-${status}${f.path === openPath ? ' sf-row-active' : ''}" style="--sf-depth:${depth}"
         data-session="${escapeHtml(sessionId)}"
         data-hash="${escapeHtml(f.hash || '')}"

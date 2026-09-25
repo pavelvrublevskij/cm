@@ -161,7 +161,12 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
                 const relNorm = rel.replace(/\\/g, '/');
                 // Only trust a parsed rm target once disk confirms it's actually gone — an
                 // imperfect shell parse should never mislabel a still-present file as deleted.
-                if (existingKeys.has(relNorm) || fs.existsSync(abs)) continue;
+                // Skip it entirely if it's a directory whose contents are already tracked
+                // individually (e.g. `rm -rf src` after files under src/ were written) — adding
+                // the bare directory path as its own "file" entry duplicates those rows in the tree.
+                const prefix = relNorm + '/';
+                const isTrackedDir = [...existingKeys].some(k => k.startsWith(prefix));
+                if (existingKeys.has(relNorm) || fs.existsSync(abs) || isTrackedDir) continue;
                 existingKeys.add(relNorm);
                 fileMap[relNorm] = { hash: null, maxVersion: 0, isNew: false };
               }

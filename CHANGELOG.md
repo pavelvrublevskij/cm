@@ -1,3 +1,9 @@
+## v1.7.1
+
+### Bug fixes
+
+- **Missing source for files moved during a session** — files created then deleted/moved later in the same session were mislabeled "new" instead of "deleted", and a moved directory could show a duplicate row in the changed-files tree.
+
 ## v1.7.0
 
 ### Features
