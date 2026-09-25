@@ -4,19 +4,45 @@ const request = require('supertest');
 const { app } = require('./helpers/app');
 const { parsePricingFromHtml } = require('../lib/pricing');
 
-function pricingRow(cells) {
-  return '<tr>' + cells.map(c => `<td class="p-2">${c}</td>`).join('') + '</tr>';
+// Column order (Model | Input | Output | 5m writes | 1h writes | Hits and refreshes) and the
+// header-driven lookup mirror the live pricing page's current per-token pricing table.
+const HEADER_ROW = '<tr><th>Model</th><th>Input</th><th>Output</th><th>5m writes</th><th>1h writes</th><th>Hits and refreshes</th></tr>';
+
+function pricingTable(rows) {
+  return '<table><thead>' + HEADER_ROW + '</thead><tbody>' +
+    rows.map(cells => '<tr>' + cells.map(c => `<td class="p-2">${c}</td>`).join('') + '</tr>').join('') +
+    '</tbody></table>';
 }
 
+function nameCell(name, tagline) {
+  return `<a href="#x">${name}</a><span class="tagline">${tagline}</span>`;
+}
+
+test('parsePricingFromHtml: model name is read from the link text, not glued to its sibling tagline', () => {
+  // Real markup: the name and tagline are sibling elements in the same cell with no
+  // separator between them, so naively stripping tags would glue them into one string.
+  const html = pricingTable([
+    [nameCell('Claude Sonnet 5', 'The best combination of speed and intelligence'),
+      '$2 / MTok', '$10 / MTok', '$2.50 / MTok', '$4 / MTok', '$0.20 / MTok']
+  ]);
+
+  const models = parsePricingFromHtml(html);
+  assert.ok(models['claude-sonnet-5'], 'clean claude-sonnet-5 key present');
+  assert.strictEqual(models['claude-sonnet-5'].input, 2);
+  assert.strictEqual(models['claude-sonnet-5'].output, 10);
+  assert.strictEqual(Object.keys(models).some(k => k.includes('best-combination')), false,
+    'no garbled tagline-suffixed key leaked into the result');
+});
+
 test('parsePricingFromHtml: model name split across <br/> from a dated pricing tier does not glue onto the qualifier', () => {
-  // Real markup captured from the pricing page for a model with an introductory tier
-  // followed by a standard tier starting on a later date.
-  const html = pricingRow([
-    'Claude Sonnet 5<br/><a class="inline-link" href="#x">through August 31, 2026</a>',
-    '$2 / MTok', '$2.50 / MTok', '$4 / MTok', '$0.20 / MTok', '$10 / MTok'
-  ]) + pricingRow([
-    'Claude Sonnet 5<br/>starting September 1, 2026',
-    '$3 / MTok', '$3.75 / MTok', '$6 / MTok', '$0.30 / MTok', '$15 / MTok'
+  // A model with an introductory tier followed by a standard tier starting on a later date.
+  // The qualifier trails as plain text after the name (no pricing tier link of its own),
+  // whether or not the cell also has a separate anchor for the model name.
+  const html = pricingTable([
+    ['<a href="#x">Claude Sonnet 5</a><br/>through August 31, 2026',
+      '$2 / MTok', '$10 / MTok', '$2.50 / MTok', '$4 / MTok', '$0.20 / MTok'],
+    ['Claude Sonnet 5<br/>starting September 1, 2026',
+      '$3 / MTok', '$15 / MTok', '$3.75 / MTok', '$6 / MTok', '$0.30 / MTok']
   ]);
 
   const models = parsePricingFromHtml(html);
@@ -26,12 +52,11 @@ test('parsePricingFromHtml: model name split across <br/> from a dated pricing t
 });
 
 test('parsePricingFromHtml: first tier row wins when a model has multiple dated pricing rows', () => {
-  const html = pricingRow([
-    'Claude Sonnet 5<br/>through August 31, 2026',
-    '$2 / MTok', '$2.50 / MTok', '$4 / MTok', '$0.20 / MTok', '$10 / MTok'
-  ]) + pricingRow([
-    'Claude Sonnet 5<br/>starting September 1, 2026',
-    '$3 / MTok', '$3.75 / MTok', '$6 / MTok', '$0.30 / MTok', '$15 / MTok'
+  const html = pricingTable([
+    ['Claude Sonnet 5<br/>through August 31, 2026',
+      '$2 / MTok', '$10 / MTok', '$2.50 / MTok', '$4 / MTok', '$0.20 / MTok'],
+    ['Claude Sonnet 5<br/>starting September 1, 2026',
+      '$3 / MTok', '$15 / MTok', '$3.75 / MTok', '$6 / MTok', '$0.30 / MTok']
   ]);
 
   const models = parsePricingFromHtml(html);
@@ -40,15 +65,22 @@ test('parsePricingFromHtml: first tier row wins when a model has multiple dated 
 });
 
 test('parsePricingFromHtml: single-row model without a pricing tier still parses normally', () => {
-  const html = pricingRow([
-    'Claude Haiku 4.5',
-    '$1 / MTok', '$1.25 / MTok', '$2 / MTok', '$0.10 / MTok', '$5 / MTok'
+  const html = pricingTable([
+    ['Claude Haiku 4.5', '$1 / MTok', '$5 / MTok', '$1.25 / MTok', '$2 / MTok', '$0.10 / MTok']
   ]);
 
   const models = parsePricingFromHtml(html);
   assert.ok(models['claude-haiku-4-5']);
   assert.strictEqual(models['claude-haiku-4-5'].input, 1);
   assert.strictEqual(models['claude-haiku-4-5'].output, 5);
+});
+
+test('parsePricingFromHtml: a table without Input/Output headers (e.g. a tool-use-overhead table) is ignored', () => {
+  const html = '<table><thead><tr><th>Model</th><th>Tool use system prompt tokens</th></tr></thead><tbody>' +
+    '<tr><td>Claude Sonnet 5</td><td>346</td></tr></tbody></table>';
+
+  const models = parsePricingFromHtml(html);
+  assert.strictEqual(Object.keys(models).length, 0, 'non-pricing table contributes no entries');
 });
 
 test('GET /api/pricing returns current pricing and source metadata', async () => {

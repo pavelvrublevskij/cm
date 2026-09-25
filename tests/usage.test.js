@@ -113,6 +113,50 @@ before(() => {
     })
   ];
   fs.writeFileSync(path.join(subagentDir2, 'sess-subagent-plain.jsonl'), subagentLines2.join('\n') + '\n');
+
+  // Seed a session where the parent turn and TWO background subagents each resolve to a
+  // different model (e.g. a Task/Agent tool fan-out where each subagent picks its own model).
+  // Every model must be attributed and priced independently in byModel.
+  const multiSlug = 'usage-proj-multi-subagent';
+  const multiDir = path.join(paths.PROJECTS_DIR, multiSlug);
+  fs.mkdirSync(multiDir, { recursive: true });
+  const multiLines = [
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-03-01T12:00:00Z',
+      message: {
+        model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+      }
+    }),
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-03-01T12:00:05Z',
+      toolUseResult: { isAsync: true, agentId: 'agent-one', resolvedModel: 'claude-haiku-4-5' }
+    }),
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-03-01T12:00:06Z',
+      toolUseResult: { isAsync: true, agentId: 'agent-two', resolvedModel: 'claude-opus-4-6' }
+    }),
+    JSON.stringify({
+      type: 'attachment',
+      timestamp: '2026-03-01T12:00:10Z',
+      attachment: {
+        commandMode: 'task-notification',
+        prompt: '<task-notification>\n<task-id>agent-one</task-id>\n<status>completed</status>\n<usage><subagent_tokens>400</subagent_tokens></usage>\n</task-notification>'
+      }
+    }),
+    JSON.stringify({
+      type: 'attachment',
+      timestamp: '2026-03-01T12:00:15Z',
+      attachment: {
+        commandMode: 'task-notification',
+        prompt: '<task-notification>\n<task-id>agent-two</task-id>\n<status>completed</status>\n<usage><subagent_tokens>700</subagent_tokens></usage>\n</task-notification>'
+      }
+    })
+  ];
+  fs.writeFileSync(path.join(multiDir, 'sess-multi-subagent.jsonl'), multiLines.join('\n') + '\n');
 });
 
 test('GET /api/usage/summary returns aggregated shape', async () => {
@@ -237,6 +281,24 @@ test('usage indexer attributes subagent tokens when the notification is a plain 
   assert.ok(res.body.byModel['claude-opus-4-6'], 'subagent resolved model present');
   assert.strictEqual(res.body.byModel['claude-opus-4-6'].output_tokens, 300);
   assert.strictEqual(res.body.totals.output_tokens, 20 + 300);
+});
+
+test('usage indexer attributes each of several subagents to its own resolved model', async () => {
+  const res = await request(app).get('/api/usage/project/usage-proj-multi-subagent');
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.byModel['claude-sonnet-4-6'], 'parent model present');
+  assert.ok(res.body.byModel['claude-haiku-4-5'], 'first subagent resolved model present');
+  assert.ok(res.body.byModel['claude-opus-4-6'], 'second subagent resolved model present');
+  assert.strictEqual(res.body.byModel['claude-sonnet-4-6'].output_tokens, 20);
+  assert.strictEqual(res.body.byModel['claude-haiku-4-5'].output_tokens, 400);
+  assert.strictEqual(res.body.byModel['claude-opus-4-6'].output_tokens, 700);
+  assert.strictEqual(res.body.totals.output_tokens, 20 + 400 + 700);
+
+  // Each model's slice of cost must be priced with that model's own rate, not one shared rate.
+  const { calcCost } = require('../lib/usage-index');
+  const expectedCost = ['claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-opus-4-6']
+    .reduce((sum, m) => sum + calcCost(res.body.byModel[m], m).total, 0);
+  assert.ok(Math.abs(res.body.cost.total - expectedCost) < 1e-9, 'cost.total sums per-model rates correctly');
 });
 
 test('GET /api/usage/summary with fromTime/toTime filters by hour', async () => {
