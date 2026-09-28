@@ -85,7 +85,14 @@ test('Windows: enable/disable manage a Startup-folder shortcut (child_process mo
     const script = psCall.args.join(' ');
     assert.ok(script.includes('CreateShortcut'));
     assert.ok(script.includes('--autostart-open'));
-    assert.ok(script.includes('WindowStyle = 7'));
+    assert.ok(script.includes('WindowStyle = 7'), 'shortcut itself falls back to minimized');
+    assert.ok(script.includes('powershell.exe'), 'shortcut targets powershell, not node.exe directly');
+    assert.ok(
+      /TargetPath = '[^']*powershell\.exe'/.test(script),
+      'node.exe is not the shortcut target — it would get its own closable console window'
+    );
+    assert.ok(script.includes('Start-Process'), 'node is backgrounded via Start-Process');
+    assert.ok(script.includes('-WindowStyle Hidden'), 'the backgrounded node process has no visible/closable window');
     assert.strictEqual(fs.existsSync(lnkPath), true);
     assert.strictEqual(autostartLib.isEnabled(), true);
 
