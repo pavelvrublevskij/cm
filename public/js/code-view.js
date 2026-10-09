@@ -3,6 +3,7 @@
 
 const CodeView = {
   PREVIEW_EXTS: ['md', 'markdown', 'html', 'htm'],
+  IMAGE_EXTS: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg'],
   STRUCTURE_WIDTH_KEY: 'claude-manager-files-structure-width',
   STRUCTURE_COLLAPSED_KEY: 'claude-manager-files-structure-collapsed',
   MIN_STRUCTURE_PX: 180,
@@ -13,6 +14,10 @@ const CodeView = {
   /** Markdown and HTML have a rendered form worth showing beside the source. */
   isPreviewable(filePath) {
     return CodeView.PREVIEW_EXTS.includes(filePath.split('.').pop().toLowerCase());
+  },
+
+  isImage(filePath) {
+    return CodeView.IMAGE_EXTS.includes(filePath.split('.').pop().toLowerCase());
   },
 
   /** Markdown renders inline; HTML renders in a sandboxed iframe so its scripts can't touch CM. */

@@ -32,6 +32,11 @@ before(() => {
   fs.mkdirSync(path.join(PROJ_DIR, 'forked', 'two'), { recursive: true });
   fs.writeFileSync(path.join(PROJ_DIR, 'binary.dat'), Buffer.from([0x00, 0x01, 0x02, 0xff]));
   fs.writeFileSync(path.join(PROJ_DIR, 'big.txt'), 'x'.repeat(CONTENT_MAX_BYTES + 10));
+  // A 1x1 transparent PNG, just to have real image bytes to serve back.
+  fs.writeFileSync(path.join(PROJ_DIR, 'logo.png'), Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64'
+  ));
 
   try {
     fs.symlinkSync(
@@ -422,6 +427,43 @@ test('content: empty path is rejected', async () => {
 
 test('content: path traversal is rejected', async () => {
   const res = await request(app).get(`/api/projects/${SLUG}/files/content`).query({ path: '../../.claude/settings.json' });
+  assert.strictEqual(res.status, 400);
+});
+
+// ── raw ───────────────────────────────────────────────────────────────────────
+
+test('raw: serves an image file with an image content-type', async () => {
+  const res = await request(app)
+    .get(`/api/projects/${SLUG}/files/raw`)
+    .query({ path: 'logo.png' })
+    .buffer(true)
+    .parse((r, cb) => {
+      const chunks = [];
+      r.on('data', c => chunks.push(c));
+      r.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+  assert.strictEqual(res.status, 200);
+  assert.match(res.headers['content-type'], /^image\/png/);
+  assert.deepStrictEqual(res.body, fs.readFileSync(path.join(PROJ_DIR, 'logo.png')));
+});
+
+test('raw: a non-image extension is refused', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/raw`).query({ path: 'src/app.js' });
+  assert.strictEqual(res.status, 415);
+});
+
+test('raw: missing file returns 404', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/raw`).query({ path: 'nope.png' });
+  assert.strictEqual(res.status, 404);
+});
+
+test('raw: path traversal is rejected', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/files/raw`).query({ path: '../../evil.png' });
+  assert.strictEqual(res.status, 400);
+});
+
+test('raw: invalid slug is rejected', async () => {
+  const res = await request(app).get('/api/projects/..bad/files/raw').query({ path: 'logo.png' });
   assert.strictEqual(res.status, 400);
 });
 

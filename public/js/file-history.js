@@ -7,7 +7,7 @@ const FileHistory = {
     const allItems = opts.allItems || null;
     const index = opts.index != null ? opts.index : -1;
 
-    const label = FileHistory._makeLabel(isNew, isDeleted, version);
+    const label = FileHistory._makeLabel(isNew, isDeleted, version, !!opts.readBase);
 
     let navHtml = '';
     if (allItems && allItems.length > 1 && index >= 0) {
@@ -42,7 +42,7 @@ const FileHistory = {
       FileHistory._updateNav(overlay, allItems, index);
     }
 
-    await FileHistory._loadDiff(overlay, sessionId, hash, version, projSlug, filePath, { isNew, isDeleted });
+    await FileHistory._loadDiff(overlay, sessionId, hash, version, projSlug, filePath, { isNew, isDeleted, readBase: !!opts.readBase });
   },
 
   /** Switch the Files pane to Source on the modal's current file and jump to `line`, closing the modal. */
@@ -62,8 +62,8 @@ const FileHistory = {
     });
   },
 
-  _makeLabel(isNew, isDeleted, version) {
-    return isNew ? '(new file)' : isDeleted ? '(deleted)' : `v${version} → current`;
+  _makeLabel(isNew, isDeleted, version, readBase) {
+    return isNew ? '(new file)' : isDeleted ? '(deleted)' : readBase ? '(earlier Read → current)' : `v${version} → current`;
   },
 
   _updateNav(overlay, allItems, index) {
@@ -76,11 +76,12 @@ const FileHistory = {
   },
 
   /** Fetch the "recorded snapshot vs file on disk" diff for one file. */
-  fetchDiffCurrent(sessionId, hash, version, projSlug, filePath, { isNew } = {}) {
+  fetchDiffCurrent(sessionId, hash, version, projSlug, filePath, { isNew, readBase } = {}) {
     const params = new URLSearchParams({ projSlug, filePath });
+    if (readBase) params.set('readBase', 'true');
     if (isNew) params.set('isNew', 'true');
     else params.set('version', String(version));
-    const hashSeg = isNew ? 'none' : encodeURIComponent(hash);
+    const hashSeg = isNew || readBase ? 'none' : encodeURIComponent(hash);
     return api(`/api/file-history/${encodeURIComponent(sessionId)}/${hashSeg}/diff-current?${params.toString()}`);
   },
 
@@ -97,9 +98,9 @@ const FileHistory = {
     return lines;
   },
 
-  async _loadDiff(overlay, sessionId, hash, version, projSlug, filePath, { isNew, isDeleted }) {
+  async _loadDiff(overlay, sessionId, hash, version, projSlug, filePath, { isNew, isDeleted, readBase }) {
     try {
-      const result = await FileHistory.fetchDiffCurrent(sessionId, hash, version, projSlug, filePath, { isNew });
+      const result = await FileHistory.fetchDiffCurrent(sessionId, hash, version, projSlug, filePath, { isNew, readBase });
       const body = overlay.querySelector('#fh-diff-body');
       if (body) FileHistory.renderDiff(body, result, filePath, { onGotoSource: line => FileHistory._gotoSource(overlay, line) });
     } catch (e) {
@@ -111,13 +112,13 @@ const FileHistory = {
   async _navToDiff(overlay, allItems, newIndex) {
     const el = allItems[newIndex];
     if (!el) return;
-    const { session, hash, from, path, isNew, isDeleted } = el.dataset;
+    const { session, hash, from, path, isNew, isDeleted, readBase } = el.dataset;
     const isNewBool = isNew === '1';
     const isDeletedBool = isDeleted === '1';
     const version = parseInt(from, 10);
 
     const titleEl = overlay.querySelector('h3');
-    if (titleEl) titleEl.textContent = `${path} ${FileHistory._makeLabel(isNewBool, isDeletedBool, version)}`;
+    if (titleEl) titleEl.textContent = `${path} ${FileHistory._makeLabel(isNewBool, isDeletedBool, version, readBase === '1')}`;
 
     if (overlay._fhState) {
       overlay._fhState.filePath = path;
@@ -133,7 +134,8 @@ const FileHistory = {
     const projSlug = Sessions._ctx ? Sessions._ctx.projSlug : '';
     await FileHistory._loadDiff(overlay, session, hash, version, projSlug, path, {
       isNew: isNewBool,
-      isDeleted: isDeletedBool
+      isDeleted: isDeletedBool,
+      readBase: readBase === '1'
     });
   },
 

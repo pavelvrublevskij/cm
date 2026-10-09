@@ -152,7 +152,7 @@ const App = {
 
     // Stop auto-refresh + close in-page terminal when leaving session-detail
     if (leavingSession) {
-      if (typeof Sessions !== 'undefined') Sessions.stopAutoRefresh();
+      if (typeof Sessions !== 'undefined') { Sessions.captureSnapshot(); Sessions.stopAutoRefresh(); }
       if (typeof TerminalPanel !== 'undefined' && TerminalPanel.isOpen()) TerminalPanel.close();
       // Invalidate session-list cache for the project we came from so green dots refresh on return.
       if (previousProject && typeof Sessions !== 'undefined' && Sessions.cache) {

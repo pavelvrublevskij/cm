@@ -501,13 +501,24 @@ test('openFile reports a read failure in the pane', async () => {
 
 test('binary and oversized files are not opened for editing', async () => {
   harness.apiHandler = () => ({ binary: true, size: 4096 });
-  await SessionFiles.openFile('logo.png');
+  await SessionFiles.openFile('archive.zip');
   assert.ok(el('sf-pane-body').innerHTML.includes('Binary file'));
   assert.strictEqual(harness.cm, null);
 
   harness.apiHandler = () => ({ binary: false, tooLarge: true, size: 5 * 1024 * 1024 });
   await SessionFiles.openFile('huge.txt');
   assert.ok(el('sf-pane-body').innerHTML.includes('too large'));
+  assert.strictEqual(harness.cm, null);
+});
+
+test('an image file renders as a preview instead of fetching it as text', async () => {
+  harness.apiHandler = () => ({ binary: true, size: 4096 });
+  await SessionFiles.openFile('logo.png');
+
+  assert.strictEqual(SessionFiles.open.mode, 'image');
+  const html = el('sf-pane-body').innerHTML;
+  assert.ok(html.includes('<img'));
+  assert.ok(html.includes('/files/raw?path=logo.png'));
   assert.strictEqual(harness.cm, null);
 });
 

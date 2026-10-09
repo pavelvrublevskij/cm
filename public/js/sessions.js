@@ -765,6 +765,8 @@ const Sessions = {
   CONVERSATION_HIDDEN_KEY: 'claude-manager-conversation-hidden',
   SHOW_TOOL_DETAILS_KEY: 'claude-manager-show-tool-details',
   DEFAULT_READONLY_KEY: 'claude-manager-default-readonly',
+  SNAPSHOT_KEY: 'claude-manager-session-snapshots',
+  SNAPSHOT_MAX: 30,
   _refreshTimer: null,
 
   defaultReadOnly() {
@@ -773,6 +775,53 @@ const Sessions = {
 
   setDefaultReadOnly(on) {
     localStorage.setItem(Sessions.DEFAULT_READONLY_KEY, on ? '1' : '0');
+  },
+
+  _snapshotKey(slug, sessionId) { return `${slug}|${sessionId}`; },
+
+  _loadSnapshots() {
+    try { return JSON.parse(sessionStorage.getItem(Sessions.SNAPSHOT_KEY) || '{}'); }
+    catch (_) { return {}; }
+  },
+
+  _saveSnapshots(map) {
+    try { sessionStorage.setItem(Sessions.SNAPSHOT_KEY, JSON.stringify(map)); }
+    catch (_) { /* private mode / quota exceeded — restore is a convenience, not critical */ }
+  },
+
+  _getSnapshot(slug, sessionId) {
+    if (!slug || !sessionId) return null;
+    return Sessions._loadSnapshots()[Sessions._snapshotKey(slug, sessionId)] || null;
+  },
+
+  /** Remember where the user left off in this session — active tab, conversation scroll
+   *  position, how many messages were loaded, any active search filter, and the file open in the
+   *  Files tab — so returning to it (active sessions bar, back navigation, or a page reload)
+   *  restores that instead of resetting. */
+  captureSnapshot() {
+    const state = Sessions.detailState;
+    if (!state.slug || !state.sessionId) return;
+    const scroller = Sessions.scrollContainer();
+    const openFile = (typeof SessionFiles !== 'undefined' && SessionFiles.open)
+      ? { path: SessionFiles.open.path, mode: SessionFiles.open.mode, ctx: SessionFiles.open.ctx || null }
+      : null;
+    const map = Sessions._loadSnapshots();
+    const key = Sessions._snapshotKey(state.slug, state.sessionId);
+    delete map[key];
+    map[key] = {
+      tab: Sessions._activeTab || 'conversation',
+      scrollTop: scroller ? scroller.scrollTop : 0,
+      offset: state.offset || 0,
+      searchQuery: Sessions._detailSearchQuery || '',
+      file: openFile,
+      ts: Date.now()
+    };
+    const keys = Object.keys(map);
+    if (keys.length > Sessions.SNAPSHOT_MAX) {
+      keys.sort((a, b) => (map[a].ts || 0) - (map[b].ts || 0));
+      delete map[keys[0]];
+    }
+    Sessions._saveSnapshots(map);
   },
 
   refreshIntervalMs() {
@@ -951,6 +1000,7 @@ const Sessions = {
     title.title = titleText;
     Sessions._detailInfo = info || {};
     Sessions._detailHasPlan = false;
+    const snapshot = Sessions._getSnapshot(slug, sessionId);
     Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0, readOnly: !!readOnly, readOnlyInstanceId: null };
     Sessions.renderDetailMeta(null);
     Sessions.applyReadOnlyState();
@@ -1009,20 +1059,38 @@ const Sessions = {
         .catch(() => {});
     }
 
-    // Start on the Files tab; loadContext will switch to Conversation if nothing changed
-    Sessions.switchTab('file-changes');
+    // Start on the saved tab if we're restoring one, otherwise Files — loadContext may still
+    // switch to Conversation if nothing changed, but the restore below has the final say.
+    Sessions.switchTab(snapshot ? snapshot.tab : 'file-changes');
     const ctxEl = document.getElementById('sf-changed');
     if (ctxEl) { ctxEl.innerHTML = ''; }
     const spEl = document.getElementById('session-scratchpad');
     if (spEl) { spEl.innerHTML = ''; }
     const artEl = document.getElementById('session-artifacts');
     if (artEl) { artEl.innerHTML = ''; }
-    Sessions.loadContext(sessionId, info);
-    Sessions.checkScratchpad();
-    Sessions.checkArtifacts();
 
-    await Sessions.loadMore();
+    await Promise.all([
+      Sessions.loadContext(sessionId, info),
+      Sessions.checkScratchpad(),
+      Sessions.checkArtifacts(),
+      snapshot && snapshot.offset > 20 ? Sessions._restoreMessages(snapshot.offset) : Sessions.loadMore()
+    ]);
     Sessions.setupScroll();
+
+    if (snapshot) {
+      Sessions.switchTab(snapshot.tab);
+      if (snapshot.searchQuery) {
+        const detailSearchInput = document.getElementById('session-detail-search-input');
+        if (detailSearchInput) detailSearchInput.value = snapshot.searchQuery;
+        Sessions._detailSearchQuery = snapshot.searchQuery;
+        Sessions.applyDetailFilter(snapshot.searchQuery);
+      }
+      if (snapshot.file && typeof SessionFiles !== 'undefined') {
+        SessionFiles.openFile(snapshot.file.path, { mode: snapshot.file.mode, ctx: snapshot.file.ctx });
+      }
+      const scroller = Sessions.scrollContainer();
+      if (scroller) requestAnimationFrame(() => { scroller.scrollTop = snapshot.scrollTop; });
+    }
 
     if (!readOnly && typeof TerminalPanel !== 'undefined' && TerminalPanel.shouldAutoOpen() && !TerminalPanel.isOpen()) {
       TerminalPanel.open(slug, sessionId);
@@ -1182,6 +1250,15 @@ const Sessions = {
   scrollToTop() {
     const scroller = Sessions.scrollContainer();
     if (scroller) scroller.scrollTo({ top: 0, behavior: 'smooth' });
+  },
+
+  /** Re-load messages page by page up to a previously-seen offset, so a restored session shows
+   *  as many messages as it did when the user left instead of just the first page. */
+  async _restoreMessages(targetOffset) {
+    await Sessions.loadMore();
+    while (Sessions.detailState.hasMore && Sessions.detailState.offset < targetOffset) {
+      await Sessions.loadMore();
+    }
   },
 
   async loadMore() {
@@ -1413,6 +1490,7 @@ const Sessions = {
     const spBtn = document.getElementById('tab-btn-scratchpad');
     const artBtn = document.getElementById('tab-btn-artifacts');
     if (!ctx || !msgs || !fcBtn || !cvBtn) return;
+    Sessions._activeTab = tab;
     const isFC = tab === 'file-changes';
     const isAct = tab === 'activity';
     const isSP = tab === 'scratchpad';

@@ -471,6 +471,86 @@ test('context: rm target still present on disk is not reported as deleted', asyn
   assert.ok(!f, 'a still-present file must not be reported as a session change from a stray rm mention');
 });
 
+// ── Shell-script writes (sed -i / python / redirects) carry no snapshot ──────
+
+const SHELL_WRITE_SESSION_ID = 'shellwrite-7777-7777-7777-777777777777';
+const SHELL_WRITE_PROJ_DIR = path.join(HOME, 'shell-write-proj');
+const SHELL_WRITE_SLUG = slugForPath(SHELL_WRITE_PROJ_DIR);
+
+before(() => {
+  const projDir = path.join(paths.PROJECTS_DIR, SHELL_WRITE_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.mkdirSync(path.join(SHELL_WRITE_PROJ_DIR, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(SHELL_WRITE_PROJ_DIR, 'src', 'a.h'), 'x');
+  fs.writeFileSync(path.join(SHELL_WRITE_PROJ_DIR, 'src', 'read-only.h'), 'x');
+
+  const entries = [
+    { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'edit' } },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 's1', name: 'Bash', input: { command: 'sed -i "s/a/b/" src/a.h' } },
+          { type: 'tool_use', id: 's2', name: 'Bash', input: { command: 'cat src/read-only.h' } },
+          { type: 'tool_use', id: 's3', name: 'Bash', input: { command: 'echo x > src/missing.h' } }
+        ]
+      }
+    }
+  ];
+  fs.writeFileSync(
+    path.join(projDir, SHELL_WRITE_SESSION_ID + '.jsonl'),
+    entries.map(e => JSON.stringify(e)).join('\n')
+  );
+});
+
+test('context: file written by sed -i in Bash is listed', async () => {
+  const res = await request(app).get(`/api/file-history/${SHELL_WRITE_SESSION_ID}/context`);
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.files.find(f => f.path === 'src/a.h'));
+});
+
+test('context: read-only Bash targets and missing files are not listed', async () => {
+  const res = await request(app).get(`/api/file-history/${SHELL_WRITE_SESSION_ID}/context`);
+  assert.ok(!res.body.files.find(f => f.path === 'src/read-only.h'));
+  assert.ok(!res.body.files.find(f => f.path === 'src/missing.h'));
+});
+
+// ── Shell-edited file diffed against the session's earlier full Read ─────────
+
+const READ_BASE_SESSION_ID = 'readbase-9999-9999-9999-999999999999';
+const READ_BASE_PROJ_DIR = path.join(HOME, 'read-base-proj');
+const READ_BASE_SLUG = slugForPath(READ_BASE_PROJ_DIR);
+
+before(() => {
+  const projDir = path.join(paths.PROJECTS_DIR, READ_BASE_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.mkdirSync(READ_BASE_PROJ_DIR, { recursive: true });
+  fs.writeFileSync(path.join(READ_BASE_PROJ_DIR, 'a.txt'), 'one\nTWO\n');
+
+  const entries = [
+    { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'edit' } },
+    { type: 'user', toolUseResult: { type: 'text', file: { filePath: path.join(READ_BASE_PROJ_DIR, 'a.txt'), content: 'one\ntwo\n', startLine: 1, numLines: 2, totalLines: 2 } } },
+    { type: 'assistant', message: { content: [
+      { type: 'tool_use', id: 'r1', name: 'Bash', input: { command: 'sed -i "s/two/TWO/" a.txt' } }
+    ] } }
+  ];
+  fs.writeFileSync(path.join(projDir, READ_BASE_SESSION_ID + '.jsonl'), entries.map(e => JSON.stringify(e)).join('\n'));
+});
+
+test('context: shell-edited file with an earlier full Read is flagged readBase and diffs against it', async () => {
+  const ctx = await request(app).get('/api/file-history/' + READ_BASE_SESSION_ID + '/context');
+  const f = ctx.body.files.find(f => f.path === 'a.txt');
+  assert.ok(f && f.readBase === true);
+
+  const res = await request(app)
+    .get('/api/file-history/' + READ_BASE_SESSION_ID + '/none/diff-current')
+    .query({ projSlug: READ_BASE_SLUG, filePath: 'a.txt', readBase: 'true' });
+  assert.strictEqual(res.status, 200);
+  const lines = res.body.hunks.flatMap(h => h.lines);
+  assert.ok(lines.some(l => l.type === '-' && l.content.includes('two')));
+  assert.ok(lines.some(l => l.type === '+' && l.content.includes('TWO')));
+});
+
 // ── backup mapping recovered when the transcript has no snapshot records ─────
 // Newer Claude Code versions write the backups but no file-history-snapshot records, so the
 // path -> backup mapping has to be recomputed as sha256(absolute path)[0..16].

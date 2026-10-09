@@ -1,9 +1,12 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const { wrapRoute } = require('../lib/file-helpers');
 const { resolveProjectPath, listDir, searchTree, readFileChunk } = require('../lib/project-files');
 
 const router = express.Router();
+
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg']);
 
 router.get('/:slug/files/tree', wrapRoute((req, res) => {
   const resolved = resolveProjectPath(req.params.slug, req.query.path || '');
@@ -34,6 +37,19 @@ router.get('/:slug/files/content', wrapRoute((req, res) => {
   }
   const offset = parseInt(req.query.offset, 10);
   res.json({ path: resolved.rel, ...readFileChunk(resolved.target, Number.isFinite(offset) ? offset : 0) });
+}));
+
+router.get('/:slug/files/raw', wrapRoute((req, res) => {
+  const resolved = resolveProjectPath(req.params.slug, req.query.path || '');
+  if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+  if (!resolved.rel) return res.status(400).json({ error: 'Invalid file path' });
+  if (!IMAGE_EXTS.has(path.extname(resolved.target).slice(1).toLowerCase())) {
+    return res.status(415).json({ error: 'Not an image file' });
+  }
+  if (!fs.existsSync(resolved.target) || !fs.statSync(resolved.target).isFile()) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  res.sendFile(resolved.target);
 }));
 
 router.put('/:slug/files/content', wrapRoute((req, res) => {

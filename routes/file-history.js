@@ -9,6 +9,8 @@ const planCache = require('../lib/plan-cache');
 const { resolveProjectPath } = require('../lib/project-files');
 const { decodeSlug } = require('../lib/slug');
 const { computeDiff } = require('../lib/diff');
+const { extractBashWrites } = require('../lib/bash-writes');
+const { readBaselines } = require('../lib/read-baseline');
 
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 
@@ -144,15 +146,37 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
     if (projectDir) {
       const resolvedProjectDir = path.resolve(projectDir);
       const existingKeys = new Set(Object.keys(fileMap).map(k => k.replace(/\\/g, '/')));
+      let sessionStart = 0;
       for (const line of sessionContent.split('\n')) {
         if (!line.trim()) continue;
         try {
           const obj = JSON.parse(line);
+          if (!sessionStart && obj.timestamp) sessionStart = Date.parse(obj.timestamp) || 0;
           if (obj.type !== 'assistant') continue;
           const content = obj.message && obj.message.content;
           if (!Array.isArray(content)) continue;
           for (const block of content) {
             if (block.type !== 'tool_use' || !block.input) continue;
+            if (block.name === 'Bash' || block.name === 'PowerShell') {
+              // Shell writes carry no snapshot; accept a parsed target only if it exists in the
+              // project and was modified after the session began.
+              for (const { cwd, target } of extractBashWrites(block.input.command)) {
+                for (const base of [path.resolve(resolvedProjectDir, cwd), resolvedProjectDir]) {
+                  const abs = path.resolve(base, target);
+                  const rel = path.relative(resolvedProjectDir, abs);
+                  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+                  let st;
+                  try { st = fs.statSync(abs); } catch (_) { continue; }
+                  if (!st.isFile() || st.mtimeMs < sessionStart) continue;
+                  const relNorm = rel.replace(/\\/g, '/');
+                  if (!existingKeys.has(relNorm)) {
+                    existingKeys.add(relNorm);
+                    fileMap[relNorm] = { hash: null, maxVersion: 0, isNew: false };
+                  }
+                  break;
+                }
+              }
+            }
             if (block.name === 'Bash') {
               for (const target of extractBashDeletions(block.input.command)) {
                 const abs = path.resolve(resolvedProjectDir, target);
@@ -203,6 +227,8 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       }
     }
 
+    const readBases = projectDir ? readBaselines(sessionContent, projectDir) : new Map();
+
     files = Object.entries(fileMap).map(([filePath, info]) => {
       const versions = info.hash ? histFiles
         .filter(f => f.startsWith(info.hash + '@v'))
@@ -219,7 +245,9 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
           isDeleted = true;
         }
       }
-      return { path: filePath, hash: info.hash, versions, isNew: info.isNew, isDeleted, mtime };
+      // No snapshot: the session's own earlier full Read of the file stands in as the "before" text.
+      const readBase = !info.hash && !info.isNew && !isDeleted && readBases.has(filePath);
+      return { path: filePath, hash: info.hash, versions, isNew: info.isNew, isDeleted, mtime, readBase };
     });
     // Every entry came from a snapshot backup or a Write/Edit/MultiEdit/NotebookEdit call, so all of
     // them were touched by this session. Files without a recorded snapshot have no diff, but their
@@ -282,11 +310,21 @@ router.get('/:sessionId/:hash/diff', wrapRoute((req, res) => {
   res.json(computeDiff(oldText, newText));
 }));
 
+/** The session's recorded pre-edit text for a shell-edited file, or null when none was captured. */
+function readBaselineText(sessionId, projSlug, filePath) {
+  const file = path.join(PROJECTS_DIR, projSlug, sessionId + '.jsonl');
+  if (!fs.existsSync(file)) return null;
+  const bases = readBaselines(fs.readFileSync(file, 'utf-8'), decodeSlug(projSlug));
+  const text = bases.get(filePath.replace(/\\/g, '/'));
+  return text === undefined ? null : text;
+}
+
 router.get('/:sessionId/:hash/diff-current', wrapRoute((req, res) => {
   const { sessionId, hash } = req.params;
   const version = parseInt(req.query.version, 10);
   const { projSlug, filePath } = req.query;
   const isNew = req.query.isNew === 'true';
+  const readBase = req.query.readBase === 'true';
 
   if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
     return res.status(400).json({ error: 'Invalid parameters' });
@@ -302,6 +340,12 @@ router.get('/:sessionId/:hash/diff-current', wrapRoute((req, res) => {
   const currentExists = fs.existsSync(currentFile);
 
   let oldText = '';
+  if (readBase) {
+    const text = readBaselineText(sessionId, projSlug, filePath);
+    if (text === null) return res.status(404).json({ error: 'No earlier Read of this file in the session' });
+    const lf = (t) => t.replace(/\r\n/g, '\n');
+    return res.json(computeDiff(lf(text), currentExists ? lf(fs.readFileSync(currentFile, 'utf-8')) : ''));
+  }
   if (!isNew) {
     const histDir = path.join(FILE_HISTORY_DIR, sessionId);
     const fromFile = path.join(histDir, `${hash}@v${version}`);

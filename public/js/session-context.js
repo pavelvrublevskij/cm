@@ -245,6 +245,7 @@ Object.assign(Sessions, {
         data-path="${escapeHtml(f.path)}"
         data-is-new="${f.isNew ? '1' : ''}"
         data-is-deleted="${f.isDeleted ? '1' : ''}"
+        data-read-base="${f.readBase ? '1' : ''}"
         onclick="Sessions._openCtxRow(this)">
         <span class="sf-name">${escapeHtml(f.name)}</span>
         <span class="sf-dirty" style="display:none" title="Unsaved changes">&#9679;</span>
