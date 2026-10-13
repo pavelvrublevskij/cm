@@ -1486,6 +1486,29 @@ const Sessions = {
     copyToClipboard(id, 'Session ID copied');
   },
 
+  async downloadTranscript() {
+    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
+    const { slug, sessionId } = Sessions.detailState;
+    if (!slug || !sessionId) return;
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/download`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || res.statusText);
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${sessionId}.jsonl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast('Download failed: ' + e.message, 'error');
+    }
+  },
+
   renameDetail() {
     const { slug, sessionId } = Sessions.detailState;
     if (!slug || !sessionId) return;

@@ -19,6 +19,7 @@ const harness = {
   cmOpts: null,
   toasts: [],
   copyTargets: [],
+  clipboard: [],
 };
 
 function makeEl(id) {
@@ -73,6 +74,7 @@ const context = vm.createContext({
   addCodeCopyButtons: container => { harness.copyTargets.push(container); },
   showLoading: (container, text) => { container.innerHTML = text; },
   toast: (msg, type) => { harness.toasts.push({ msg, type }); },
+  copyToClipboard: (text, label) => { harness.clipboard.push({ text, label }); },
   CodeMirror: (host, opts) => {
     harness.cmOpts = opts;
     const inst = { value: opts.value, getValue: () => inst.value, on() {}, refresh() {} };
@@ -98,6 +100,7 @@ beforeEach(() => {
   harness.cmOpts = null;
   harness.toasts = [];
   harness.copyTargets = [];
+  harness.clipboard = [];
   Sessions._scratchpadData = null;
   Sessions._spOpen = null;
   Sessions._spEditor = null;
@@ -300,6 +303,39 @@ test('polling still refreshes tab visibility before the tab has been opened, but
   assert.strictEqual(harness.apiCalls.length, 1, 'still polls so the tab can appear/disappear live');
   assert.strictEqual(el('tab-btn-scratchpad').style.display, '', 'tab becomes visible once files exist');
   assert.strictEqual(el('session-scratchpad').innerHTML, before, 'panel itself is not rendered until opened');
+});
+
+// ── copy source ───────────────────────────────────────────────────────────────
+
+test('source mode shows a Copy button that copies the whole file', async () => {
+  await loadWith(FILES);
+  harness.apiHandler = () => ({ binary: false, content: 'const a = 1;\nconst b = 2;', size: 40 });
+  await Sessions.openScratchpadInPane(1);
+
+  assert.ok(el('sp-pane').innerHTML.includes('sp-copy-btn'));
+  Sessions.copyScratchpadSource();
+  assert.deepStrictEqual(harness.clipboard, [{ text: 'const a = 1;\nconst b = 2;', label: 'Source copied' }]);
+});
+
+test('the Copy button is hidden in preview mode and while loading', async () => {
+  await loadWith(FILES);
+  harness.apiHandler = () => ({ binary: false, content: '# Notes', size: 20 });
+  await Sessions.openScratchpadInPane(0);
+  assert.strictEqual(el('sp-pane').innerHTML.includes('sp-copy-btn'), false, 'preview');
+
+  Sessions.setScratchpadMode('source');
+  assert.ok(el('sp-pane').innerHTML.includes('sp-copy-btn'), 'source');
+
+  harness.apiHandler = () => new Promise(() => {});
+  Sessions.openScratchpadInPane(1);
+  assert.strictEqual(el('sp-pane').innerHTML.includes('sp-copy-btn'), false, 'loading');
+});
+
+test('the Copy button is hidden for binary files', async () => {
+  await loadWith(FILES);
+  harness.apiHandler = () => ({ binary: true, size: 60 });
+  await Sessions.openScratchpadInPane(2);
+  assert.strictEqual(el('sp-pane').innerHTML.includes('sp-copy-btn'), false);
 });
 
 // ── OS actions still reachable ────────────────────────────────────────────────

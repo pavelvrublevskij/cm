@@ -604,6 +604,23 @@ router.get('/:slug/sessions/:sessionId/activity', wrapRoute((req, res) => {
   res.json({ items, stats: { total: items.length, byCategory } });
 }));
 
+router.get('/:slug/sessions/:sessionId/download', wrapRoute((req, res) => {
+  const dir = safeSlug(req.params.slug);
+  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
+
+  const sessionId = req.params.sessionId;
+  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const filePath = path.join(dir, sessionId + '.jsonl');
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Session not found' });
+
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Content-Disposition', `attachment; filename="${sessionId}.jsonl"`);
+  res.send(fs.readFileSync(filePath));
+}));
+
 router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res) => {
   const dir = safeSlug(req.params.slug);
   if (!dir) return res.status(400).json({ error: 'Invalid slug' });
