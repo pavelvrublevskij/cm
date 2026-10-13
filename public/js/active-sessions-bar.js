@@ -5,6 +5,7 @@ const ActiveSessionsBar = {
   _sessions: [],
   _lastSidebarKey: null,
   _projectBranches: {},
+  COLORS: ['#f85149', '#f0883e', '#d29922', '#3fb950', '#2bb5a8', '#388bfd', '#a371f7', '#db61a2'],
 
   start() {
     ActiveSessionsBar._applyPosition(localStorage.getItem(ActiveSessionsBar.POSITION_KEY) || 'bottom');
@@ -15,7 +16,64 @@ const ActiveSessionsBar = {
     document.addEventListener('click', () => {
       const p = document.getElementById('asb-new-panel');
       if (p) p.remove();
+      ActiveSessionsBar._closeColorMenu();
     });
+  },
+
+  _colorStyle(s) {
+    return s.color ? `--session-color:${s.color}` : '';
+  },
+
+  _closeColorMenu() {
+    const p = document.getElementById('asb-color-panel');
+    if (p) p.remove();
+  },
+
+  _showColorMenu(e, slug, sessionId) {
+    e.preventDefault();
+    e.stopPropagation();
+    ActiveSessionsBar._closeColorMenu();
+    const s = ActiveSessionsBar._sessions.find(x => x.slug === slug && x.sessionId === sessionId);
+    const current = s ? s.color : null;
+
+    const panel = document.createElement('div');
+    panel.id = 'asb-color-panel';
+    panel.className = 'action-menu-panel open asb-color-panel';
+    const left = Math.min(e.clientX, window.innerWidth - 200);
+    const top = Math.min(e.clientY, window.innerHeight - 110);
+    panel.style.cssText = `position:fixed;left:${left}px;top:${top}px;z-index:1000;width:max-content;`;
+    const swatches = ActiveSessionsBar.COLORS.map(c =>
+      `<button class="asb-color-swatch${c === current ? ' active' : ''}" data-color="${c}" style="background:${c}" title="${c}" aria-label="${c}"></button>`
+    ).join('');
+    const custom = current && !ActiveSessionsBar.COLORS.includes(current) ? current : '#888888';
+    panel.innerHTML = `<div class="asb-color-swatches">${swatches}</div>
+      <label class="action-menu-item asb-color-custom">Custom&hellip; <input type="color" value="${custom}"></label>
+      <button class="action-menu-item" data-color="">Default</button>`;
+    panel.addEventListener('click', ev => ev.stopPropagation());
+    panel.querySelectorAll('[data-color]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ActiveSessionsBar._closeColorMenu();
+        ActiveSessionsBar.setColor(slug, sessionId, btn.dataset.color || null);
+      });
+    });
+    panel.querySelector('input[type="color"]').addEventListener('change', ev => {
+      ActiveSessionsBar._closeColorMenu();
+      ActiveSessionsBar.setColor(slug, sessionId, ev.target.value);
+    });
+    document.body.appendChild(panel);
+  },
+
+  async setColor(slug, sessionId, color) {
+    try {
+      const res = await api(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/color`, { method: 'POST', body: { color } });
+      ActiveSessionsBar._sessions.forEach(s => {
+        if (s.slug === slug && s.sessionId === sessionId) s.color = res.color;
+      });
+      ActiveSessionsBar._render();
+      ActiveSessionsBar._renderSidebar();
+    } catch (e) {
+      toast('Could not set color: ' + e.message, 'error');
+    }
   },
 
   _applyPosition(position) {
@@ -129,7 +187,7 @@ const ActiveSessionsBar = {
         const archiveIcon = s.archived ? `<span class="asb-archive-icon" title="Session is archived">${ActiveSessionsBar._archiveIconSvg}</span>` : '';
         const roTitle = s.kind === 'readonly' ? ' (read-only)' : '';
         const instanceAttr = s.instanceId ? ` data-asb-instance="${escapeHtml(s.instanceId)}"` : '';
-        return `<div class="asb-pill${isCurrent ? ' asb-pill--current' : ''}${warn ? ' asb-pill--branch-warn' : ''}" data-asb-session="${escapeHtml(s.sessionId)}" data-asb-slug="${escapeHtml(s.slug)}" data-asb-kind="${escapeHtml(s.kind)}"${instanceAttr} title="${escapeHtml(s.title || s.sessionId)}${roTitle}">
+        return `<div class="asb-pill${isCurrent ? ' asb-pill--current' : ''}${warn ? ' asb-pill--branch-warn' : ''}${s.color ? ' asb-pill--colored' : ''}" style="${ActiveSessionsBar._colorStyle(s)}" data-asb-session="${escapeHtml(s.sessionId)}" data-asb-slug="${escapeHtml(s.slug)}" data-asb-kind="${escapeHtml(s.kind)}"${instanceAttr} title="${escapeHtml(s.title || s.sessionId)}${roTitle}">
           <span class="session-active-dot session-active-dot--${s.kind}"></span>
           ${warnIcon}${archiveIcon}
           <span class="asb-session">${escapeHtml(label)}</span>
@@ -149,6 +207,7 @@ const ActiveSessionsBar = {
 
     container.querySelectorAll('.asb-pill').forEach(el => {
       el.addEventListener('click', () => ActiveSessionsBar.open(el.dataset.asbSlug, el.dataset.asbSession, el.dataset.asbKind === 'readonly'));
+      el.addEventListener('contextmenu', e => ActiveSessionsBar._showColorMenu(e, el.dataset.asbSlug, el.dataset.asbSession));
     });
     container.querySelectorAll('[data-asb-close-session]').forEach(btn => {
       btn.addEventListener('click', e => {
@@ -182,7 +241,7 @@ const ActiveSessionsBar = {
 
   _renderSidebar() {
     const { currentSessionId, currentReadOnly, currentInstanceId } = ActiveSessionsBar._currentSelector();
-    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
+    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived + '|' + (s.color || '')).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
     if (key === ActiveSessionsBar._lastSidebarKey) return;
     ActiveSessionsBar._lastSidebarKey = key;
 
@@ -209,8 +268,9 @@ const ActiveSessionsBar = {
         const label = (s.title || s.sessionId.slice(0, 16)).slice(0, 28);
         const isCurrent = ActiveSessionsBar._isCurrent(s, currentSessionId, currentReadOnly, currentInstanceId);
         const div = document.createElement('div');
-        div.className = 'nav-item project-active-sub' + (isCurrent ? ' active' : '');
+        div.className = 'nav-item project-active-sub' + (isCurrent ? ' active' : '') + (s.color ? ' project-active-sub--colored' : '');
         div.style.setProperty('--tree-indent', indent + 'px');
+        if (s.color) div.style.setProperty('--session-color', s.color);
         div.title = (s.title || s.sessionId) + (s.kind === 'readonly' ? ' (read-only)' : '');
         const closeBtn = document.createElement('button');
         closeBtn.className = 'asb-close asb-close--sidebar';
@@ -232,6 +292,9 @@ const ActiveSessionsBar = {
         div.addEventListener('click', (function(slug, sessionId, kind) {
           return () => ActiveSessionsBar.open(slug, sessionId, kind === 'readonly');
         }(s.slug, s.sessionId, s.kind)));
+        div.addEventListener('contextmenu', (function(slug, sessionId) {
+          return e => ActiveSessionsBar._showColorMenu(e, slug, sessionId);
+        }(s.slug, s.sessionId)));
         anchor.insertAdjacentElement('afterend', div);
         anchor = div;
       }

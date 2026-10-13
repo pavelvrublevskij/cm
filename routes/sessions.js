@@ -14,6 +14,7 @@ const { stampActive, listAllActiveSessions } = require('../lib/session-status');
 const { MAX_SNIPPETS, extractEntrySnippets, extractMetaSnippet, parseSearchQuery, collectEntryFacts, matchFilters } = require('../lib/session-search');
 const { collectFromJsonl, collectFromDir } = require('../lib/session-activity');
 const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/session-archive');
+const { getSessionColors, setSessionColor, isValidColor } = require('../lib/session-colors');
 const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
 
@@ -104,6 +105,7 @@ function launchTerminal(projectPath, cmd) {
 router.get('/active', wrapRoute((req, res) => {
   const all = listAllActiveSessions();
   const archivedBySlug = {};
+  const colorsBySlug = {};
   const result = all
     .filter(({ sessionId }) => !sessionId.includes('..') && !sessionId.includes('/') && !sessionId.includes('\\'))
     .map(({ slug, sessionId, kind, instanceId }) => {
@@ -119,7 +121,9 @@ router.get('/active', wrapRoute((req, res) => {
       }
       if (!archivedBySlug[slug]) archivedBySlug[slug] = getArchivedIds(slug);
       const archived = archivedBySlug[slug].has(sessionId);
-      return { slug, sessionId, title: title || '', kind, instanceId, lastGitBranch, archived };
+      if (!colorsBySlug[slug]) colorsBySlug[slug] = getSessionColors(slug);
+      const color = colorsBySlug[slug][sessionId] || null;
+      return { slug, sessionId, title: title || '', kind, instanceId, lastGitBranch, archived, color };
     });
   res.json(result);
 }));
@@ -784,6 +788,24 @@ router.post('/:slug/sessions/:sessionId/rename', wrapRoute((req, res) => {
   }
 
   res.json({ ok: true, title });
+}));
+
+router.post('/:slug/sessions/:sessionId/color', wrapRoute((req, res) => {
+  const dir = safeSlug(req.params.slug);
+  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
+
+  const sessionId = req.params.sessionId;
+  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const color = req.body && req.body.color;
+  if (color != null && !isValidColor(color)) {
+    return res.status(400).json({ error: 'Color must be a #rrggbb hex value or null' });
+  }
+
+  setSessionColor(req.params.slug, sessionId, color || null);
+  res.json({ ok: true, color: color ? color.toLowerCase() : null });
 }));
 
 router.post('/:slug/sessions/:sessionId/archive', wrapRoute((req, res) => {

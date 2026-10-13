@@ -303,3 +303,42 @@ test('closeReadonly navigates away only when closing the instance I am currently
   assert.strictEqual(harness.navigations.length, 1);
   assert.strictEqual(harness.navigations[0].view, 'project-detail');
 });
+
+// ── session colors ────────────────────────────────────────────────────────────
+
+test('a colored session renders its pill tinted with the stored color', () => {
+  ActiveSessionsBar._sessions[0].color = '#3fb950';
+  ActiveSessionsBar._render();
+  const html = elementsById['asb-groups'].innerHTML;
+  assert.ok(html.includes('asb-pill--colored'));
+  assert.ok(html.includes('--session-color:#3fb950'));
+  assert.strictEqual(html.split('asb-pill--colored').length - 1, 1, 'only the colored session is tinted');
+});
+
+test('setColor posts to the server and updates the pill', async () => {
+  const calls = [];
+  const prevApi = context.api;
+  context.api = async (url, opts) => { calls.push({ url, opts }); return { ok: true, color: '#388bfd' }; };
+  try {
+    await ActiveSessionsBar.setColor(SLUG, SESSION_B, '#388bfd');
+  } finally {
+    context.api = prevApi;
+  }
+  assert.strictEqual(calls[0].url, `/api/projects/${SLUG}/sessions/${SESSION_B}/color`);
+  assert.strictEqual(calls[0].opts.body.color, '#388bfd');
+  assert.strictEqual(ActiveSessionsBar._sessions[1].color, '#388bfd');
+  assert.ok(elementsById['asb-groups'].innerHTML.includes('--session-color:#388bfd'));
+});
+
+test('resetting to default removes the tint', async () => {
+  ActiveSessionsBar._sessions[0].color = '#3fb950';
+  const prevApi = context.api;
+  context.api = async () => ({ ok: true, color: null });
+  try {
+    await ActiveSessionsBar.setColor(SLUG, SESSION_A, null);
+  } finally {
+    context.api = prevApi;
+  }
+  assert.strictEqual(ActiveSessionsBar._sessions[0].color, null);
+  assert.strictEqual(elementsById['asb-groups'].innerHTML.includes('asb-pill--colored'), false);
+});
