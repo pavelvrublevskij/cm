@@ -123,17 +123,25 @@ Object.assign(Sessions, {
       return;
     }
 
-    Sessions._ctx = { sessionId, projSlug: data.projSlug || '', files: data.files || [], plans: data.plans || [], sort: 'default' };
+    const prev = Sessions._ctx && Sessions._ctx.sessionId === sessionId ? Sessions._ctx : null;
+    const prompts = data.prompts || [];
+    const fromPrompt = prev && prompts.some(p => p.index === prev.fromPrompt) ? prev.fromPrompt : 0;
+    Sessions._ctx = { sessionId, projSlug: data.projSlug || '', files: data.files || [], plans: data.plans || [], prompts, fromPrompt, sort: 'default' };
 
     let html = '';
 
     if (hasFiles) {
+      const changesOnly = typeof SessionChanges !== 'undefined' && SessionChanges.active;
       const sortHtml = `<div class="ctx-sort-bar">
         <span class="ctx-sort-label">Sort:</span>
         <button class="ctx-sort-btn active" onclick="Sessions.sortCtxFiles('default')">Default</button>
         <button class="ctx-sort-btn" onclick="Sessions.sortCtxFiles('asc')">A→Z</button>
         <button class="ctx-sort-btn" onclick="Sessions.sortCtxFiles('desc')">Z→A</button>
-      </div>`;
+        <button class="ctx-sort-btn" onclick="Sessions.sortCtxFiles('prompt')">By prompt</button>
+        <button class="ctx-sort-btn ctx-changes-only-btn${changesOnly ? ' active' : ''}" id="ctx-changes-only-btn"
+          title="Show every change of this session as one diff" onclick="SessionChanges.toggle()">Changes only</button>
+      </div>
+      ${Sessions._ctxPromptFilterHtml()}`;
 
       html += `<div class="ctx-section" id="ctx-files-section">
         <button class="ctx-toggle" onclick="Sessions.toggleCtx('ctx-files-section')">
@@ -164,6 +172,44 @@ Object.assign(Sessions, {
 
     el.innerHTML = html;
     Sessions._syncFilesTree();
+    if (typeof SessionChanges !== 'undefined' && SessionChanges.active) SessionChanges.render();
+  },
+
+  /** "From prompt" picker — lists only prompts that changed at least one file. */
+  _ctxPromptFilterHtml() {
+    const ctx = Sessions._ctx;
+    const used = new Set(Sessions._ctxVisibleFiles().flatMap(f => f.prompts || []));
+    const options = ctx.prompts.filter(p => used.has(p.index));
+    if (!options.length) return '';
+    const optionHtml = options.map(p =>
+      `<option value="${p.index}"${p.index === ctx.fromPrompt ? ' selected' : ''}>#${p.index} ${escapeHtml(Sessions._ctxPromptLabel(p, 60))}</option>`
+    ).join('');
+    return `<div class="ctx-sort-bar ctx-prompt-filter">
+      <span class="ctx-sort-label">From prompt:</span>
+      <select class="ctx-prompt-select" id="ctx-prompt-select" onchange="Sessions.setCtxFromPrompt(this.value)">
+        <option value="0"${ctx.fromPrompt ? '' : ' selected'}>All prompts</option>
+        ${optionHtml}
+      </select>
+    </div>`;
+  },
+
+  _ctxPromptLabel(prompt, max) {
+    const text = (prompt.text || '').replace(/\s+/g, ' ').trim() || '(empty prompt)';
+    return text.length > max ? text.slice(0, max - 1) + '…' : text;
+  },
+
+  setCtxFromPrompt(value) {
+    Sessions._ctx.fromPrompt = parseInt(value, 10) || 0;
+    const list = document.getElementById('ctx-file-list');
+    if (list) list.innerHTML = Sessions._renderCtxFileList();
+    if (typeof SessionChanges !== 'undefined' && SessionChanges.active) SessionChanges.render();
+  },
+
+  /** Visible changed files narrowed to those touched at or after the "From prompt" pick. */
+  _ctxListedFiles() {
+    const from = Sessions._ctx.fromPrompt;
+    const files = Sessions._ctxVisibleFiles();
+    return from ? files.filter(f => (f.prompts || []).some(i => i >= from)) : files;
   },
 
   /** Session-changed files with normalized separators, minus the .claude/ entries the panel hides. */
@@ -182,9 +228,44 @@ Object.assign(Sessions, {
 
   /** Changed files render as a tree, same row pattern as the project structure below, plus status badges. */
   _renderCtxFileList() {
-    const files = Sessions._ctxVisibleFiles();
-    if (!files.length) return '<div class="ctx-empty">No files changed</div>';
+    const files = Sessions._ctxListedFiles();
+    if (!files.length) {
+      return `<div class="ctx-empty">${Sessions._ctx.fromPrompt ? 'No files changed from this prompt on' : 'No files changed'}</div>`;
+    }
+    if (Sessions._ctx.sort === 'prompt') return Sessions._ctxPromptGroupsHtml(files);
     return Sessions._ctxTreeHtml(Sessions._buildCtxTree(files, Sessions._ctx.sort), '', 0);
+  },
+
+  /** One group per prompt that changed files, in prompt order; a file touched by several prompts
+   *  shows under each. Files no tool call can be tied to a prompt go last. */
+  _ctxPromptGroupsHtml(files) {
+    const from = Sessions._ctx.fromPrompt;
+    const byPrompt = new Map();
+    const unlinked = [];
+    for (const f of files) {
+      const idxs = (f.prompts || []).filter(i => i >= from);
+      if (!idxs.length) unlinked.push(f);
+      for (const i of idxs) {
+        if (!byPrompt.has(i)) byPrompt.set(i, []);
+        byPrompt.get(i).push(f);
+      }
+    }
+    const promptsByIndex = new Map(Sessions._ctx.prompts.map(p => [p.index, p]));
+    let html = '';
+    for (const i of [...byPrompt.keys()].sort((a, b) => a - b)) {
+      const p = promptsByIndex.get(i) || { index: i, text: '' };
+      html += `<div class="ctx-prompt-group" title="${escapeAttr(p.text || '')}">
+        <span class="ctx-prompt-index">#${i}</span>
+        <span class="ctx-prompt-text">${escapeHtml(Sessions._ctxPromptLabel(p, 80))}</span>
+        ${p.timestamp ? `<span class="ctx-prompt-time">${timeAgo(p.timestamp)}</span>` : ''}
+      </div>`;
+      html += Sessions._ctxTreeHtml(Sessions._buildCtxTree(byPrompt.get(i), 'asc'), '', 0);
+    }
+    if (unlinked.length) {
+      html += '<div class="ctx-prompt-group"><span class="ctx-prompt-text">Not linked to a prompt</span></div>';
+      html += Sessions._ctxTreeHtml(Sessions._buildCtxTree(unlinked, 'asc'), '', 0);
+    }
+    return html;
   },
 
   _buildCtxTree(files, sort) {
@@ -281,15 +362,18 @@ Object.assign(Sessions, {
   sortCtxFiles(order) {
     Sessions._ctx.sort = order;
     document.querySelectorAll('.ctx-sort-btn').forEach(btn => {
-      const labels = { default: 'Default', asc: 'A→Z', desc: 'Z→A' };
+      const labels = { default: 'Default', asc: 'A→Z', desc: 'Z→A', prompt: 'By prompt' };
+      if (btn.id === 'ctx-changes-only-btn') return;
       btn.classList.toggle('active', btn.textContent.trim() === labels[order]);
     });
     const list = document.getElementById('ctx-file-list');
     if (list) list.innerHTML = Sessions._renderCtxFileList();
+    if (typeof SessionChanges !== 'undefined' && SessionChanges.active) SessionChanges.render();
   },
 
   /** A changed file opens on its diff by default — source is a toggle away. */
   _openCtxRow(el) {
+    if (typeof SessionChanges !== 'undefined' && SessionChanges.active) return SessionChanges.scrollTo(el.dataset.path);
     SessionFiles.openFile(el.dataset.path, { mode: 'diff', ctx: { ...el.dataset } });
   },
 

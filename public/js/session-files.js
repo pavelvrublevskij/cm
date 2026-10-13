@@ -57,6 +57,7 @@ const SessionFiles = {
   // --- lifecycle ---
 
   reset(slug) {
+    if (typeof SessionChanges !== 'undefined') SessionChanges.reset();
     SessionFiles._clearSaveTimer();
     SessionFiles.slug = slug;
     SessionFiles.treeLoaded = false;
@@ -332,6 +333,7 @@ const SessionFiles = {
    *  opts.discard: throw away this file's unsaved buffer instead of keeping it. */
   async openFile(relPath, opts = {}) {
     if (!relPath || !SessionFiles.slug) return;
+    if (typeof SessionChanges !== 'undefined') SessionChanges.leave();
     if (opts.discard) delete SessionFiles.buffers[relPath];
     else SessionFiles._stashBuffer();
     SessionFiles._clearSaveTimer();
@@ -445,6 +447,7 @@ const SessionFiles = {
   renderPane() {
     const el = document.getElementById('sf-pane');
     if (!el) return;
+    if (typeof SessionChanges !== 'undefined' && SessionChanges.active) return;
     const open = SessionFiles.open;
 
     if (!open) {
@@ -623,8 +626,9 @@ const SessionFiles = {
     const open = SessionFiles.open;
     if (!open || !open.canDiff) return;
     const ctx = open.ctx;
+    const seen = new Set();
     const rows = [...document.querySelectorAll('#ctx-file-list .ctx-file-item')]
-      .filter(row => SessionFiles._canDiff(row.dataset));
+      .filter(row => SessionFiles._canDiff(row.dataset) && !seen.has(row.dataset.path) && seen.add(row.dataset.path));
     FileHistory.showDiffCurrent(ctx.session, ctx.hash, parseInt(ctx.from, 10), SessionFiles._projSlug(), open.path, {
       isNew: ctx.isNew === '1',
       readBase: ctx.readBase === '1',

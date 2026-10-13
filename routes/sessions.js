@@ -11,7 +11,7 @@ const { scanSession, firstMeaningfulPrompt } = require('../lib/session-scan');
 const terminalServer = require('../lib/terminal-server');
 const activeSessions = require('../lib/active-sessions');
 const { stampActive, listAllActiveSessions } = require('../lib/session-status');
-const { MAX_SNIPPETS, extractEntrySnippets, extractMetaSnippet } = require('../lib/session-search');
+const { MAX_SNIPPETS, extractEntrySnippets, extractMetaSnippet, parseSearchQuery, collectEntryFacts, matchFilters } = require('../lib/session-search');
 const { collectFromJsonl, collectFromDir } = require('../lib/session-activity');
 const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/session-archive');
 const { groupMemberSlugs } = require('../lib/project-grouping');
@@ -238,10 +238,12 @@ router.get('/:slug/sessions', wrapRoute((req, res) => {
 }));
 
 /**
- * Full-text search over one project's sessions. Every result carries its own `slug` so a
- * group-wide search can tell the caller which project each hit came from.
+ * Full-text search over one project's sessions, narrowed by any n:/f:/t:/b: filters in `query`
+ * (see parseSearchQuery). Every result carries its own `slug` so a group-wide search can tell the
+ * caller which project each hit came from.
  */
-function searchProjectSessions(slug, dir, q, qLower) {
+function searchProjectSessions(slug, dir, query) {
+  const { text: q, textLower: qLower, filters, hasFilters } = query;
   const archivedIds = getArchivedIds(slug);
 
   // Load index metadata if available
@@ -272,6 +274,7 @@ function searchProjectSessions(slug, dir, q, qLower) {
     const gitBranches = [];
     const branchSeen = new Set();
     let customTitle = '';
+    const facts = { files: new Set(), tools: new Map() };
 
     try {
       const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
@@ -283,6 +286,7 @@ function searchProjectSessions(slug, dir, q, qLower) {
             continue;
           }
           if (entry.type !== 'user' && entry.type !== 'assistant') continue;
+          if (hasFilters) collectEntryFacts(entry, facts);
 
           if (entry.type === 'user') {
             messageCount++;
@@ -304,7 +308,7 @@ function searchProjectSessions(slug, dir, q, qLower) {
             modified = entry.timestamp;
           }
 
-          if (snippets.length >= MAX_SNIPPETS) continue;
+          if (!q || snippets.length >= MAX_SNIPPETS) continue;
 
           const newSnippets = extractEntrySnippets(entry, q, qLower, snippets.length);
           snippets.push(...newSnippets);
@@ -313,19 +317,19 @@ function searchProjectSessions(slug, dir, q, qLower) {
     } catch (_) { continue; }
 
     // Also search sub-agent conversations
-    if (snippets.length < MAX_SNIPPETS) {
+    if ((q && snippets.length < MAX_SNIPPETS) || hasFilters) {
       const subagentDir = path.join(dir, sessionId, 'subagents');
       if (fs.existsSync(subagentDir)) {
         try {
           for (const sf of fs.readdirSync(subagentDir).filter(sf => sf.endsWith('.jsonl'))) {
-            if (snippets.length >= MAX_SNIPPETS) break;
+            if (!hasFilters && snippets.length >= MAX_SNIPPETS) break;
             try {
               const subLines = fs.readFileSync(path.join(subagentDir, sf), 'utf-8').split('\n').filter(Boolean);
               for (const line of subLines) {
-                if (snippets.length >= MAX_SNIPPETS) break;
                 try {
                   const entry = JSON.parse(line);
-                  snippets.push(...extractEntrySnippets(entry, q, qLower, snippets.length));
+                  if (hasFilters) collectEntryFacts(entry, facts);
+                  if (q && snippets.length < MAX_SNIPPETS) snippets.push(...extractEntrySnippets(entry, q, qLower, snippets.length));
                 } catch (_) {}
               }
             } catch (_) {}
@@ -336,12 +340,19 @@ function searchProjectSessions(slug, dir, q, qLower) {
 
     // Also check title/metadata fields (custom title, index summary, first prompt)
     const meta = indexMeta[sessionId];
-    if (snippets.length === 0) {
+    if (q && snippets.length === 0) {
       const metaSnippet = extractMetaSnippet([customTitle, meta?.summary, meta?.firstPrompt, firstPrompt], q, qLower);
       if (metaSnippet) snippets.push(metaSnippet);
     }
 
-    if (snippets.length === 0) continue;
+    if (q && snippets.length === 0) continue;
+
+    if (hasFilters) {
+      const name = customTitle || meta?.summary || meta?.firstPrompt || firstPrompt;
+      const filterSnippets = matchFilters(filters, { ...facts, name, branches: gitBranches });
+      if (!filterSnippets) continue;
+      snippets.unshift(...filterSnippets);
+    }
 
     const session = {
       slug,
@@ -373,9 +384,10 @@ router.get('/:slug/sessions/search', wrapRoute((req, res) => {
 
   const q = (req.query.q || '').trim();
   if (q.length < 2) return res.json([]);
-  const qLower = q.toLowerCase();
+  const query = parseSearchQuery(q);
+  if (!query.text && !query.hasFilters) return res.json([]);
 
-  const results = forProjectScope(req, (slug, dir) => searchProjectSessions(slug, dir, q, qLower));
+  const results = forProjectScope(req, (slug, dir) => searchProjectSessions(slug, dir, query));
   res.json(results.sort(byNewestFirst));
 }));
 

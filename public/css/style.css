@@ -1380,6 +1380,24 @@ input[type="radio"] + label {
   margin-bottom: 8px;
 }
 
+/* The Memory tab fills the view so the file list and the editor scroll on their own */
+#tab-memory.active {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+#tab-memory .memory-list { min-height: 0; }
+#memory-file-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+#tab-memory .memory-editor {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .memory-item {
   padding: 10px 12px;
   background: var(--bg-secondary);
@@ -1709,6 +1727,7 @@ input[type="radio"] + label {
 .search-history-item:hover { background: var(--bg-hover); }
 
 .search-history-icon { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+.search-hint-prefix { color: var(--accent); font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 600; flex-shrink: 0; min-width: 18px; }
 
 .search-history-query {
   flex: 1;
@@ -3768,6 +3787,53 @@ mark.search-highlight {
 #ctx-files-section .ctx-body { padding: 6px 0 10px; }
 #ctx-files-section .ctx-sort-bar { padding: 6px 16px 4px; }
 #ctx-files-section .ctx-empty { padding: 6px 16px; }
+#ctx-files-section .ctx-sort-bar { flex-wrap: wrap; }
+.ctx-changes-only-btn { margin-left: auto; }
+.ctx-prompt-filter { padding-top: 0 !important; }
+.ctx-prompt-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.ctx-prompt-group {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 16px 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+.ctx-prompt-group:first-child { border-top: none; }
+.ctx-prompt-index { color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.ctx-prompt-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-prompt-time { flex-shrink: 0; }
+
+/* "Changes only": the session's diffs stacked in one scrolling pane */
+.sc-totals { margin-left: auto; font-size: 12px; }
+.sf-pane-body.sc-body { display: block; }
+.sc-file { border-bottom: 1px solid var(--border); }
+.sc-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.sc-file-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); }
+.sc-file-stats { flex-shrink: 0; }
+.sf-pane-body.sc-body .diff-view { flex: none; overflow: visible; }
+.sc-file-body .empty-state { padding: 12px; }
 
 /* flex-basis 0, not auto: content width (a wide diff) must never resize the columns */
 .sf-pane {

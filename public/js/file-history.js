@@ -140,6 +140,7 @@ const FileHistory = {
   },
 
   /** Render just the diff — syntax-coloured per line, using the file's CodeMirror mode.
+   *  opts.compact leaves out the read-only note and stats header (the caller shows its own).
    *  opts.onGotoSource(line), when given, adds a hover affordance on lines that still exist in
    *  the current file (i.e. have a new-side line number) to jump straight to that line in Source. */
   renderDiff(container, result, filePath, opts = {}) {
@@ -173,7 +174,7 @@ const FileHistory = {
       return `<div class="diff-hunk-header">@@ -${hunk.oldStart} +${hunk.newStart} @@</div>` + lines;
     }).join('<div class="diff-separator"></div>');
 
-    container.innerHTML = note + stats + `<div class="diff-view code-colors">${hunks}</div>`;
+    container.innerHTML = (opts.compact ? '' : note + stats) + `<div class="diff-view code-colors">${hunks}</div>`;
 
     if (canGoto) {
       const view = container.querySelector('.diff-view');

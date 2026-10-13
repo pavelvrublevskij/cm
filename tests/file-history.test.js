@@ -788,3 +788,37 @@ test('reveal-file: missing file on disk returns 404', async () => {
 });
 
 test('reveal-file SKIPPED: spawns OS file explorer (side-effect)', { skip: true }, () => {});
+
+// ── prompt attribution ──────────────────────────────────────────────────────
+
+test('context: each changed file lists the prompts whose tool calls touched it', async () => {
+  const sessionId = 'prompts88-8888-8888-8888-888888888888';
+  const projDir = path.join(paths.PROJECTS_DIR, PROJ_SLUG);
+  const target = path.resolve(decodeSlug(PROJ_SLUG));
+  const edit = (id, file) => ({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id, name: 'Edit', input: { file_path: path.join(target, file), old_string: 'a', new_string: 'b' } }] }
+  });
+  fs.writeFileSync(
+    path.join(projDir, sessionId + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'first prompt' } },
+      edit('p1', 'a.js'),
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'p1', content: 'ok' }] } },
+      edit('p2', 'b.js'),
+      { type: 'user', isMeta: true, message: { content: 'meta note' } },
+      { type: 'user', timestamp: '2026-07-01T11:00:00.000Z', message: { content: [{ type: 'text', text: 'second prompt' }] } },
+      edit('p3', 'a.js'),
+      { type: 'user', message: { content: '<command-name>/clear</command-name>' } },
+      { type: 'user', message: { content: '<command-name>/review</command-name><command-args>now</command-args>' } }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+
+  const res = await request(app).get(`/api/file-history/${sessionId}/context`);
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body.prompts.map(p => [p.index, p.text]), [[1, 'first prompt'], [2, 'second prompt'], [3, '/review now']]);
+  assert.strictEqual(res.body.prompts[1].timestamp, '2026-07-01T11:00:00.000Z');
+  const byPath = Object.fromEntries(res.body.files.map(f => [f.path, f.prompts]));
+  assert.deepStrictEqual(byPath['a.js'], [1, 2]);
+  assert.deepStrictEqual(byPath['b.js'], [1]);
+});

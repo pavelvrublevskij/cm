@@ -388,7 +388,8 @@ const Sessions = {
     return `<div class="session-search-wrap">
       <div class="session-search-container" onmouseenter="Sessions._cancelHideHistoryDropdown()" onmouseleave="Sessions._hideHistoryDropdownDelayed()">
         <input type="text" class="session-search" id="session-search-input"
-          placeholder="${Sessions._groupScope && group ? `Search sessions across ${escapeAttr(group.groupLabel)}...` : 'Search sessions...'}"
+          placeholder="${Sessions._groupScope && group ? `Search sessions across ${escapeAttr(group.groupLabel)}... (n: f: t: b:)` : 'Search sessions... (n: f: t: b:)'}"
+          title="Filters: n:name  f:file  t:tool  b:branch — quote values with spaces, e.g. f:&quot;my file.js&quot;"
           oninput="Sessions._hideHistoryDropdown(); Sessions.onSearch('${slug}', this.value)"
           onfocus="Sessions.showHistory('${slug}')"
           onblur="Sessions._hideHistoryDropdownDelayed()">
@@ -468,11 +469,40 @@ const Sessions = {
     return new Date(ts).toLocaleDateString();
   },
 
-  _renderHistoryInto(dropdownId, storageKey, applyHandler, removeHandler, clearHandler) {
+  SEARCH_FILTER_HINTS: [
+    { prefix: 'n:', label: 'session name', example: 'n:refactor' },
+    { prefix: 'f:', label: 'file the session edited', example: 'f:parser.js' },
+    { prefix: 't:', label: 'tool used', example: 't:bash' },
+    { prefix: 'b:', label: 'git branch', example: 'b:main' },
+  ],
+
+  /** Filter hints shown at the top of the history dropdown; a click types the prefix into the box. */
+  _searchHintsHtml(slug) {
+    const rows = Sessions.SEARCH_FILTER_HINTS.map(h =>
+      `<div class="search-history-item search-hint-item" data-prefix="${h.prefix}" onmousedown="Sessions._applySearchHint(event, '${slug}', this.dataset.prefix)">
+        <span class="search-hint-prefix">${h.prefix}</span>
+        <span class="search-history-query">${escapeHtml(h.label)}</span>
+        <span class="search-history-time">${escapeHtml(h.example)}</span>
+      </div>`
+    ).join('');
+    return `<div class="search-history-group">Filters &mdash; combine with text, quote values with spaces</div>${rows}`;
+  },
+
+  _applySearchHint(event, slug, prefix) {
+    event.preventDefault();
+    const input = document.getElementById('session-search-input');
+    if (!input) return;
+    input.value = input.value.trim() ? input.value.trimEnd() + ' ' + prefix : prefix;
+    input.focus();
+    input.selectionStart = input.selectionEnd = input.value.length;
+    Sessions._hideHistoryDropdown();
+  },
+
+  _renderHistoryInto(dropdownId, storageKey, applyHandler, removeHandler, clearHandler, prefixHtml = '') {
     const dropdown = document.getElementById(dropdownId);
     if (!dropdown) return;
     const h = Sessions._getHistory(storageKey);
-    if (!h.length) { dropdown.style.display = 'none'; return; }
+    if (!h.length && !prefixHtml) { dropdown.style.display = 'none'; return; }
 
     const now = Date.now();
     const DAY = 86400000;
@@ -483,7 +513,7 @@ const Sessions = {
       { label: 'Older',     items: h.filter(e => now - e.ts >= 7 * DAY) },
     ].filter(g => g.items.length);
 
-    let html = '';
+    let html = prefixHtml;
     for (const g of groups) {
       html += `<div class="search-history-group">${escapeHtml(g.label)}</div>`;
       for (const e of g.items) {
@@ -495,19 +525,22 @@ const Sessions = {
         </div>`;
       }
     }
-    html += `<div class="search-history-clear"><button onmousedown="event.stopPropagation(); ${clearHandler}()">Clear history</button></div>`;
+    if (h.length) html += `<div class="search-history-clear"><button onmousedown="event.stopPropagation(); ${clearHandler}()">Clear history</button></div>`;
 
     dropdown.innerHTML = html;
     dropdown.style.display = 'block';
   },
 
   _renderHistoryDropdown(slug) {
+    const input = document.getElementById('session-search-input');
+    const empty = !input || !input.value.trim();
     Sessions._renderHistoryInto(
       'search-history-dropdown',
       Sessions._searchKey(slug),
       `Sessions._applyHistory(event, '${slug}', this)`,
       'Sessions._removeFromHistory',
-      'Sessions._clearHistory'
+      'Sessions._clearHistory',
+      empty ? Sessions._searchHintsHtml(slug) : ''
     );
   },
 
@@ -617,7 +650,7 @@ const Sessions = {
       const label = sn.label ? `<span class="snippet-label">${escapeHtml(sn.label)}</span> ` : '';
       const roleTag = sn.role === 'user' ? 'You' : sn.role === 'assistant' ? 'Claude' : '';
       const roleHtml = roleTag ? `<span class="snippet-role snippet-role-${sn.role}">${roleTag}</span> ` : '';
-      return `<div class="session-snippet snippet-${sn.role}">${roleHtml}${label}${Sessions.highlightMatch(sn.text, Sessions._lastQuery)}</div>`;
+      return `<div class="session-snippet snippet-${sn.role}">${roleHtml}${label}${Sessions.highlightMatch(sn.text, Sessions._snippetTerm(sn))}</div>`;
     }).join('');
     // Under group scope the list and search both mix sessions from sibling projects, so every card
     // is badged with the project it belongs to — badging only the foreign ones would leave the
@@ -667,6 +700,34 @@ const Sessions = {
   },
 
   _lastQuery: '',
+
+  /** Splits a query into free text and its n:/f:/t:/b: filter values — mirrors the server's parser. */
+  parseSearchTerms(q) {
+    const keys = { n: 'name', f: 'file', t: 'tool', b: 'branch' };
+    const terms = { text: '', name: [], file: [], tool: [], branch: [] };
+    const rest = [];
+    const re = /(?:^|\s)([nftb]):(?:"([^"]*)"|(\S+))|(\S+)/g;
+    let m;
+    while ((m = re.exec(q || ''))) {
+      if (m[1]) {
+        const value = (m[2] !== undefined ? m[2] : m[3]).trim();
+        if (value) terms[keys[m[1]]].push(value);
+      } else {
+        rest.push(m[4]);
+      }
+    }
+    terms.text = rest.join(' ');
+    return terms;
+  },
+
+  /** What to highlight in a snippet: a filter snippet highlights its filter's value, others the free text. */
+  _snippetTerm(sn) {
+    const terms = Sessions.parseSearchTerms(Sessions._lastQuery);
+    if (sn.role === 'meta' && Array.isArray(terms[sn.label])) {
+      return terms[sn.label].find(v => sn.text.toLowerCase().includes(v.toLowerCase())) || '';
+    }
+    return terms.text;
+  },
 
   highlightMatch(text, query) {
     if (!query) return escapeHtml(text);
