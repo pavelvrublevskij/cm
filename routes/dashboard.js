@@ -5,10 +5,8 @@ const { PROJECTS_DIR, SKILLS_DIR, OUTPUT_STYLES_DIR, MCP_FILE, KEYBINDINGS_FILE,
 const { readJson, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
 const { buildIndex, calcCostMultiModel } = require('../lib/usage-index');
-const { getCustomTitle } = require('../lib/session-title');
-const { collectBranches } = require('../lib/session-branches');
+const { scanSession, firstMeaningfulPrompt } = require('../lib/session-scan');
 const { stampActive, listAllActiveSessions } = require('../lib/session-status');
-const { hasBridgeSession } = require('../lib/session-flags');
 const planCache = require('../lib/plan-cache');
 
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
@@ -19,15 +17,11 @@ function loadPlanStems() {
   catch (_) { return []; }
 }
 
-function fileHasPlan(sessionId, filePath, planStems) {
+function sessionHasPlan(sessionId, meta) {
   if (planCache.get(sessionId)) return true;
-  if (!planStems.length) return false;
-  try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const hasPlan = planStems.some(stem => content.includes(stem));
-    if (hasPlan) planCache.set(sessionId, true);
-    return hasPlan;
-  } catch (_) { return false; }
+  const hasPlan = !!meta?.hasPlan;
+  if (hasPlan) planCache.set(sessionId, true);
+  return hasPlan;
 }
 
 function normalizePrompt(text) {
@@ -39,21 +33,6 @@ function isSkippablePrompt(text) {
   const t = (text || '').trim();
   if (t.includes('Caveat: The messages below were generated')) return true;
   return normalizePrompt(t) === '/clear';
-}
-
-function findFirstMeaningfulPrompt(filePath) {
-  try {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.type !== 'user') continue;
-        const raw = typeof entry.message?.content === 'string' ? entry.message.content : '';
-        if (raw && !isSkippablePrompt(raw)) return normalizePrompt(raw).slice(0, 200);
-      } catch (_) {}
-    }
-  } catch (_) {}
-  return '';
 }
 
 router.get('/active-count', wrapRoute((req, res) => {
@@ -102,22 +81,23 @@ router.get('/', wrapRoute(async (req, res) => {
         totalSessions += entries.length;
         for (const e of entries) {
           const filePath = path.join(projectDir, e.sessionId + '.jsonl');
-          const custom = getCustomTitle(filePath);
-          const gitBranches = collectBranches(filePath);
+          const meta = scanSession(filePath, planStems.length ? planStems : null);
+          const custom = meta ? (meta.customTitle || meta.summaryTitle) : '';
+          const gitBranches = meta ? meta.gitBranches : [];
           recentSessions.push({
             slug,
             projectName: decodedPath,
             sessionId: e.sessionId,
             summary: custom || e.summary || '',
-            firstPrompt: isSkippablePrompt(e.firstPrompt) ? findFirstMeaningfulPrompt(filePath) : (e.firstPrompt || ''),
+            firstPrompt: isSkippablePrompt(e.firstPrompt) ? firstMeaningfulPrompt(meta, isSkippablePrompt, normalizePrompt) : (e.firstPrompt || ''),
             messageCount: e.messageCount || 0,
             created: e.created || null,
             modified: e.modified || null,
             gitBranch: e.gitBranch || (gitBranches[0] || ''),
             lastGitBranch: gitBranches[gitBranches.length - 1] || '',
             gitBranches,
-            hasPlan: fileHasPlan(e.sessionId, filePath, planStems),
-            remoteControlled: hasBridgeSession(filePath)
+            hasPlan: sessionHasPlan(e.sessionId, meta),
+            remoteControlled: !!meta?.remoteControlled
           });
         }
       } catch (_) { /* malformed index */ }
@@ -126,58 +106,25 @@ router.get('/', wrapRoute(async (req, res) => {
       try {
         const jsonls = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
         totalSessions += jsonls.length;
-        // Parse first line for recent sessions (lightweight)
         for (const f of jsonls) {
-          const filePath = path.join(projectDir, f);
-          const stat = fs.statSync(filePath);
-          try {
-            const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-            let firstPrompt = '', created = null, gitBranch = '', lastGitBranch = '', msgCount = 0, customTitle = '';
-            const gitBranches = [];
-            const branchSeen = new Set();
-            for (const line of lines) {
-              try {
-                const entry = JSON.parse(line);
-                if (entry.type === 'custom-title' && entry.customTitle) {
-                  customTitle = entry.customTitle;
-                } else if (entry.type === 'user') {
-                  msgCount++;
-                  if (msgCount === 1) {
-                    created = entry.timestamp || stat.birthtime.toISOString();
-                    gitBranch = entry.gitBranch || '';
-                  }
-                  if (!firstPrompt) {
-                    const raw = typeof entry.message?.content === 'string' ? entry.message.content : '';
-                    if (!isSkippablePrompt(raw)) firstPrompt = normalizePrompt(raw).slice(0, 200);
-                  }
-                  if (entry.gitBranch) {
-                    lastGitBranch = entry.gitBranch;
-                    if (!branchSeen.has(entry.gitBranch)) {
-                      branchSeen.add(entry.gitBranch);
-                      gitBranches.push(entry.gitBranch);
-                    }
-                  }
-                }
-              } catch (_) { /* malformed line */ }
-            }
-            if (msgCount > 0) {
-              recentSessions.push({
-                slug,
-                projectName: decodedPath,
-                sessionId: f.replace('.jsonl', ''),
-                summary: customTitle,
-                firstPrompt,
-                messageCount: msgCount,
-                created,
-                modified: stat.mtime.toISOString(),
-                gitBranch,
-                lastGitBranch,
-                gitBranches,
-                hasPlan: fileHasPlan(f.replace('.jsonl', ''), filePath, planStems),
-                remoteControlled: hasBridgeSession(filePath)
-              });
-            }
-          } catch (_) { /* unreadable file */ }
+          const sessionId = f.replace('.jsonl', '');
+          const meta = scanSession(path.join(projectDir, f), planStems.length ? planStems : null);
+          if (!meta || meta.userCount === 0) continue;
+          recentSessions.push({
+            slug,
+            projectName: decodedPath,
+            sessionId,
+            summary: meta.customTitle,
+            firstPrompt: firstMeaningfulPrompt(meta, isSkippablePrompt, normalizePrompt),
+            messageCount: meta.userCount,
+            created: meta.firstUserTimestamp || meta.stat.birthtime.toISOString(),
+            modified: meta.stat.mtime.toISOString(),
+            gitBranch: meta.firstUserBranch,
+            lastGitBranch: meta.lastUserBranch,
+            gitBranches: meta.gitBranches,
+            hasPlan: sessionHasPlan(sessionId, meta),
+            remoteControlled: meta.remoteControlled
+          });
         }
       } catch (_) {}
     }

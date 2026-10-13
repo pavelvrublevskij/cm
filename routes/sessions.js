@@ -7,9 +7,7 @@ const { CLAUDE_DIR } = require('../lib/paths');
 const planCache = require('../lib/plan-cache');
 const { getProjectUsageMap, getSessionUsage, calcCost } = require('../lib/usage-index');
 const { decodeSlug } = require('../lib/slug');
-const { getCustomTitle } = require('../lib/session-title');
-const { collectBranches } = require('../lib/session-branches');
-const { hasBridgeSession } = require('../lib/session-flags');
+const { scanSession, firstMeaningfulPrompt } = require('../lib/session-scan');
 const terminalServer = require('../lib/terminal-server');
 const activeSessions = require('../lib/active-sessions');
 const { stampActive, listAllActiveSessions } = require('../lib/session-status');
@@ -20,9 +18,6 @@ const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
 
 const router = express.Router({ mergeParams: true });
-
-const _titleCache = new Map();
-const TITLE_CACHE_TTL = 60000;
 
 // Shared by the active-session routes (deactivate / open-readonly / close-readonly): validates
 // :slug and :sessionId from the URL, writing the 400 response itself on failure. Returns null on
@@ -49,13 +44,9 @@ function validateInstanceId(req, res) {
   return instanceId;
 }
 
-function getCachedTitle(filePath) {
-  const nowMs = Date.now();
-  const cached = _titleCache.get(filePath);
-  if (cached && nowMs - cached.cachedAt < TITLE_CACHE_TTL) return cached.title;
-  const title = getCustomTitle(filePath) || findFirstMeaningfulPrompt(filePath);
-  _titleCache.set(filePath, { title, cachedAt: nowMs });
-  return title;
+function sessionTitle(meta) {
+  if (!meta) return '';
+  return meta.customTitle || meta.summaryTitle || firstMeaningfulPrompt(meta, isSkippablePrompt, normalizePrompt);
 }
 
 function normalizePrompt(text) {
@@ -72,20 +63,6 @@ function isSkippablePrompt(text) {
   return normalizePrompt(t) === '/clear';
 }
 
-function findFirstMeaningfulPrompt(filePath) {
-  try {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.type !== 'user') continue;
-        const raw = typeof entry.message?.content === 'string' ? entry.message.content : '';
-        if (raw && !isSkippablePrompt(raw)) return normalizePrompt(raw).slice(0, 200);
-      } catch (_) {}
-    }
-  } catch (_) {}
-  return '';
-}
 
 function safeSpawn(cmd, args, opts) {
   const proc = spawn(cmd, args, opts);
@@ -135,8 +112,9 @@ router.get('/active', wrapRoute((req, res) => {
       let lastGitBranch = '';
       if (dir) {
         const filePath = path.join(dir, sessionId + '.jsonl');
-        title = getCachedTitle(filePath);
-        const branches = collectBranches(filePath);
+        const meta = scanSession(filePath);
+        title = sessionTitle(meta);
+        const branches = meta ? meta.gitBranches : [];
         lastGitBranch = branches.length ? branches[branches.length - 1] : '';
       }
       if (!archivedBySlug[slug]) archivedBySlug[slug] = getArchivedIds(slug);
@@ -176,15 +154,16 @@ function listProjectSessions(slug, dir, showArchived) {
       })).filter(s => showArchived ? archivedIds.has(s.sessionId) : !archivedIds.has(s.sessionId));
       sessions.forEach(s => {
         const filePath = path.join(dir, s.sessionId + '.jsonl');
-        const custom = getCustomTitle(filePath);
+        const meta = scanSession(filePath);
+        const custom = meta ? (meta.customTitle || meta.summaryTitle) : '';
         if (custom) s.summary = custom;
-        s.gitBranches = collectBranches(filePath);
+        s.gitBranches = meta ? meta.gitBranches : [];
         if (s.gitBranches.length) {
           if (!s.gitBranch) s.gitBranch = s.gitBranches[0];
           s.lastGitBranch = s.gitBranches[s.gitBranches.length - 1];
         }
-        s.remoteControlled = hasBridgeSession(filePath);
-        if (isSkippablePrompt(s.firstPrompt)) s.firstPrompt = findFirstMeaningfulPrompt(filePath);
+        s.remoteControlled = !!meta?.remoteControlled;
+        if (isSkippablePrompt(s.firstPrompt)) s.firstPrompt = firstMeaningfulPrompt(meta, isSkippablePrompt, normalizePrompt);
       });
       const usageMap = getProjectUsageMap(slug);
       sessions.forEach(s => {
@@ -200,65 +179,23 @@ function listProjectSessions(slug, dir, showArchived) {
   // Fallback: parse .jsonl files directly
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
   const sessions = files.map(f => {
-    const filePath = path.join(dir, f);
-    const stat = fs.statSync(filePath);
-    const session = {
+    const meta = scanSession(path.join(dir, f));
+    if (!meta) return { slug, sessionId: f.replace('.jsonl', ''), messageCount: 0 };
+    const { stat } = meta;
+    return {
       slug,
       sessionId: f.replace('.jsonl', ''),
-      summary: '',
-      firstPrompt: '',
-      messageCount: 0,
-      created: null,
-      modified: null,
-      gitBranch: '',
-      lastGitBranch: '',
-      gitBranches: [],
+      summary: meta.customTitle,
+      firstPrompt: firstMeaningfulPrompt(meta, isSkippablePrompt, normalizePrompt),
+      messageCount: meta.userCount,
+      created: meta.firstUserTimestamp || stat.birthtime.toISOString(),
+      modified: meta.lastUserTimestamp || stat.mtime.toISOString(),
+      gitBranch: meta.firstUserBranch,
+      lastGitBranch: meta.lastUserBranch,
+      gitBranches: meta.gitBranches,
       isSidechain: false,
-      remoteControlled: false
+      remoteControlled: meta.remoteControlled
     };
-
-    try {
-      const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-      let userMessages = 0;
-      const branchSeen = new Set();
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line);
-          if (entry.type === 'custom-title' && entry.customTitle) {
-            session.summary = entry.customTitle;
-          } else if (entry.type === 'bridge-session') {
-            session.remoteControlled = true;
-          } else if (entry.type === 'user') {
-            userMessages++;
-            if (userMessages === 1) {
-              session.created = entry.timestamp || stat.birthtime.toISOString();
-              session.gitBranch = entry.gitBranch || '';
-            }
-            if (!session.firstPrompt) {
-              const raw = typeof entry.message?.content === 'string' ? entry.message.content : '';
-              if (!isSkippablePrompt(raw)) session.firstPrompt = normalizePrompt(raw).slice(0, 200);
-            }
-            if (entry.gitBranch) {
-              session.lastGitBranch = entry.gitBranch;
-              if (!branchSeen.has(entry.gitBranch)) {
-                branchSeen.add(entry.gitBranch);
-                session.gitBranches.push(entry.gitBranch);
-              }
-            }
-            session.modified = entry.timestamp || stat.mtime.toISOString();
-          }
-        } catch (_) { /* malformed JSONL line, skip */ }
-      }
-      session.messageCount = userMessages;
-      if (!session.created) session.created = stat.birthtime.toISOString();
-      if (!session.modified) session.modified = stat.mtime.toISOString();
-    } catch (_) {
-      /* unreadable file, use stat times */
-      session.created = stat.birthtime.toISOString();
-      session.modified = stat.mtime.toISOString();
-    }
-
-    return session;
   });
 
   const usageMap = getProjectUsageMap(slug);
@@ -460,11 +397,8 @@ router.get('/:slug/sessions/with-plans', wrapRoute((req, res) => {
   for (const f of files) {
     const sessionId = f.replace('.jsonl', '');
     if (planCache.get(sessionId)) { sessionIds.push(sessionId); continue; }
-    try {
-      const content = fs.readFileSync(path.join(dir, f), 'utf-8');
-      const hasPlan = planStems.some(stem => content.includes(stem));
-      if (hasPlan) { planCache.set(sessionId, true); sessionIds.push(sessionId); }
-    } catch (_) {}
+    const meta = scanSession(path.join(dir, f), planStems);
+    if (meta?.hasPlan) { planCache.set(sessionId, true); sessionIds.push(sessionId); }
   }
   res.json(sessionIds);
 }));
@@ -589,10 +523,11 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
   const limit = parseInt(req.query.limit) || 20;
   const page = messages.slice(offset, offset + limit);
 
-  const gitBranches = collectBranches(filePath);
+  const meta = scanSession(filePath);
+  const gitBranches = meta ? meta.gitBranches : [];
   const lastGitBranch = gitBranches.length ? gitBranches[gitBranches.length - 1] : '';
   const usage = getSessionUsage(req.params.slug, sessionId);
-  const customTitle = getCustomTitle(filePath);
+  const customTitle = meta ? (meta.customTitle || meta.summaryTitle) : '';
   planCache.set(sessionId, hasPlan);
 
   const gitBranch = gitBranches[0] || '';
@@ -609,7 +544,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
     lastGitBranch,
     isSidechain,
     hasPlan,
-    remoteControlled: hasBridgeSession(filePath),
+    remoteControlled: !!meta?.remoteControlled,
     active: isActive,
     archived: archivedIds.has(sessionId),
   };

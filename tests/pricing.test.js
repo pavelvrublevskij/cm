@@ -2,7 +2,8 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
 const { app } = require('./helpers/app');
-const { parsePricingFromHtml } = require('../lib/pricing');
+const pricing = require('../lib/pricing');
+const { parsePricingFromHtml } = pricing;
 
 // Column order (Model | Input | Output | 5m writes | 1h writes | Hits and refreshes) and the
 // header-driven lookup mirror the live pricing page's current per-token pricing table.
@@ -179,3 +180,10 @@ test('PUT /api/pricing/history/:index rejects out-of-range index', async () => {
 });
 
 test('POST /api/pricing/fetch SKIPPED: hits Anthropic pricing page over the network', { skip: true }, () => {});
+
+test('readHistory cache picks up a manual entry saved after it was read', () => {
+  const before = pricing.readHistory().entries.length;
+  pricing.saveManualEntry({ 'claude-cache-test': { input: 1, output: 2, cache_write: 1, cache_read: 0.1 } });
+  assert.strictEqual(pricing.readHistory().entries.length, before + 1);
+  assert.ok(pricing.getCurrentPricing()['claude-cache-test']);
+});

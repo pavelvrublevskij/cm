@@ -1,3 +1,14 @@
+## v1.8.0
+
+### Features
+
+- **Shell-edited files in the Files tab** — files changed by Bash/PowerShell commands (sed -i, redirects, cp/mv, etc.) now appear with diffs.
+
+### Performance
+
+- **Much faster dashboard** — session files are scanned once and cached until they change (15s+ → under 0.1s on repeat loads).
+- **Faster session lists, project list and Git panel** — cached session metadata, pricing and path lookups; Git panel runs its git commands in parallel.
+
 ## v1.7.1
 
 ### Bug fixes

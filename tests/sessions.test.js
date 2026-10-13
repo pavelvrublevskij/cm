@@ -475,8 +475,9 @@ test('POST /api/projects/:slug/sessions/new returns 400 for invalid slug', async
 
 test('POST /api/projects/:slug/sessions/:sessionId/resume is skipped (spawns terminal)', { skip: 'Endpoint launches an OS terminal via child_process; testing would open a real window on the runner.' }, () => {});
 
-test('hasBridgeSession: returns true for jsonl with bridge-session entry, false otherwise', () => {
-  const { hasBridgeSession } = require('../lib/session-flags');
+test('scanSession remoteControlled: true for jsonl with bridge-session entry, false otherwise', () => {
+  const { scanSession } = require('../lib/session-scan');
+  const hasBridgeSession = f => !!scanSession(f)?.remoteControlled;
   const tmpSlug = 'bridge-flag-helper';
   const dir = path.join(paths.PROJECTS_DIR, tmpSlug);
   fs.rmSync(dir, { recursive: true, force: true });
