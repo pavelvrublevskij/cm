@@ -16,7 +16,6 @@ const ActiveSessionsBar = {
     document.addEventListener('click', () => {
       const p = document.getElementById('asb-new-panel');
       if (p) p.remove();
-      ActiveSessionsBar._closeColorMenu();
     });
   },
 
@@ -24,56 +23,12 @@ const ActiveSessionsBar = {
     return s.color ? `--session-color:${s.color}` : '';
   },
 
-  _closeColorMenu() {
-    const p = document.getElementById('asb-color-panel');
-    if (p) p.remove();
-  },
-
-  _showColorMenu(e, slug, sessionId) {
-    e.preventDefault();
-    e.stopPropagation();
-    ActiveSessionsBar._closeColorMenu();
-    const s = ActiveSessionsBar._sessions.find(x => x.slug === slug && x.sessionId === sessionId);
-    const current = s ? s.color : null;
-
-    const panel = document.createElement('div');
-    panel.id = 'asb-color-panel';
-    panel.className = 'action-menu-panel open asb-color-panel';
-    const left = Math.min(e.clientX, window.innerWidth - 200);
-    const top = Math.min(e.clientY, window.innerHeight - 110);
-    panel.style.cssText = `position:fixed;left:${left}px;top:${top}px;z-index:1000;width:max-content;`;
-    const swatches = ActiveSessionsBar.COLORS.map(c =>
-      `<button class="asb-color-swatch${c === current ? ' active' : ''}" data-color="${c}" style="background:${c}" title="${c}" aria-label="${c}"></button>`
-    ).join('');
-    const custom = current && !ActiveSessionsBar.COLORS.includes(current) ? current : '#888888';
-    panel.innerHTML = `<div class="asb-color-swatches">${swatches}</div>
-      <label class="action-menu-item asb-color-custom">Custom&hellip; <input type="color" value="${custom}"></label>
-      <button class="action-menu-item" data-color="">Default</button>`;
-    panel.addEventListener('click', ev => ev.stopPropagation());
-    panel.querySelectorAll('[data-color]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        ActiveSessionsBar._closeColorMenu();
-        ActiveSessionsBar.setColor(slug, sessionId, btn.dataset.color || null);
-      });
+  applyColor(slug, sessionId, color) {
+    ActiveSessionsBar._sessions.forEach(s => {
+      if (s.slug === slug && s.sessionId === sessionId) s.color = color;
     });
-    panel.querySelector('input[type="color"]').addEventListener('change', ev => {
-      ActiveSessionsBar._closeColorMenu();
-      ActiveSessionsBar.setColor(slug, sessionId, ev.target.value);
-    });
-    document.body.appendChild(panel);
-  },
-
-  async setColor(slug, sessionId, color) {
-    try {
-      const res = await api(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/color`, { method: 'POST', body: { color } });
-      ActiveSessionsBar._sessions.forEach(s => {
-        if (s.slug === slug && s.sessionId === sessionId) s.color = res.color;
-      });
-      ActiveSessionsBar._render();
-      ActiveSessionsBar._renderSidebar();
-    } catch (e) {
-      toast('Could not set color: ' + e.message, 'error');
-    }
+    ActiveSessionsBar._render();
+    ActiveSessionsBar._renderSidebar();
   },
 
   _applyPosition(position) {
@@ -207,7 +162,7 @@ const ActiveSessionsBar = {
 
     container.querySelectorAll('.asb-pill').forEach(el => {
       el.addEventListener('click', () => ActiveSessionsBar.open(el.dataset.asbSlug, el.dataset.asbSession, el.dataset.asbKind === 'readonly'));
-      el.addEventListener('contextmenu', e => ActiveSessionsBar._showColorMenu(e, el.dataset.asbSlug, el.dataset.asbSession));
+      el.addEventListener('contextmenu', e => SessionColors.showMenu(e, el.dataset.asbSlug, el.dataset.asbSession));
     });
     container.querySelectorAll('[data-asb-close-session]').forEach(btn => {
       btn.addEventListener('click', e => {
@@ -293,7 +248,7 @@ const ActiveSessionsBar = {
           return () => ActiveSessionsBar.open(slug, sessionId, kind === 'readonly');
         }(s.slug, s.sessionId, s.kind)));
         div.addEventListener('contextmenu', (function(slug, sessionId) {
-          return e => ActiveSessionsBar._showColorMenu(e, slug, sessionId);
+          return e => SessionColors.showMenu(e, slug, sessionId);
         }(s.slug, s.sessionId)));
         anchor.insertAdjacentElement('afterend', div);
         anchor = div;

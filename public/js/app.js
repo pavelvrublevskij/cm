@@ -70,6 +70,7 @@ const App = {
 
     if (typeof ActiveCount !== 'undefined') ActiveCount.start();
     if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.start();
+    SessionColors.load();
     if (typeof Artifacts !== 'undefined') Artifacts.checkGlobalVisibility();
 
     // Best-effort: drop this tab's read-only registration for the session it's currently on when

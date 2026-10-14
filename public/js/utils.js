@@ -474,6 +474,89 @@ function renderSessionBadges(s, opts = {}) {
   return parts.join('');
 }
 
+/** User-picked session colors, shared by session cards and the active sessions bar. */
+const SessionColors = {
+  PRESETS: ['#f85149', '#f0883e', '#d29922', '#3fb950', '#2bb5a8', '#388bfd', '#a371f7', '#db61a2'],
+  _map: {},
+
+  async load() {
+    try {
+      SessionColors._map = await api('/api/projects/session-colors');
+      SessionColors._applyToCards();
+    } catch (e) {
+      toast('Could not load session colors: ' + e.message, 'error');
+    }
+  },
+
+  get(slug, sessionId) {
+    return (SessionColors._map[slug] || {})[sessionId] || null;
+  },
+
+  async set(slug, sessionId, color) {
+    let res;
+    try {
+      res = await api(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/color`, { method: 'POST', body: { color } });
+    } catch (e) {
+      toast('Could not set color: ' + e.message, 'error');
+      return;
+    }
+    if (!SessionColors._map[slug]) SessionColors._map[slug] = {};
+    if (res.color) SessionColors._map[slug][sessionId] = res.color;
+    else delete SessionColors._map[slug][sessionId];
+    SessionColors._applyToCards();
+    if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.applyColor(slug, sessionId, res.color);
+  },
+
+  _applyToCards() {
+    document.querySelectorAll('.session-card[data-session-id]').forEach(card => {
+      const color = SessionColors.get(card.dataset.slug, card.dataset.sessionId);
+      card.classList.toggle('session-card--colored', !!color);
+      if (color) card.style.setProperty('--session-color', color);
+      else card.style.removeProperty('--session-color');
+    });
+  },
+
+  closeMenu() {
+    const p = document.getElementById('session-color-panel');
+    if (p) p.remove();
+  },
+
+  showMenu(e, slug, sessionId) {
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
+    SessionColors.closeMenu();
+    const current = SessionColors.get(slug, sessionId);
+
+    const panel = document.createElement('div');
+    panel.id = 'session-color-panel';
+    panel.className = 'action-menu-panel open session-color-panel';
+    const left = Math.min(e.clientX, window.innerWidth - 200);
+    const top = Math.min(e.clientY, window.innerHeight - 110);
+    panel.style.cssText = `position:fixed;left:${left}px;top:${top}px;z-index:1000;width:max-content;`;
+    const swatches = SessionColors.PRESETS.map(c =>
+      `<button class="session-color-swatch${c === current ? ' active' : ''}" data-color="${c}" style="background:${c}" title="${c}" aria-label="${c}"></button>`
+    ).join('');
+    const custom = current && !SessionColors.PRESETS.includes(current) ? current : '#888888';
+    panel.innerHTML = `<div class="session-color-swatches">${swatches}</div>
+      <label class="action-menu-item session-color-custom">Custom&hellip; <input type="color" value="${custom}"></label>
+      <button class="action-menu-item" data-color="">Default</button>`;
+    panel.addEventListener('click', ev => ev.stopPropagation());
+    panel.querySelectorAll('[data-color]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        SessionColors.closeMenu();
+        SessionColors.set(slug, sessionId, btn.dataset.color || null);
+      });
+    });
+    panel.querySelector('input[type="color"]').addEventListener('change', ev => {
+      SessionColors.closeMenu();
+      SessionColors.set(slug, sessionId, ev.target.value);
+    });
+    document.body.appendChild(panel);
+    document.addEventListener('click', SessionColors.closeMenu, { once: true });
+  }
+};
+
 function renderSessionCard(s, opts = {}) {
   const slug = opts.slug || s.slug;
 
@@ -538,8 +621,10 @@ function renderSessionCard(s, opts = {}) {
     ? `<span class="session-id-badge" title="${escapeHtml(s.sessionId)} — click to copy" onclick="event.stopPropagation(); copyToClipboard('${s.sessionId}', 'Session ID copied')">${escapeHtml(shortId)}</span>`
     : '';
 
+  const color = SessionColors.get(slug, s.sessionId);
+
   return `
-    <div class="session-card" style="cursor:pointer" data-session-id="${s.sessionId}" onclick="${onclick}">
+    <div class="session-card${color ? ' session-card--colored' : ''}" style="cursor:pointer${color ? `;--session-color:${color}` : ''}" data-session-id="${s.sessionId}" data-slug="${slug}" onclick="${onclick}" oncontextmenu="SessionColors.showMenu(event, '${slug}', '${s.sessionId}')">
       ${headerHtml}
       ${opts.snippets || ''}
       <div class="session-meta">
@@ -560,6 +645,7 @@ function renderSessionCard(s, opts = {}) {
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openInNewTab('${slug}', '${s.sessionId}')">Open in new tab &#8599;</button>
               <button class="action-menu-item" data-slug="${slug}" data-session="${s.sessionId}" data-title="${escapeHtml(s.summary || s.firstPrompt || '')}" onclick="event.stopPropagation(); Sessions.renameAction(this)">Rename</button>
               <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.copyIdAction('${s.sessionId}')">Copy session ID</button>
+              <button class="action-menu-item" onclick="SessionColors.showMenu(event, '${slug}', '${s.sessionId}')">Color&hellip;</button>
               ${opts.archived
                 ? `<button class="action-menu-item" onclick="event.stopPropagation(); Sessions.unarchiveAction('${slug}', '${s.sessionId}')">Unarchive</button>`
                 : `<button class="action-menu-item" onclick="event.stopPropagation(); Sessions.archiveAction('${slug}', '${s.sessionId}')">Archive</button>`

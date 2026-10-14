@@ -1855,6 +1855,12 @@ mark.search-highlight {
   border-color: var(--border-light);
 }
 
+.session-card--colored,
+.session-card--colored:hover {
+  background: color-mix(in srgb, var(--session-color) 12%, var(--bg-secondary));
+  border-color: var(--session-color);
+}
+
 .session-summary {
   font-size: 12px;
   font-weight: 600;
@@ -5484,14 +5490,14 @@ mark.search-highlight {
   box-shadow: inset 3px 0 0 var(--session-color);
 }
 
-.asb-color-panel { padding: 6px; }
-.asb-color-swatches {
+.session-color-panel { padding: 6px; }
+.session-color-swatches {
   display: grid;
   grid-template-columns: repeat(4, 22px);
   gap: 6px;
   padding: 2px 2px 6px;
 }
-.asb-color-swatch {
+.session-color-swatch {
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -5499,16 +5505,16 @@ mark.search-highlight {
   cursor: pointer;
   padding: 0;
 }
-.asb-color-swatch:hover { border-color: var(--text-muted); }
-.asb-color-swatch.active { border-color: var(--text-primary); }
-.asb-color-custom {
+.session-color-swatch:hover { border-color: var(--text-muted); }
+.session-color-swatch.active { border-color: var(--text-primary); }
+.session-color-custom {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   cursor: pointer;
 }
-.asb-color-custom input[type="color"] {
+.session-color-custom input[type="color"] {
   width: 26px;
   height: 20px;
   padding: 0;

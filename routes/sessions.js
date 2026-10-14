@@ -14,7 +14,7 @@ const { stampActive, listAllActiveSessions } = require('../lib/session-status');
 const { MAX_SNIPPETS, extractEntrySnippets, extractMetaSnippet, parseSearchQuery, collectEntryFacts, matchFilters } = require('../lib/session-search');
 const { collectFromJsonl, collectFromDir } = require('../lib/session-activity');
 const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/session-archive');
-const { getSessionColors, setSessionColor, isValidColor } = require('../lib/session-colors');
+const { getAllSessionColors, getSessionColors, setSessionColor, isValidColor } = require('../lib/session-colors');
 const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
 
@@ -126,6 +126,10 @@ router.get('/active', wrapRoute((req, res) => {
       return { slug, sessionId, title: title || '', kind, instanceId, lastGitBranch, archived, color };
     });
   res.json(result);
+}));
+
+router.get('/session-colors', wrapRoute((req, res) => {
+  res.json(getAllSessionColors());
 }));
 
 /** Newest first, tolerating entries whose timestamp never got recorded. */

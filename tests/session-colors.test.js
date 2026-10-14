@@ -57,3 +57,11 @@ test('POST /color rejects an invalid slug and session id', async () => {
   assert.strictEqual((await request(app).post('/api/projects/bad..slug/sessions/x/color').send({ color: null })).status, 400);
   assert.strictEqual((await request(app).post(`/api/projects/${SLUG}/sessions/a..b/color`).send({ color: null })).status, 400);
 });
+
+test('GET /session-colors returns every stored color', async () => {
+  await request(app).post(`/api/projects/${SLUG}/sessions/${SESSION_A}/color`).send({ color: '#3fb950' });
+  const res = await request(app).get('/api/projects/session-colors');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body[SLUG][SESSION_A], '#3fb950');
+  await request(app).post(`/api/projects/${SLUG}/sessions/${SESSION_A}/color`).send({ color: null });
+});
