@@ -471,6 +471,86 @@ test('context: rm target still present on disk is not reported as deleted', asyn
   assert.ok(!f, 'a still-present file must not be reported as a session change from a stray rm mention');
 });
 
+// ── Shell-script writes (sed -i / python / redirects) carry no snapshot ──────
+
+const SHELL_WRITE_SESSION_ID = 'shellwrite-7777-7777-7777-777777777777';
+const SHELL_WRITE_PROJ_DIR = path.join(HOME, 'shell-write-proj');
+const SHELL_WRITE_SLUG = slugForPath(SHELL_WRITE_PROJ_DIR);
+
+before(() => {
+  const projDir = path.join(paths.PROJECTS_DIR, SHELL_WRITE_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.mkdirSync(path.join(SHELL_WRITE_PROJ_DIR, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(SHELL_WRITE_PROJ_DIR, 'src', 'a.h'), 'x');
+  fs.writeFileSync(path.join(SHELL_WRITE_PROJ_DIR, 'src', 'read-only.h'), 'x');
+
+  const entries = [
+    { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'edit' } },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 's1', name: 'Bash', input: { command: 'sed -i "s/a/b/" src/a.h' } },
+          { type: 'tool_use', id: 's2', name: 'Bash', input: { command: 'cat src/read-only.h' } },
+          { type: 'tool_use', id: 's3', name: 'Bash', input: { command: 'echo x > src/missing.h' } }
+        ]
+      }
+    }
+  ];
+  fs.writeFileSync(
+    path.join(projDir, SHELL_WRITE_SESSION_ID + '.jsonl'),
+    entries.map(e => JSON.stringify(e)).join('\n')
+  );
+});
+
+test('context: file written by sed -i in Bash is listed', async () => {
+  const res = await request(app).get(`/api/file-history/${SHELL_WRITE_SESSION_ID}/context`);
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.files.find(f => f.path === 'src/a.h'));
+});
+
+test('context: read-only Bash targets and missing files are not listed', async () => {
+  const res = await request(app).get(`/api/file-history/${SHELL_WRITE_SESSION_ID}/context`);
+  assert.ok(!res.body.files.find(f => f.path === 'src/read-only.h'));
+  assert.ok(!res.body.files.find(f => f.path === 'src/missing.h'));
+});
+
+// ── Shell-edited file diffed against the session's earlier full Read ─────────
+
+const READ_BASE_SESSION_ID = 'readbase-9999-9999-9999-999999999999';
+const READ_BASE_PROJ_DIR = path.join(HOME, 'read-base-proj');
+const READ_BASE_SLUG = slugForPath(READ_BASE_PROJ_DIR);
+
+before(() => {
+  const projDir = path.join(paths.PROJECTS_DIR, READ_BASE_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.mkdirSync(READ_BASE_PROJ_DIR, { recursive: true });
+  fs.writeFileSync(path.join(READ_BASE_PROJ_DIR, 'a.txt'), 'one\nTWO\n');
+
+  const entries = [
+    { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'edit' } },
+    { type: 'user', toolUseResult: { type: 'text', file: { filePath: path.join(READ_BASE_PROJ_DIR, 'a.txt'), content: 'one\ntwo\n', startLine: 1, numLines: 2, totalLines: 2 } } },
+    { type: 'assistant', message: { content: [
+      { type: 'tool_use', id: 'r1', name: 'Bash', input: { command: 'sed -i "s/two/TWO/" a.txt' } }
+    ] } }
+  ];
+  fs.writeFileSync(path.join(projDir, READ_BASE_SESSION_ID + '.jsonl'), entries.map(e => JSON.stringify(e)).join('\n'));
+});
+
+test('context: shell-edited file with an earlier full Read is flagged readBase and diffs against it', async () => {
+  const ctx = await request(app).get('/api/file-history/' + READ_BASE_SESSION_ID + '/context');
+  const f = ctx.body.files.find(f => f.path === 'a.txt');
+  assert.ok(f && f.readBase === true);
+
+  const res = await request(app)
+    .get('/api/file-history/' + READ_BASE_SESSION_ID + '/none/diff-current')
+    .query({ projSlug: READ_BASE_SLUG, filePath: 'a.txt', readBase: 'true' });
+  assert.strictEqual(res.status, 200);
+  const lines = res.body.hunks.flatMap(h => h.lines);
+  assert.ok(lines.some(l => l.type === '-' && l.content.includes('two')));
+  assert.ok(lines.some(l => l.type === '+' && l.content.includes('TWO')));
+});
+
 // ── backup mapping recovered when the transcript has no snapshot records ─────
 // Newer Claude Code versions write the backups but no file-history-snapshot records, so the
 // path -> backup mapping has to be recomputed as sha256(absolute path)[0..16].
@@ -708,3 +788,37 @@ test('reveal-file: missing file on disk returns 404', async () => {
 });
 
 test('reveal-file SKIPPED: spawns OS file explorer (side-effect)', { skip: true }, () => {});
+
+// ── prompt attribution ──────────────────────────────────────────────────────
+
+test('context: each changed file lists the prompts whose tool calls touched it', async () => {
+  const sessionId = 'prompts88-8888-8888-8888-888888888888';
+  const projDir = path.join(paths.PROJECTS_DIR, PROJ_SLUG);
+  const target = path.resolve(decodeSlug(PROJ_SLUG));
+  const edit = (id, file) => ({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id, name: 'Edit', input: { file_path: path.join(target, file), old_string: 'a', new_string: 'b' } }] }
+  });
+  fs.writeFileSync(
+    path.join(projDir, sessionId + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'first prompt' } },
+      edit('p1', 'a.js'),
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'p1', content: 'ok' }] } },
+      edit('p2', 'b.js'),
+      { type: 'user', isMeta: true, message: { content: 'meta note' } },
+      { type: 'user', timestamp: '2026-07-01T11:00:00.000Z', message: { content: [{ type: 'text', text: 'second prompt' }] } },
+      edit('p3', 'a.js'),
+      { type: 'user', message: { content: '<command-name>/clear</command-name>' } },
+      { type: 'user', message: { content: '<command-name>/review</command-name><command-args>now</command-args>' } }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+
+  const res = await request(app).get(`/api/file-history/${sessionId}/context`);
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body.prompts.map(p => [p.index, p.text]), [[1, 'first prompt'], [2, 'second prompt'], [3, '/review now']]);
+  assert.strictEqual(res.body.prompts[1].timestamp, '2026-07-01T11:00:00.000Z');
+  const byPath = Object.fromEntries(res.body.files.map(f => [f.path, f.prompts]));
+  assert.deepStrictEqual(byPath['a.js'], [1, 2]);
+  assert.deepStrictEqual(byPath['b.js'], [1]);
+});

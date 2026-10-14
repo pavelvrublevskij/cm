@@ -1,3 +1,21 @@
+## v1.8.0
+
+### Features
+
+- **Shell-edited files in the Files tab** — files changed by Bash/PowerShell commands (sed -i, redirects, cp/mv, etc.) now appear with diffs.
+- **Session search filters** — narrow session search with `n:` (name), `f:` (edited file), `t:` (tool) and `b:` (branch); combine them with free text, quote values with spaces. Hints appear in the search dropdown.
+- **Changes grouped by prompt** — "By prompt" in the Files tab groups changed files under the prompt that changed them; "From prompt" shows only changes from a chosen prompt on.
+- **Changes only view** — one scrollable diff of every file the session changed, with the project tree hidden.
+
+### Bug fixes
+
+- **Long memory lists pushed the editor off screen** — the Memory tab's file list now scrolls on its own, separate from the editor.
+
+### Performance
+
+- **Much faster dashboard** — session files are scanned once and cached until they change (15s+ → under 0.1s on repeat loads).
+- **Faster session lists, project list and Git panel** — cached session metadata, pricing and path lookups; Git panel runs its git commands in parallel.
+
 ## v1.7.1
 
 ### Bug fixes

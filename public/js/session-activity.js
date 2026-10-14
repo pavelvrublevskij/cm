@@ -197,6 +197,7 @@ Object.assign(Sessions, {
         <div class="activity-item-main">
           <span class="activity-tool-badge activity-cat-${escapeHtml(item.category)}">${escapeHtml(item.tool)}</span>
           ${labelHtml}
+          ${item.category === 'shell' ? `<button class="icon-btn activity-copy-btn" title="Copy command" aria-label="Copy command" data-copy="${escapeHtml(label)}" onclick="event.stopPropagation(); copyToClipboard(this.dataset.copy, 'Command copied')">&#128203;</button>` : ''}
           <span class="activity-item-time">${time}</span>
         </div>
         ${needsDetail ? `<div class="activity-item-detail" id="${itemId}">${detailContent}</div>` : ''}

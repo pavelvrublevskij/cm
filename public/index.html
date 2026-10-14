@@ -587,6 +587,7 @@
                 <div class="action-menu-panel">
                   <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.renameDetail()">Rename</button>
                   <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.copyIdDetail()">Copy session ID</button>
+                  <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.downloadTranscript()">Download transcript (.jsonl)</button>
                   <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.openInNewTab(Sessions.detailState.slug, Sessions.detailState.sessionId)">Open in new tab &#8599;</button>
                   <button class="action-menu-item" id="session-detail-resume-btn" onclick="event.stopPropagation(); Sessions.resumeFromMenu()">Resume in OS Terminal</button>
                   <button class="action-menu-item" id="session-detail-archive-btn" onclick="event.stopPropagation(); Sessions.archiveDetail()">Archive</button>
@@ -881,6 +882,7 @@
   <script src="/js/session-scratchpad.js"></script>
   <script src="/js/artifacts.js"></script>
   <script src="/js/session-files.js"></script>
+  <script src="/js/session-changes.js"></script>
   <script src="/js/crud-frontmatter.js"></script>
   <script src="/js/project-settings-tab.js"></script>
   <script src="/js/project-mcp-tab.js"></script>

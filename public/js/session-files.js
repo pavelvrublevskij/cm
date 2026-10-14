@@ -57,6 +57,7 @@ const SessionFiles = {
   // --- lifecycle ---
 
   reset(slug) {
+    if (typeof SessionChanges !== 'undefined') SessionChanges.reset();
     SessionFiles._clearSaveTimer();
     SessionFiles.slug = slug;
     SessionFiles.treeLoaded = false;
@@ -332,19 +333,24 @@ const SessionFiles = {
    *  opts.discard: throw away this file's unsaved buffer instead of keeping it. */
   async openFile(relPath, opts = {}) {
     if (!relPath || !SessionFiles.slug) return;
+    if (typeof SessionChanges !== 'undefined') SessionChanges.leave();
     if (opts.discard) delete SessionFiles.buffers[relPath];
     else SessionFiles._stashBuffer();
     SessionFiles._clearSaveTimer();
 
     const ctx = opts.ctx || null;
     const isDeleted = !!(ctx && ctx.isDeleted === '1');
+    const isImage = !isDeleted && CodeView.isImage(relPath);
     const canDiff = SessionFiles._canDiff(ctx);
-    const canPreview = !isDeleted && CodeView.isPreviewable(relPath);
-    // Markdown and HTML land on their rendered form; everything else changed opens on its diff,
-    // and anything unchanged (or without a diff to show) falls back to source.
-    const mode = canPreview ? 'preview' : ((opts.mode === 'diff' || isDeleted) && canDiff ? 'diff' : 'source');
+    const canPreview = !isDeleted && !isImage && CodeView.isPreviewable(relPath);
+    // Images render straight from disk; markdown and HTML land on their rendered form; everything
+    // else changed opens on its diff, and anything unchanged (or without a diff to show) falls
+    // back to source.
+    const mode = isImage ? 'image'
+      : canPreview ? 'preview'
+      : (opts.mode === 'diff' || isDeleted) && canDiff ? 'diff' : 'source';
     SessionFiles.open = {
-      path: relPath, mode, ctx, canDiff, canPreview, isDeleted, loading: !isDeleted, saved: '', mtime: null,
+      path: relPath, mode, ctx, canDiff, canPreview, isImage, isDeleted, loading: !isDeleted, saved: '', mtime: null,
       changedLines: undefined, nextOffset: 0, doneLoading: true, loadingMore: false
     };
     SessionFiles.renderPane();
@@ -425,13 +431,14 @@ const SessionFiles = {
 
   /** A diff needs a recorded snapshot (hash) or a file the session created — otherwise source only. */
   _canDiff(ctx) {
-    return !!ctx && (ctx.isNew === '1' || !!ctx.hash);
+    return !!ctx && (ctx.isNew === '1' || !!ctx.hash || ctx.readBase === '1');
   },
 
   setMode(mode) {
     if (!SessionFiles.open || SessionFiles.open.mode === mode) return;
     if (mode === 'diff' && !SessionFiles.open.canDiff) return;
     if (mode === 'preview' && !SessionFiles.open.canPreview) return;
+    if (mode === 'image' && !SessionFiles.open.isImage) return;
     SessionFiles._stashBuffer();
     SessionFiles.open.mode = mode;
     SessionFiles.renderPane();
@@ -440,6 +447,7 @@ const SessionFiles = {
   renderPane() {
     const el = document.getElementById('sf-pane');
     if (!el) return;
+    if (typeof SessionChanges !== 'undefined' && SessionChanges.active) return;
     const open = SessionFiles.open;
 
     if (!open) {
@@ -455,6 +463,7 @@ const SessionFiles = {
     const hasDiff = open.canDiff;
     const hasPreview = open.canPreview;
     const isDiff = open.mode === 'diff';
+    const isImageMode = open.mode === 'image';
     const modeBtn = (mode, label) =>
       `<button class="sf-mode-btn${open.mode === mode ? ' active' : ''}" onclick="SessionFiles.setMode('${mode}')">${label}</button>`;
 
@@ -463,12 +472,12 @@ const SessionFiles = {
         <span class="sf-dirty sf-pane-dirty" id="sf-pane-dirty" style="display:none" title="Unsaved changes">&#9679;</span>
         <span class="sf-pane-search-count" id="sf-pane-search-count" style="display:none"></span>
         <div class="sf-pane-actions">
-          ${hasDiff || hasPreview ? `<div class="sf-mode-toggle">
-            ${modeBtn('source', 'Source')}
+          ${hasDiff || hasPreview || open.isImage ? `<div class="sf-mode-toggle">
+            ${open.isImage ? modeBtn('image', 'Image') : modeBtn('source', 'Source')}
             ${hasPreview ? modeBtn('preview', 'Preview') : ''}
             ${hasDiff ? modeBtn('diff', 'Diff') : ''}
           </div>` : ''}
-          ${isDiff ? '' : '<button class="btn btn-sm btn-primary" id="sf-save-btn" onclick="SessionFiles.save()" disabled>Save</button>'}
+          ${isDiff || isImageMode ? '' : '<button class="btn btn-sm btn-primary" id="sf-save-btn" onclick="SessionFiles.save()" disabled>Save</button>'}
           <div class="action-menu">
             <button class="btn btn-sm action-menu-btn" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)" aria-label="File actions">&#8942;</button>
             <div class="action-menu-panel">
@@ -481,7 +490,7 @@ const SessionFiles = {
         </div>
       </div>
       <div class="sf-pane-body" id="sf-pane-body"></div>
-      ${isDiff ? '' : `<div class="sf-status-bar">
+      ${isDiff || isImageMode ? '' : `<div class="sf-status-bar">
         <span class="sf-status-state" id="sf-status-state"></span>
         <span class="sf-status-sep">&middot;</span>
         <span id="sf-status-autosave"></span>
@@ -494,7 +503,11 @@ const SessionFiles = {
     SessionFiles.editor = null;
 
     const body = document.getElementById('sf-pane-body');
-    if (open.loading) {
+    if (isImageMode) {
+      const src = `/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/raw?path=${encodeURIComponent(open.path)}`
+        + (open.mtime ? `&mtime=${open.mtime}` : '');
+      body.innerHTML = `<div class="sf-preview-pane sf-image-pane"><img class="sf-image-preview" src="${escapeAttr(src)}" alt="${escapeHtml(name)}"></div>`;
+    } else if (open.loading) {
       showLoading(body, isDiff ? 'Computing diff...' : 'Loading file...');
     } else if (open.error) {
       body.innerHTML = `<div class="empty-state"><p>${escapeHtml(open.error)}</p></div>`;
@@ -581,7 +594,7 @@ const SessionFiles = {
     const projSlug = SessionFiles._projSlug();
     try {
       const result = open._diffResult || await FileHistory.fetchDiffCurrent(ctx.session, ctx.hash, parseInt(ctx.from, 10), projSlug, open.path, {
-        isNew: ctx.isNew === '1'
+        isNew: ctx.isNew === '1', readBase: ctx.readBase === '1'
       });
       if (SessionFiles.open !== open || open.mode !== 'diff') return;
       open._diffResult = result;
@@ -597,7 +610,7 @@ const SessionFiles = {
     const ctx = open.ctx;
     try {
       const result = await FileHistory.fetchDiffCurrent(ctx.session, ctx.hash, parseInt(ctx.from, 10), SessionFiles._projSlug(), open.path, {
-        isNew: ctx.isNew === '1'
+        isNew: ctx.isNew === '1', readBase: ctx.readBase === '1'
       });
       if (SessionFiles.open !== open) return;
       open._diffResult = result;
@@ -613,10 +626,12 @@ const SessionFiles = {
     const open = SessionFiles.open;
     if (!open || !open.canDiff) return;
     const ctx = open.ctx;
+    const seen = new Set();
     const rows = [...document.querySelectorAll('#ctx-file-list .ctx-file-item')]
-      .filter(row => SessionFiles._canDiff(row.dataset));
+      .filter(row => SessionFiles._canDiff(row.dataset) && !seen.has(row.dataset.path) && seen.add(row.dataset.path));
     FileHistory.showDiffCurrent(ctx.session, ctx.hash, parseInt(ctx.from, 10), SessionFiles._projSlug(), open.path, {
       isNew: ctx.isNew === '1',
+      readBase: ctx.readBase === '1',
       isDeleted: ctx.isDeleted === '1',
       allItems: rows,
       index: rows.findIndex(row => row.dataset.path === open.path)

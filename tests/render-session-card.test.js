@@ -108,3 +108,51 @@ test('renderSessionCard: browser+readonly split falls back to s.slug when opts.s
     "Sessions.openReadOnly('proj-from-s', 's1')"
   ]);
 });
+
+// ── session colors ────────────────────────────────────────────────────────────
+
+test('a session with a stored color renders a tinted card; others stay default', () => {
+  vm.runInContext('SessionColors', sandbox)._map = { proj: { s1: '#3fb950' } };
+  const colored = renderSessionCard({ sessionId: 's1', summary: 'x' }, { slug: 'proj' });
+  assert.ok(colored.includes('session-card--colored'));
+  assert.ok(colored.includes('--session-color:#3fb950'));
+  assert.ok(colored.includes('data-slug="proj"'));
+
+  const plain = renderSessionCard({ sessionId: 's2', summary: 'y' }, { slug: 'proj' });
+  assert.strictEqual(plain.includes('session-card--colored'), false);
+  vm.runInContext('SessionColors', sandbox)._map = {};
+});
+
+test('cards offer the color menu on right-click and in the ⋮ menu', () => {
+  const html = renderSessionCard({ sessionId: 's1', summary: 'x' }, { slug: 'proj' });
+  assert.ok(html.includes(`oncontextmenu="SessionColors.showMenu(event, 'proj', 's1')"`));
+  assert.ok(html.includes('Color&hellip;'));
+});
+
+test('SessionColors.set posts, updates the map, recolors cards and notifies the bar', async () => {
+  const card = {
+    dataset: { slug: 'proj', sessionId: 's1' },
+    classList: { _set: new Set(), toggle(c, on) { if (on) this._set.add(c); else this._set.delete(c); } },
+    style: { _p: {}, setProperty(k, v) { this._p[k] = v; }, removeProperty(k) { delete this._p[k]; } },
+  };
+  const calls = [];
+  const barCalls = [];
+  sandbox.document.querySelectorAll = sel => (sel.startsWith('.session-card') ? [card] : []);
+  sandbox.api = async (url, opts) => { calls.push({ url, opts }); return { ok: true, color: opts.body.color }; };
+  sandbox.ActiveSessionsBar = { applyColor: (...a) => barCalls.push(a.join('|')) };
+  const SC = vm.runInContext('SessionColors', sandbox);
+  SC._map = {};
+
+  await SC.set('proj', 's1', '#388bfd');
+  assert.strictEqual(calls[0].url, '/api/projects/proj/sessions/s1/color');
+  assert.strictEqual(SC.get('proj', 's1'), '#388bfd');
+  assert.ok(card.classList._set.has('session-card--colored'));
+  assert.strictEqual(card.style._p['--session-color'], '#388bfd');
+  assert.strictEqual(barCalls[0], 'proj|s1|#388bfd');
+
+  await SC.set('proj', 's1', null);
+  assert.strictEqual(SC.get('proj', 's1'), null);
+  assert.strictEqual(card.classList._set.has('session-card--colored'), false);
+  assert.strictEqual(card.style._p['--session-color'], undefined);
+  SC._map = {};
+});

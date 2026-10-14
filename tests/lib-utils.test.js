@@ -8,8 +8,10 @@ const os = require('os');
 const { paths } = require('./helpers/app');
 
 const { safeSlug, safeMemoryFile, readJson, safeDataWrite } = require('../lib/file-helpers');
-const { getCustomTitle } = require('../lib/session-title');
-const { collectBranches } = require('../lib/session-branches');
+const { scanSession } = require('../lib/session-scan');
+
+const getCustomTitle = f => scanSession(f)?.customTitle || '';
+const collectBranches = f => scanSession(f)?.gitBranches || [];
 const { readFrontmatterFile, readFrontmatterDir, writeFrontmatter } = require('../lib/frontmatter');
 const { getISOWeek, dayInRange, hourKeyInRange, getFilteredByModel } = require('../lib/usage-filters');
 
@@ -94,9 +96,9 @@ test('safeDataWrite: rejects writes into CLAUDE_DIR', () => {
   assert.throws(() => safeDataWrite(path.join(paths.CLAUDE_DIR, 'danger.json')));
 });
 
-// ── getCustomTitle ────────────────────────────────────────────────────────────
+// ── scanSession: custom title ─────────────────────────────────────────────────
 
-test('getCustomTitle: returns empty string when no custom-title entry', () => {
+test('scanSession customTitle: returns empty string when no custom-title entry', () => {
   const f = path.join(TMP, 'no-title.jsonl');
   fs.writeFileSync(f, [
     JSON.stringify({ type: 'user', message: { content: 'hello' } }),
@@ -105,7 +107,7 @@ test('getCustomTitle: returns empty string when no custom-title entry', () => {
   assert.strictEqual(getCustomTitle(f), '');
 });
 
-test('getCustomTitle: returns title from custom-title entry', () => {
+test('scanSession customTitle: returns title from custom-title entry', () => {
   const f = path.join(TMP, 'has-title.jsonl');
   fs.writeFileSync(f, [
     JSON.stringify({ type: 'user', message: { content: 'hello' } }),
@@ -114,7 +116,7 @@ test('getCustomTitle: returns title from custom-title entry', () => {
   assert.strictEqual(getCustomTitle(f), 'My Session');
 });
 
-test('getCustomTitle: returns last title when multiple entries exist', () => {
+test('scanSession customTitle: returns last title when multiple entries exist', () => {
   const f = path.join(TMP, 'multi-title.jsonl');
   fs.writeFileSync(f, [
     JSON.stringify({ type: 'custom-title', customTitle: 'First' }),
@@ -123,25 +125,25 @@ test('getCustomTitle: returns last title when multiple entries exist', () => {
   assert.strictEqual(getCustomTitle(f), 'Last');
 });
 
-test('getCustomTitle: returns empty string for missing file', () => {
+test('scanSession customTitle: returns empty string for missing file', () => {
   assert.strictEqual(getCustomTitle(path.join(TMP, 'nonexistent.jsonl')), '');
 });
 
-test('getCustomTitle: skips malformed JSON lines', () => {
+test('scanSession customTitle: skips malformed JSON lines', () => {
   const f = path.join(TMP, 'malformed.jsonl');
   fs.writeFileSync(f, 'not-json\n' + JSON.stringify({ type: 'custom-title', customTitle: 'Valid' }));
   assert.strictEqual(getCustomTitle(f), 'Valid');
 });
 
-// ── collectBranches ───────────────────────────────────────────────────────────
+// ── scanSession: git branches ─────────────────────────────────────────────────
 
-test('collectBranches: returns empty array for empty file', () => {
+test('scanSession gitBranches: returns empty array for empty file', () => {
   const f = path.join(TMP, 'empty.jsonl');
   fs.writeFileSync(f, '');
   assert.deepStrictEqual(collectBranches(f), []);
 });
 
-test('collectBranches: returns branches in insertion order, deduplicated', () => {
+test('scanSession gitBranches: returns branches in insertion order, deduplicated', () => {
   const f = path.join(TMP, 'branches.jsonl');
   fs.writeFileSync(f, [
     JSON.stringify({ type: 'user', gitBranch: 'main' }),
@@ -152,7 +154,7 @@ test('collectBranches: returns branches in insertion order, deduplicated', () =>
   assert.deepStrictEqual(collectBranches(f), ['main', 'feature/x', 'bugfix/y']);
 });
 
-test('collectBranches: ignores non-user entries', () => {
+test('scanSession gitBranches: ignores non-user entries', () => {
   const f = path.join(TMP, 'mixed.jsonl');
   fs.writeFileSync(f, [
     JSON.stringify({ type: 'assistant', gitBranch: 'ignored' }),
@@ -161,11 +163,11 @@ test('collectBranches: ignores non-user entries', () => {
   assert.deepStrictEqual(collectBranches(f), ['main']);
 });
 
-test('collectBranches: returns empty array for missing file', () => {
+test('scanSession gitBranches: returns empty array for missing file', () => {
   assert.deepStrictEqual(collectBranches(path.join(TMP, 'nonexistent.jsonl')), []);
 });
 
-test('collectBranches: skips entries with no gitBranch', () => {
+test('scanSession gitBranches: skips entries with no gitBranch', () => {
   const f = path.join(TMP, 'no-branch.jsonl');
   fs.writeFileSync(f, [
     JSON.stringify({ type: 'user' }),

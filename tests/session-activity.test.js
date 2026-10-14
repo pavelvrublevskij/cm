@@ -290,3 +290,30 @@ test('collectFromDir: non-jsonl files are ignored', () => {
   fs.writeFileSync(path.join(dir, 'data.json'), '{}');
   assert.deepStrictEqual(collectFromDir(dir, 10), []);
 });
+
+// ── client: copy button on shell commands ─────────────────────────────────────
+
+function loadActivityClient() {
+  const vm = require('vm');
+  const src = 'const Sessions = {};\n'
+    + fs.readFileSync(path.join(__dirname, '../public/js/session-activity.js'), 'utf-8')
+    + '\nglobalThis._Sessions = Sessions;';
+  const ctx = vm.createContext({ escapeHtml: s => String(s).split('"').join('&quot;').split('<').join('&lt;') });
+  vm.runInContext(src, ctx);
+  return ctx._Sessions;
+}
+
+test('_renderActivityItem: shell items get a copy button carrying the full command', () => {
+  const S = loadActivityClient();
+  const cmd = 'git log --oneline "a b" ' + 'x'.repeat(120);
+  const html = S._renderActivityItem({ tool: 'Bash', category: 'shell', label: cmd }, 0);
+  assert.ok(html.includes('activity-copy-btn'));
+  assert.ok(html.includes(`data-copy="${cmd.split('"').join('&quot;')}"`));
+  assert.ok(html.includes("copyToClipboard(this.dataset.copy, 'Command copied')"));
+});
+
+test('_renderActivityItem: non-shell items have no copy button', () => {
+  const S = loadActivityClient();
+  const html = S._renderActivityItem({ tool: 'Read', category: 'file', label: '/a/b.js' }, 0);
+  assert.strictEqual(html.includes('activity-copy-btn'), false);
+});

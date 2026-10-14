@@ -303,3 +303,24 @@ test('closeReadonly navigates away only when closing the instance I am currently
   assert.strictEqual(harness.navigations.length, 1);
   assert.strictEqual(harness.navigations[0].view, 'project-detail');
 });
+
+// ── session colors ────────────────────────────────────────────────────────────
+
+test('a colored session renders its pill tinted with the stored color', () => {
+  ActiveSessionsBar._sessions[0].color = '#3fb950';
+  ActiveSessionsBar._render();
+  const html = elementsById['asb-groups'].innerHTML;
+  assert.ok(html.includes('asb-pill--colored'));
+  assert.ok(html.includes('--session-color:#3fb950'));
+  assert.strictEqual(html.split('asb-pill--colored').length - 1, 1, 'only the colored session is tinted');
+});
+
+test('applyColor updates the pill and resetting removes the tint', () => {
+  ActiveSessionsBar.applyColor(SLUG, SESSION_B, '#388bfd');
+  assert.strictEqual(ActiveSessionsBar._sessions[1].color, '#388bfd');
+  assert.ok(elementsById['asb-groups'].innerHTML.includes('--session-color:#388bfd'));
+
+  ActiveSessionsBar.applyColor(SLUG, SESSION_B, null);
+  assert.strictEqual(ActiveSessionsBar._sessions[1].color, null);
+  assert.strictEqual(elementsById['asb-groups'].innerHTML.includes('asb-pill--colored'), false);
+});

@@ -28,9 +28,8 @@ function looksBinary(text) {
  * call; untracked files have no HEAD side for git to diff against, so their "added" count is just
  * their own line count, read directly (skipped past UNTRACKED_STAT_MAX_BYTES or when unreadable).
  */
-async function attachFileStats(files, projectPath) {
+function attachFileStats(files, projectPath, numstat) {
   if (!files.length) return files;
-  const numstat = await diffNumstat(projectPath);
   for (const file of files) {
     file.stat = file.label === 'untracked'
       ? untrackedFileStat(path.join(projectPath, file.path))
@@ -65,19 +64,20 @@ router.get('/:slug/git/info', wrapRoute(async (req, res) => {
 
   if (!(await gitOk(projectPath))) return unavailable(res);
 
-  const { branch, detached } = await headInfo(projectPath);
-  const { upstream, ahead, behind } = await upstreamStatus(projectPath);
-  const unpushed = ahead ? await unpushedCommits(projectPath, upstream) : [];
-  const incoming = behind ? await incomingCommits(projectPath, upstream) : [];
-
-  let hasRemote = false;
-  try { hasRemote = (await git(['remote'], projectPath)).length > 0; } catch (_) {}
-
-  let files = [];
-  try {
-    const raw = await git(['status', '--porcelain', '--untracked-files=all'], projectPath);
-    files = await attachFileStats(parseStatus(raw), projectPath);
-  } catch (_) {}
+  // Each git call is a process spawn (slow on Windows), so independent ones run concurrently.
+  const [{ branch, detached }, upstreamInfo, hasRemote, files] = await Promise.all([
+    headInfo(projectPath),
+    upstreamStatus(projectPath),
+    git(['remote'], projectPath).then(out => out.length > 0, () => false),
+    Promise.all([git(['status', '--porcelain', '--untracked-files=all'], projectPath), diffNumstat(projectPath)])
+      .then(([raw, numstat]) => attachFileStats(parseStatus(raw), projectPath, numstat))
+      .catch(() => [])
+  ]);
+  const { upstream, ahead, behind } = upstreamInfo;
+  const [unpushed, incoming] = await Promise.all([
+    ahead ? unpushedCommits(projectPath, upstream) : [],
+    behind ? incomingCommits(projectPath, upstream) : []
+  ]);
 
   res.json({ available: true, branch, detached, upstream, ahead, behind, unpushed, incoming, hasRemote, files });
 }));

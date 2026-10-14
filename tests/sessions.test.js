@@ -475,8 +475,9 @@ test('POST /api/projects/:slug/sessions/new returns 400 for invalid slug', async
 
 test('POST /api/projects/:slug/sessions/:sessionId/resume is skipped (spawns terminal)', { skip: 'Endpoint launches an OS terminal via child_process; testing would open a real window on the runner.' }, () => {});
 
-test('hasBridgeSession: returns true for jsonl with bridge-session entry, false otherwise', () => {
-  const { hasBridgeSession } = require('../lib/session-flags');
+test('scanSession remoteControlled: true for jsonl with bridge-session entry, false otherwise', () => {
+  const { scanSession } = require('../lib/session-scan');
+  const hasBridgeSession = f => !!scanSession(f)?.remoteControlled;
   const tmpSlug = 'bridge-flag-helper';
   const dir = path.join(paths.PROJECTS_DIR, tmpSlug);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -672,6 +673,35 @@ test('GET /api/projects/:slug/sessions/:sessionId/activity returns 404 for unkno
 
 test('GET /api/projects/:slug/sessions/:sessionId/activity returns 400 for invalid slug', async () => {
   const res = await request(app).get('/api/projects/bad..slug/sessions/any/activity');
+  assert.strictEqual(res.status, 400);
+});
+
+test('GET /api/projects/:slug/sessions/:sessionId/download returns the raw .jsonl as an attachment', async () => {
+  const tmpSlug = 'download-proj';
+  const sid = 'dl111111-1111-1111-1111-111111111111';
+  const dir = path.join(paths.PROJECTS_DIR, tmpSlug);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const raw = '{"type":"user","message":{"content":"hello"}}\n{"type":"assistant","message":{"content":"hi"}}\n';
+  fs.writeFileSync(path.join(dir, sid + '.jsonl'), raw);
+
+  const res = await request(app).get(`/api/projects/${tmpSlug}/sessions/${sid}/download`).buffer(true).parse((r, cb) => {
+    let data = '';
+    r.on('data', c => { data += c; });
+    r.on('end', () => cb(null, data));
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body, raw);
+  assert.ok(res.headers['content-disposition'].includes(`${sid}.jsonl`));
+});
+
+test('GET /api/projects/:slug/sessions/:sessionId/download returns 404 for unknown session', async () => {
+  const res = await request(app).get(`/api/projects/${SLUG}/sessions/no-such-session/download`);
+  assert.strictEqual(res.status, 404);
+});
+
+test('GET /api/projects/:slug/sessions/:sessionId/download rejects invalid slug', async () => {
+  const res = await request(app).get('/api/projects/bad..slug/sessions/any/download');
   assert.strictEqual(res.status, 400);
 });
 

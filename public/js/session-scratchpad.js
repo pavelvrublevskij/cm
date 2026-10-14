@@ -138,10 +138,12 @@ Object.assign(Sessions, {
     const dir = open.path.slice(0, open.path.length - name.length);
     const modeBtn = (mode, label) =>
       `<button class="sf-mode-btn${open.mode === mode ? ' active' : ''}" onclick="Sessions.setScratchpadMode('${mode}')">${label}</button>`;
+    const canCopy = open.mode === 'source' && !open.loading && !open.error && !open.binary && !open.tooLarge;
 
     el.innerHTML = `<div class="sf-pane-header">
         <span class="sf-pane-path" title="${escapeHtml(open.path)}">${dir ? `<span class="sf-pane-dir">${escapeHtml(dir)}</span>` : ''}${escapeHtml(name)}</span>
         <div class="sf-pane-actions">
+          ${canCopy ? `<button class="btn btn-sm" id="sp-copy-btn" onclick="Sessions.copyScratchpadSource()">Copy</button>` : ''}
           ${open.canPreview ? `<div class="sf-mode-toggle">${modeBtn('source', 'Source')}${modeBtn('preview', 'Preview')}</div>` : ''}
           <div class="action-menu">
             <button class="btn btn-sm action-menu-btn" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)" aria-label="File actions">&#8942;</button>
@@ -177,6 +179,12 @@ Object.assign(Sessions, {
       body.innerHTML = '<div class="sf-editor-host code-colors" id="sp-editor-host"></div>';
       Sessions._spEditor = CodeView.mount(document.getElementById('sp-editor-host'), open.text, open.path, { readOnly: true });
     }
+  },
+
+  copyScratchpadSource() {
+    const open = Sessions._spOpen;
+    if (!open || open.text == null) return;
+    copyToClipboard(open.text, 'Source copied');
   },
 
   _refreshScratchpadList() {

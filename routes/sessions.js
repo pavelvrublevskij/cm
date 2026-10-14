@@ -7,22 +7,18 @@ const { CLAUDE_DIR } = require('../lib/paths');
 const planCache = require('../lib/plan-cache');
 const { getProjectUsageMap, getSessionUsage, calcCost } = require('../lib/usage-index');
 const { decodeSlug } = require('../lib/slug');
-const { getCustomTitle } = require('../lib/session-title');
-const { collectBranches } = require('../lib/session-branches');
-const { hasBridgeSession } = require('../lib/session-flags');
+const { scanSession, firstMeaningfulPrompt } = require('../lib/session-scan');
 const terminalServer = require('../lib/terminal-server');
 const activeSessions = require('../lib/active-sessions');
 const { stampActive, listAllActiveSessions } = require('../lib/session-status');
-const { MAX_SNIPPETS, extractEntrySnippets, extractMetaSnippet } = require('../lib/session-search');
+const { MAX_SNIPPETS, extractEntrySnippets, extractMetaSnippet, parseSearchQuery, collectEntryFacts, matchFilters } = require('../lib/session-search');
 const { collectFromJsonl, collectFromDir } = require('../lib/session-activity');
 const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/session-archive');
+const { getAllSessionColors, getSessionColors, setSessionColor, isValidColor } = require('../lib/session-colors');
 const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
 
 const router = express.Router({ mergeParams: true });
-
-const _titleCache = new Map();
-const TITLE_CACHE_TTL = 60000;
 
 // Shared by the active-session routes (deactivate / open-readonly / close-readonly): validates
 // :slug and :sessionId from the URL, writing the 400 response itself on failure. Returns null on
@@ -49,13 +45,9 @@ function validateInstanceId(req, res) {
   return instanceId;
 }
 
-function getCachedTitle(filePath) {
-  const nowMs = Date.now();
-  const cached = _titleCache.get(filePath);
-  if (cached && nowMs - cached.cachedAt < TITLE_CACHE_TTL) return cached.title;
-  const title = getCustomTitle(filePath) || findFirstMeaningfulPrompt(filePath);
-  _titleCache.set(filePath, { title, cachedAt: nowMs });
-  return title;
+function sessionTitle(meta) {
+  if (!meta) return '';
+  return meta.customTitle || meta.summaryTitle || firstMeaningfulPrompt(meta, isSkippablePrompt, normalizePrompt);
 }
 
 function normalizePrompt(text) {
@@ -72,20 +64,6 @@ function isSkippablePrompt(text) {
   return normalizePrompt(t) === '/clear';
 }
 
-function findFirstMeaningfulPrompt(filePath) {
-  try {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.type !== 'user') continue;
-        const raw = typeof entry.message?.content === 'string' ? entry.message.content : '';
-        if (raw && !isSkippablePrompt(raw)) return normalizePrompt(raw).slice(0, 200);
-      } catch (_) {}
-    }
-  } catch (_) {}
-  return '';
-}
 
 function safeSpawn(cmd, args, opts) {
   const proc = spawn(cmd, args, opts);
@@ -127,6 +105,7 @@ function launchTerminal(projectPath, cmd) {
 router.get('/active', wrapRoute((req, res) => {
   const all = listAllActiveSessions();
   const archivedBySlug = {};
+  const colorsBySlug = {};
   const result = all
     .filter(({ sessionId }) => !sessionId.includes('..') && !sessionId.includes('/') && !sessionId.includes('\\'))
     .map(({ slug, sessionId, kind, instanceId }) => {
@@ -135,15 +114,22 @@ router.get('/active', wrapRoute((req, res) => {
       let lastGitBranch = '';
       if (dir) {
         const filePath = path.join(dir, sessionId + '.jsonl');
-        title = getCachedTitle(filePath);
-        const branches = collectBranches(filePath);
+        const meta = scanSession(filePath);
+        title = sessionTitle(meta);
+        const branches = meta ? meta.gitBranches : [];
         lastGitBranch = branches.length ? branches[branches.length - 1] : '';
       }
       if (!archivedBySlug[slug]) archivedBySlug[slug] = getArchivedIds(slug);
       const archived = archivedBySlug[slug].has(sessionId);
-      return { slug, sessionId, title: title || '', kind, instanceId, lastGitBranch, archived };
+      if (!colorsBySlug[slug]) colorsBySlug[slug] = getSessionColors(slug);
+      const color = colorsBySlug[slug][sessionId] || null;
+      return { slug, sessionId, title: title || '', kind, instanceId, lastGitBranch, archived, color };
     });
   res.json(result);
+}));
+
+router.get('/session-colors', wrapRoute((req, res) => {
+  res.json(getAllSessionColors());
 }));
 
 /** Newest first, tolerating entries whose timestamp never got recorded. */
@@ -176,15 +162,16 @@ function listProjectSessions(slug, dir, showArchived) {
       })).filter(s => showArchived ? archivedIds.has(s.sessionId) : !archivedIds.has(s.sessionId));
       sessions.forEach(s => {
         const filePath = path.join(dir, s.sessionId + '.jsonl');
-        const custom = getCustomTitle(filePath);
+        const meta = scanSession(filePath);
+        const custom = meta ? (meta.customTitle || meta.summaryTitle) : '';
         if (custom) s.summary = custom;
-        s.gitBranches = collectBranches(filePath);
+        s.gitBranches = meta ? meta.gitBranches : [];
         if (s.gitBranches.length) {
           if (!s.gitBranch) s.gitBranch = s.gitBranches[0];
           s.lastGitBranch = s.gitBranches[s.gitBranches.length - 1];
         }
-        s.remoteControlled = hasBridgeSession(filePath);
-        if (isSkippablePrompt(s.firstPrompt)) s.firstPrompt = findFirstMeaningfulPrompt(filePath);
+        s.remoteControlled = !!meta?.remoteControlled;
+        if (isSkippablePrompt(s.firstPrompt)) s.firstPrompt = firstMeaningfulPrompt(meta, isSkippablePrompt, normalizePrompt);
       });
       const usageMap = getProjectUsageMap(slug);
       sessions.forEach(s => {
@@ -200,65 +187,23 @@ function listProjectSessions(slug, dir, showArchived) {
   // Fallback: parse .jsonl files directly
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
   const sessions = files.map(f => {
-    const filePath = path.join(dir, f);
-    const stat = fs.statSync(filePath);
-    const session = {
+    const meta = scanSession(path.join(dir, f));
+    if (!meta) return { slug, sessionId: f.replace('.jsonl', ''), messageCount: 0 };
+    const { stat } = meta;
+    return {
       slug,
       sessionId: f.replace('.jsonl', ''),
-      summary: '',
-      firstPrompt: '',
-      messageCount: 0,
-      created: null,
-      modified: null,
-      gitBranch: '',
-      lastGitBranch: '',
-      gitBranches: [],
+      summary: meta.customTitle,
+      firstPrompt: firstMeaningfulPrompt(meta, isSkippablePrompt, normalizePrompt),
+      messageCount: meta.userCount,
+      created: meta.firstUserTimestamp || stat.birthtime.toISOString(),
+      modified: meta.lastUserTimestamp || stat.mtime.toISOString(),
+      gitBranch: meta.firstUserBranch,
+      lastGitBranch: meta.lastUserBranch,
+      gitBranches: meta.gitBranches,
       isSidechain: false,
-      remoteControlled: false
+      remoteControlled: meta.remoteControlled
     };
-
-    try {
-      const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-      let userMessages = 0;
-      const branchSeen = new Set();
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line);
-          if (entry.type === 'custom-title' && entry.customTitle) {
-            session.summary = entry.customTitle;
-          } else if (entry.type === 'bridge-session') {
-            session.remoteControlled = true;
-          } else if (entry.type === 'user') {
-            userMessages++;
-            if (userMessages === 1) {
-              session.created = entry.timestamp || stat.birthtime.toISOString();
-              session.gitBranch = entry.gitBranch || '';
-            }
-            if (!session.firstPrompt) {
-              const raw = typeof entry.message?.content === 'string' ? entry.message.content : '';
-              if (!isSkippablePrompt(raw)) session.firstPrompt = normalizePrompt(raw).slice(0, 200);
-            }
-            if (entry.gitBranch) {
-              session.lastGitBranch = entry.gitBranch;
-              if (!branchSeen.has(entry.gitBranch)) {
-                branchSeen.add(entry.gitBranch);
-                session.gitBranches.push(entry.gitBranch);
-              }
-            }
-            session.modified = entry.timestamp || stat.mtime.toISOString();
-          }
-        } catch (_) { /* malformed JSONL line, skip */ }
-      }
-      session.messageCount = userMessages;
-      if (!session.created) session.created = stat.birthtime.toISOString();
-      if (!session.modified) session.modified = stat.mtime.toISOString();
-    } catch (_) {
-      /* unreadable file, use stat times */
-      session.created = stat.birthtime.toISOString();
-      session.modified = stat.mtime.toISOString();
-    }
-
-    return session;
   });
 
   const usageMap = getProjectUsageMap(slug);
@@ -301,10 +246,12 @@ router.get('/:slug/sessions', wrapRoute((req, res) => {
 }));
 
 /**
- * Full-text search over one project's sessions. Every result carries its own `slug` so a
- * group-wide search can tell the caller which project each hit came from.
+ * Full-text search over one project's sessions, narrowed by any n:/f:/t:/b: filters in `query`
+ * (see parseSearchQuery). Every result carries its own `slug` so a group-wide search can tell the
+ * caller which project each hit came from.
  */
-function searchProjectSessions(slug, dir, q, qLower) {
+function searchProjectSessions(slug, dir, query) {
+  const { text: q, textLower: qLower, filters, hasFilters } = query;
   const archivedIds = getArchivedIds(slug);
 
   // Load index metadata if available
@@ -335,6 +282,7 @@ function searchProjectSessions(slug, dir, q, qLower) {
     const gitBranches = [];
     const branchSeen = new Set();
     let customTitle = '';
+    const facts = { files: new Set(), tools: new Map() };
 
     try {
       const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
@@ -346,6 +294,7 @@ function searchProjectSessions(slug, dir, q, qLower) {
             continue;
           }
           if (entry.type !== 'user' && entry.type !== 'assistant') continue;
+          if (hasFilters) collectEntryFacts(entry, facts);
 
           if (entry.type === 'user') {
             messageCount++;
@@ -367,7 +316,7 @@ function searchProjectSessions(slug, dir, q, qLower) {
             modified = entry.timestamp;
           }
 
-          if (snippets.length >= MAX_SNIPPETS) continue;
+          if (!q || snippets.length >= MAX_SNIPPETS) continue;
 
           const newSnippets = extractEntrySnippets(entry, q, qLower, snippets.length);
           snippets.push(...newSnippets);
@@ -376,19 +325,19 @@ function searchProjectSessions(slug, dir, q, qLower) {
     } catch (_) { continue; }
 
     // Also search sub-agent conversations
-    if (snippets.length < MAX_SNIPPETS) {
+    if ((q && snippets.length < MAX_SNIPPETS) || hasFilters) {
       const subagentDir = path.join(dir, sessionId, 'subagents');
       if (fs.existsSync(subagentDir)) {
         try {
           for (const sf of fs.readdirSync(subagentDir).filter(sf => sf.endsWith('.jsonl'))) {
-            if (snippets.length >= MAX_SNIPPETS) break;
+            if (!hasFilters && snippets.length >= MAX_SNIPPETS) break;
             try {
               const subLines = fs.readFileSync(path.join(subagentDir, sf), 'utf-8').split('\n').filter(Boolean);
               for (const line of subLines) {
-                if (snippets.length >= MAX_SNIPPETS) break;
                 try {
                   const entry = JSON.parse(line);
-                  snippets.push(...extractEntrySnippets(entry, q, qLower, snippets.length));
+                  if (hasFilters) collectEntryFacts(entry, facts);
+                  if (q && snippets.length < MAX_SNIPPETS) snippets.push(...extractEntrySnippets(entry, q, qLower, snippets.length));
                 } catch (_) {}
               }
             } catch (_) {}
@@ -399,12 +348,19 @@ function searchProjectSessions(slug, dir, q, qLower) {
 
     // Also check title/metadata fields (custom title, index summary, first prompt)
     const meta = indexMeta[sessionId];
-    if (snippets.length === 0) {
+    if (q && snippets.length === 0) {
       const metaSnippet = extractMetaSnippet([customTitle, meta?.summary, meta?.firstPrompt, firstPrompt], q, qLower);
       if (metaSnippet) snippets.push(metaSnippet);
     }
 
-    if (snippets.length === 0) continue;
+    if (q && snippets.length === 0) continue;
+
+    if (hasFilters) {
+      const name = customTitle || meta?.summary || meta?.firstPrompt || firstPrompt;
+      const filterSnippets = matchFilters(filters, { ...facts, name, branches: gitBranches });
+      if (!filterSnippets) continue;
+      snippets.unshift(...filterSnippets);
+    }
 
     const session = {
       slug,
@@ -436,9 +392,10 @@ router.get('/:slug/sessions/search', wrapRoute((req, res) => {
 
   const q = (req.query.q || '').trim();
   if (q.length < 2) return res.json([]);
-  const qLower = q.toLowerCase();
+  const query = parseSearchQuery(q);
+  if (!query.text && !query.hasFilters) return res.json([]);
 
-  const results = forProjectScope(req, (slug, dir) => searchProjectSessions(slug, dir, q, qLower));
+  const results = forProjectScope(req, (slug, dir) => searchProjectSessions(slug, dir, query));
   res.json(results.sort(byNewestFirst));
 }));
 
@@ -460,11 +417,8 @@ router.get('/:slug/sessions/with-plans', wrapRoute((req, res) => {
   for (const f of files) {
     const sessionId = f.replace('.jsonl', '');
     if (planCache.get(sessionId)) { sessionIds.push(sessionId); continue; }
-    try {
-      const content = fs.readFileSync(path.join(dir, f), 'utf-8');
-      const hasPlan = planStems.some(stem => content.includes(stem));
-      if (hasPlan) { planCache.set(sessionId, true); sessionIds.push(sessionId); }
-    } catch (_) {}
+    const meta = scanSession(path.join(dir, f), planStems);
+    if (meta?.hasPlan) { planCache.set(sessionId, true); sessionIds.push(sessionId); }
   }
   res.json(sessionIds);
 }));
@@ -589,10 +543,11 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
   const limit = parseInt(req.query.limit) || 20;
   const page = messages.slice(offset, offset + limit);
 
-  const gitBranches = collectBranches(filePath);
+  const meta = scanSession(filePath);
+  const gitBranches = meta ? meta.gitBranches : [];
   const lastGitBranch = gitBranches.length ? gitBranches[gitBranches.length - 1] : '';
   const usage = getSessionUsage(req.params.slug, sessionId);
-  const customTitle = getCustomTitle(filePath);
+  const customTitle = meta ? (meta.customTitle || meta.summaryTitle) : '';
   planCache.set(sessionId, hasPlan);
 
   const gitBranch = gitBranches[0] || '';
@@ -609,7 +564,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
     lastGitBranch,
     isSidechain,
     hasPlan,
-    remoteControlled: hasBridgeSession(filePath),
+    remoteControlled: !!meta?.remoteControlled,
     active: isActive,
     archived: archivedIds.has(sessionId),
   };
@@ -655,6 +610,23 @@ router.get('/:slug/sessions/:sessionId/activity', wrapRoute((req, res) => {
   for (const item of items) byCategory[item.category]++;
 
   res.json({ items, stats: { total: items.length, byCategory } });
+}));
+
+router.get('/:slug/sessions/:sessionId/download', wrapRoute((req, res) => {
+  const dir = safeSlug(req.params.slug);
+  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
+
+  const sessionId = req.params.sessionId;
+  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const filePath = path.join(dir, sessionId + '.jsonl');
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Session not found' });
+
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Content-Disposition', `attachment; filename="${sessionId}.jsonl"`);
+  res.send(fs.readFileSync(filePath));
 }));
 
 router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res) => {
@@ -820,6 +792,24 @@ router.post('/:slug/sessions/:sessionId/rename', wrapRoute((req, res) => {
   }
 
   res.json({ ok: true, title });
+}));
+
+router.post('/:slug/sessions/:sessionId/color', wrapRoute((req, res) => {
+  const dir = safeSlug(req.params.slug);
+  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
+
+  const sessionId = req.params.sessionId;
+  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const color = req.body && req.body.color;
+  if (color != null && !isValidColor(color)) {
+    return res.status(400).json({ error: 'Color must be a #rrggbb hex value or null' });
+  }
+
+  setSessionColor(req.params.slug, sessionId, color || null);
+  res.json({ ok: true, color: color ? color.toLowerCase() : null });
 }));
 
 router.post('/:slug/sessions/:sessionId/archive', wrapRoute((req, res) => {

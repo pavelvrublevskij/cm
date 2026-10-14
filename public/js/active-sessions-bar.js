@@ -5,6 +5,7 @@ const ActiveSessionsBar = {
   _sessions: [],
   _lastSidebarKey: null,
   _projectBranches: {},
+  COLORS: ['#f85149', '#f0883e', '#d29922', '#3fb950', '#2bb5a8', '#388bfd', '#a371f7', '#db61a2'],
 
   start() {
     ActiveSessionsBar._applyPosition(localStorage.getItem(ActiveSessionsBar.POSITION_KEY) || 'bottom');
@@ -16,6 +17,18 @@ const ActiveSessionsBar = {
       const p = document.getElementById('asb-new-panel');
       if (p) p.remove();
     });
+  },
+
+  _colorStyle(s) {
+    return s.color ? `--session-color:${s.color}` : '';
+  },
+
+  applyColor(slug, sessionId, color) {
+    ActiveSessionsBar._sessions.forEach(s => {
+      if (s.slug === slug && s.sessionId === sessionId) s.color = color;
+    });
+    ActiveSessionsBar._render();
+    ActiveSessionsBar._renderSidebar();
   },
 
   _applyPosition(position) {
@@ -129,7 +142,7 @@ const ActiveSessionsBar = {
         const archiveIcon = s.archived ? `<span class="asb-archive-icon" title="Session is archived">${ActiveSessionsBar._archiveIconSvg}</span>` : '';
         const roTitle = s.kind === 'readonly' ? ' (read-only)' : '';
         const instanceAttr = s.instanceId ? ` data-asb-instance="${escapeHtml(s.instanceId)}"` : '';
-        return `<div class="asb-pill${isCurrent ? ' asb-pill--current' : ''}${warn ? ' asb-pill--branch-warn' : ''}" data-asb-session="${escapeHtml(s.sessionId)}" data-asb-slug="${escapeHtml(s.slug)}" data-asb-kind="${escapeHtml(s.kind)}"${instanceAttr} title="${escapeHtml(s.title || s.sessionId)}${roTitle}">
+        return `<div class="asb-pill${isCurrent ? ' asb-pill--current' : ''}${warn ? ' asb-pill--branch-warn' : ''}${s.color ? ' asb-pill--colored' : ''}" style="${ActiveSessionsBar._colorStyle(s)}" data-asb-session="${escapeHtml(s.sessionId)}" data-asb-slug="${escapeHtml(s.slug)}" data-asb-kind="${escapeHtml(s.kind)}"${instanceAttr} title="${escapeHtml(s.title || s.sessionId)}${roTitle}">
           <span class="session-active-dot session-active-dot--${s.kind}"></span>
           ${warnIcon}${archiveIcon}
           <span class="asb-session">${escapeHtml(label)}</span>
@@ -149,6 +162,7 @@ const ActiveSessionsBar = {
 
     container.querySelectorAll('.asb-pill').forEach(el => {
       el.addEventListener('click', () => ActiveSessionsBar.open(el.dataset.asbSlug, el.dataset.asbSession, el.dataset.asbKind === 'readonly'));
+      el.addEventListener('contextmenu', e => SessionColors.showMenu(e, el.dataset.asbSlug, el.dataset.asbSession));
     });
     container.querySelectorAll('[data-asb-close-session]').forEach(btn => {
       btn.addEventListener('click', e => {
@@ -182,7 +196,7 @@ const ActiveSessionsBar = {
 
   _renderSidebar() {
     const { currentSessionId, currentReadOnly, currentInstanceId } = ActiveSessionsBar._currentSelector();
-    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
+    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived + '|' + (s.color || '')).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
     if (key === ActiveSessionsBar._lastSidebarKey) return;
     ActiveSessionsBar._lastSidebarKey = key;
 
@@ -209,8 +223,9 @@ const ActiveSessionsBar = {
         const label = (s.title || s.sessionId.slice(0, 16)).slice(0, 28);
         const isCurrent = ActiveSessionsBar._isCurrent(s, currentSessionId, currentReadOnly, currentInstanceId);
         const div = document.createElement('div');
-        div.className = 'nav-item project-active-sub' + (isCurrent ? ' active' : '');
+        div.className = 'nav-item project-active-sub' + (isCurrent ? ' active' : '') + (s.color ? ' project-active-sub--colored' : '');
         div.style.setProperty('--tree-indent', indent + 'px');
+        if (s.color) div.style.setProperty('--session-color', s.color);
         div.title = (s.title || s.sessionId) + (s.kind === 'readonly' ? ' (read-only)' : '');
         const closeBtn = document.createElement('button');
         closeBtn.className = 'asb-close asb-close--sidebar';
@@ -232,6 +247,9 @@ const ActiveSessionsBar = {
         div.addEventListener('click', (function(slug, sessionId, kind) {
           return () => ActiveSessionsBar.open(slug, sessionId, kind === 'readonly');
         }(s.slug, s.sessionId, s.kind)));
+        div.addEventListener('contextmenu', (function(slug, sessionId) {
+          return e => SessionColors.showMenu(e, slug, sessionId);
+        }(s.slug, s.sessionId)));
         anchor.insertAdjacentElement('afterend', div);
         anchor = div;
       }

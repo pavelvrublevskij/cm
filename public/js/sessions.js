@@ -388,7 +388,8 @@ const Sessions = {
     return `<div class="session-search-wrap">
       <div class="session-search-container" onmouseenter="Sessions._cancelHideHistoryDropdown()" onmouseleave="Sessions._hideHistoryDropdownDelayed()">
         <input type="text" class="session-search" id="session-search-input"
-          placeholder="${Sessions._groupScope && group ? `Search sessions across ${escapeAttr(group.groupLabel)}...` : 'Search sessions...'}"
+          placeholder="${Sessions._groupScope && group ? `Search sessions across ${escapeAttr(group.groupLabel)}... (n: f: t: b:)` : 'Search sessions... (n: f: t: b:)'}"
+          title="Filters: n:name  f:file  t:tool  b:branch — quote values with spaces, e.g. f:&quot;my file.js&quot;"
           oninput="Sessions._hideHistoryDropdown(); Sessions.onSearch('${slug}', this.value)"
           onfocus="Sessions.showHistory('${slug}')"
           onblur="Sessions._hideHistoryDropdownDelayed()">
@@ -468,11 +469,40 @@ const Sessions = {
     return new Date(ts).toLocaleDateString();
   },
 
-  _renderHistoryInto(dropdownId, storageKey, applyHandler, removeHandler, clearHandler) {
+  SEARCH_FILTER_HINTS: [
+    { prefix: 'n:', label: 'session name', example: 'n:refactor' },
+    { prefix: 'f:', label: 'file the session edited', example: 'f:parser.js' },
+    { prefix: 't:', label: 'tool used', example: 't:bash' },
+    { prefix: 'b:', label: 'git branch', example: 'b:main' },
+  ],
+
+  /** Filter hints shown at the top of the history dropdown; a click types the prefix into the box. */
+  _searchHintsHtml(slug) {
+    const rows = Sessions.SEARCH_FILTER_HINTS.map(h =>
+      `<div class="search-history-item search-hint-item" data-prefix="${h.prefix}" onmousedown="Sessions._applySearchHint(event, '${slug}', this.dataset.prefix)">
+        <span class="search-hint-prefix">${h.prefix}</span>
+        <span class="search-history-query">${escapeHtml(h.label)}</span>
+        <span class="search-history-time">${escapeHtml(h.example)}</span>
+      </div>`
+    ).join('');
+    return `<div class="search-history-group">Filters &mdash; combine with text, quote values with spaces</div>${rows}`;
+  },
+
+  _applySearchHint(event, slug, prefix) {
+    event.preventDefault();
+    const input = document.getElementById('session-search-input');
+    if (!input) return;
+    input.value = input.value.trim() ? input.value.trimEnd() + ' ' + prefix : prefix;
+    input.focus();
+    input.selectionStart = input.selectionEnd = input.value.length;
+    Sessions._hideHistoryDropdown();
+  },
+
+  _renderHistoryInto(dropdownId, storageKey, applyHandler, removeHandler, clearHandler, prefixHtml = '') {
     const dropdown = document.getElementById(dropdownId);
     if (!dropdown) return;
     const h = Sessions._getHistory(storageKey);
-    if (!h.length) { dropdown.style.display = 'none'; return; }
+    if (!h.length && !prefixHtml) { dropdown.style.display = 'none'; return; }
 
     const now = Date.now();
     const DAY = 86400000;
@@ -483,7 +513,7 @@ const Sessions = {
       { label: 'Older',     items: h.filter(e => now - e.ts >= 7 * DAY) },
     ].filter(g => g.items.length);
 
-    let html = '';
+    let html = prefixHtml;
     for (const g of groups) {
       html += `<div class="search-history-group">${escapeHtml(g.label)}</div>`;
       for (const e of g.items) {
@@ -495,19 +525,22 @@ const Sessions = {
         </div>`;
       }
     }
-    html += `<div class="search-history-clear"><button onmousedown="event.stopPropagation(); ${clearHandler}()">Clear history</button></div>`;
+    if (h.length) html += `<div class="search-history-clear"><button onmousedown="event.stopPropagation(); ${clearHandler}()">Clear history</button></div>`;
 
     dropdown.innerHTML = html;
     dropdown.style.display = 'block';
   },
 
   _renderHistoryDropdown(slug) {
+    const input = document.getElementById('session-search-input');
+    const empty = !input || !input.value.trim();
     Sessions._renderHistoryInto(
       'search-history-dropdown',
       Sessions._searchKey(slug),
       `Sessions._applyHistory(event, '${slug}', this)`,
       'Sessions._removeFromHistory',
-      'Sessions._clearHistory'
+      'Sessions._clearHistory',
+      empty ? Sessions._searchHintsHtml(slug) : ''
     );
   },
 
@@ -617,7 +650,7 @@ const Sessions = {
       const label = sn.label ? `<span class="snippet-label">${escapeHtml(sn.label)}</span> ` : '';
       const roleTag = sn.role === 'user' ? 'You' : sn.role === 'assistant' ? 'Claude' : '';
       const roleHtml = roleTag ? `<span class="snippet-role snippet-role-${sn.role}">${roleTag}</span> ` : '';
-      return `<div class="session-snippet snippet-${sn.role}">${roleHtml}${label}${Sessions.highlightMatch(sn.text, Sessions._lastQuery)}</div>`;
+      return `<div class="session-snippet snippet-${sn.role}">${roleHtml}${label}${Sessions.highlightMatch(sn.text, Sessions._snippetTerm(sn))}</div>`;
     }).join('');
     // Under group scope the list and search both mix sessions from sibling projects, so every card
     // is badged with the project it belongs to — badging only the foreign ones would leave the
@@ -667,6 +700,34 @@ const Sessions = {
   },
 
   _lastQuery: '',
+
+  /** Splits a query into free text and its n:/f:/t:/b: filter values — mirrors the server's parser. */
+  parseSearchTerms(q) {
+    const keys = { n: 'name', f: 'file', t: 'tool', b: 'branch' };
+    const terms = { text: '', name: [], file: [], tool: [], branch: [] };
+    const rest = [];
+    const re = /(?:^|\s)([nftb]):(?:"([^"]*)"|(\S+))|(\S+)/g;
+    let m;
+    while ((m = re.exec(q || ''))) {
+      if (m[1]) {
+        const value = (m[2] !== undefined ? m[2] : m[3]).trim();
+        if (value) terms[keys[m[1]]].push(value);
+      } else {
+        rest.push(m[4]);
+      }
+    }
+    terms.text = rest.join(' ');
+    return terms;
+  },
+
+  /** What to highlight in a snippet: a filter snippet highlights its filter's value, others the free text. */
+  _snippetTerm(sn) {
+    const terms = Sessions.parseSearchTerms(Sessions._lastQuery);
+    if (sn.role === 'meta' && Array.isArray(terms[sn.label])) {
+      return terms[sn.label].find(v => sn.text.toLowerCase().includes(v.toLowerCase())) || '';
+    }
+    return terms.text;
+  },
 
   highlightMatch(text, query) {
     if (!query) return escapeHtml(text);
@@ -765,6 +826,8 @@ const Sessions = {
   CONVERSATION_HIDDEN_KEY: 'claude-manager-conversation-hidden',
   SHOW_TOOL_DETAILS_KEY: 'claude-manager-show-tool-details',
   DEFAULT_READONLY_KEY: 'claude-manager-default-readonly',
+  SNAPSHOT_KEY: 'claude-manager-session-snapshots',
+  SNAPSHOT_MAX: 30,
   _refreshTimer: null,
 
   defaultReadOnly() {
@@ -773,6 +836,53 @@ const Sessions = {
 
   setDefaultReadOnly(on) {
     localStorage.setItem(Sessions.DEFAULT_READONLY_KEY, on ? '1' : '0');
+  },
+
+  _snapshotKey(slug, sessionId) { return `${slug}|${sessionId}`; },
+
+  _loadSnapshots() {
+    try { return JSON.parse(sessionStorage.getItem(Sessions.SNAPSHOT_KEY) || '{}'); }
+    catch (_) { return {}; }
+  },
+
+  _saveSnapshots(map) {
+    try { sessionStorage.setItem(Sessions.SNAPSHOT_KEY, JSON.stringify(map)); }
+    catch (_) { /* private mode / quota exceeded — restore is a convenience, not critical */ }
+  },
+
+  _getSnapshot(slug, sessionId) {
+    if (!slug || !sessionId) return null;
+    return Sessions._loadSnapshots()[Sessions._snapshotKey(slug, sessionId)] || null;
+  },
+
+  /** Remember where the user left off in this session — active tab, conversation scroll
+   *  position, how many messages were loaded, any active search filter, and the file open in the
+   *  Files tab — so returning to it (active sessions bar, back navigation, or a page reload)
+   *  restores that instead of resetting. */
+  captureSnapshot() {
+    const state = Sessions.detailState;
+    if (!state.slug || !state.sessionId) return;
+    const scroller = Sessions.scrollContainer();
+    const openFile = (typeof SessionFiles !== 'undefined' && SessionFiles.open)
+      ? { path: SessionFiles.open.path, mode: SessionFiles.open.mode, ctx: SessionFiles.open.ctx || null }
+      : null;
+    const map = Sessions._loadSnapshots();
+    const key = Sessions._snapshotKey(state.slug, state.sessionId);
+    delete map[key];
+    map[key] = {
+      tab: Sessions._activeTab || 'conversation',
+      scrollTop: scroller ? scroller.scrollTop : 0,
+      offset: state.offset || 0,
+      searchQuery: Sessions._detailSearchQuery || '',
+      file: openFile,
+      ts: Date.now()
+    };
+    const keys = Object.keys(map);
+    if (keys.length > Sessions.SNAPSHOT_MAX) {
+      keys.sort((a, b) => (map[a].ts || 0) - (map[b].ts || 0));
+      delete map[keys[0]];
+    }
+    Sessions._saveSnapshots(map);
   },
 
   refreshIntervalMs() {
@@ -951,6 +1061,7 @@ const Sessions = {
     title.title = titleText;
     Sessions._detailInfo = info || {};
     Sessions._detailHasPlan = false;
+    const snapshot = Sessions._getSnapshot(slug, sessionId);
     Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0, readOnly: !!readOnly, readOnlyInstanceId: null };
     Sessions.renderDetailMeta(null);
     Sessions.applyReadOnlyState();
@@ -1009,20 +1120,38 @@ const Sessions = {
         .catch(() => {});
     }
 
-    // Start on the Files tab; loadContext will switch to Conversation if nothing changed
-    Sessions.switchTab('file-changes');
+    // Start on the saved tab if we're restoring one, otherwise Files — loadContext may still
+    // switch to Conversation if nothing changed, but the restore below has the final say.
+    Sessions.switchTab(snapshot ? snapshot.tab : 'file-changes');
     const ctxEl = document.getElementById('sf-changed');
     if (ctxEl) { ctxEl.innerHTML = ''; }
     const spEl = document.getElementById('session-scratchpad');
     if (spEl) { spEl.innerHTML = ''; }
     const artEl = document.getElementById('session-artifacts');
     if (artEl) { artEl.innerHTML = ''; }
-    Sessions.loadContext(sessionId, info);
-    Sessions.checkScratchpad();
-    Sessions.checkArtifacts();
 
-    await Sessions.loadMore();
+    await Promise.all([
+      Sessions.loadContext(sessionId, info),
+      Sessions.checkScratchpad(),
+      Sessions.checkArtifacts(),
+      snapshot && snapshot.offset > 20 ? Sessions._restoreMessages(snapshot.offset) : Sessions.loadMore()
+    ]);
     Sessions.setupScroll();
+
+    if (snapshot) {
+      Sessions.switchTab(snapshot.tab);
+      if (snapshot.searchQuery) {
+        const detailSearchInput = document.getElementById('session-detail-search-input');
+        if (detailSearchInput) detailSearchInput.value = snapshot.searchQuery;
+        Sessions._detailSearchQuery = snapshot.searchQuery;
+        Sessions.applyDetailFilter(snapshot.searchQuery);
+      }
+      if (snapshot.file && typeof SessionFiles !== 'undefined') {
+        SessionFiles.openFile(snapshot.file.path, { mode: snapshot.file.mode, ctx: snapshot.file.ctx });
+      }
+      const scroller = Sessions.scrollContainer();
+      if (scroller) requestAnimationFrame(() => { scroller.scrollTop = snapshot.scrollTop; });
+    }
 
     if (!readOnly && typeof TerminalPanel !== 'undefined' && TerminalPanel.shouldAutoOpen() && !TerminalPanel.isOpen()) {
       TerminalPanel.open(slug, sessionId);
@@ -1182,6 +1311,15 @@ const Sessions = {
   scrollToTop() {
     const scroller = Sessions.scrollContainer();
     if (scroller) scroller.scrollTo({ top: 0, behavior: 'smooth' });
+  },
+
+  /** Re-load messages page by page up to a previously-seen offset, so a restored session shows
+   *  as many messages as it did when the user left instead of just the first page. */
+  async _restoreMessages(targetOffset) {
+    await Sessions.loadMore();
+    while (Sessions.detailState.hasMore && Sessions.detailState.offset < targetOffset) {
+      await Sessions.loadMore();
+    }
   },
 
   async loadMore() {
@@ -1348,6 +1486,29 @@ const Sessions = {
     copyToClipboard(id, 'Session ID copied');
   },
 
+  async downloadTranscript() {
+    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
+    const { slug, sessionId } = Sessions.detailState;
+    if (!slug || !sessionId) return;
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/download`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || res.statusText);
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${sessionId}.jsonl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast('Download failed: ' + e.message, 'error');
+    }
+  },
+
   renameDetail() {
     const { slug, sessionId } = Sessions.detailState;
     if (!slug || !sessionId) return;
@@ -1413,6 +1574,7 @@ const Sessions = {
     const spBtn = document.getElementById('tab-btn-scratchpad');
     const artBtn = document.getElementById('tab-btn-artifacts');
     if (!ctx || !msgs || !fcBtn || !cvBtn) return;
+    Sessions._activeTab = tab;
     const isFC = tab === 'file-changes';
     const isAct = tab === 'activity';
     const isSP = tab === 'scratchpad';
