@@ -5652,11 +5652,6 @@ mark.search-highlight {
   flex-wrap: wrap;
 }
 
-.artifact-project-label {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
 .artifact-ticket-badge {
   background: var(--accent-bg);
   color: var(--accent);

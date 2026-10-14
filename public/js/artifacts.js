@@ -30,7 +30,26 @@ const Artifacts = {
       list.innerHTML = '<div class="empty-state"><p>No artifacts published yet</p></div>';
       return;
     }
-    list.innerHTML = `<div class="card-grid">${artifacts.map(a => Artifacts._cardHtml(a, { showProject: true })).join('')}</div>`;
+    list.innerHTML = Artifacts._groupByProject(artifacts).map(g => `
+      <div class="artifact-group">
+        <div class="artifact-group-title">${escapeHtml(decodeName(g.slug))} (${g.artifacts.length})</div>
+        <div class="card-grid">${g.artifacts.map(a => Artifacts._cardHtml(a)).join('')}</div>
+      </div>
+    `).join('');
+  },
+
+  /** Groups keep the incoming (newest-first) order, so the project with the latest artifact comes first. */
+  _groupByProject(artifacts) {
+    const groups = [];
+    const bySlug = {};
+    for (const a of artifacts) {
+      if (!bySlug[a.slug]) {
+        bySlug[a.slug] = { slug: a.slug, artifacts: [] };
+        groups.push(bySlug[a.slug]);
+      }
+      bySlug[a.slug].artifacts.push(a);
+    }
+    return groups;
   },
 
   /** Called once when a project is opened: fetches its artifacts and shows/hides the project tab. */
@@ -80,7 +99,6 @@ const Artifacts = {
   _cardHtml(a, opts = {}) {
     const favicon = a.favicon ? escapeHtml(a.favicon) : '📎';
     const ticketBadge = a.ticket ? `<span class="badge artifact-ticket-badge">${escapeHtml(a.ticket)}</span>` : '';
-    const projectLabel = opts.showProject ? `<span class="artifact-project-label">${escapeHtml(decodeName(a.slug))}</span>` : '';
     const desc = a.description ? `<div class="artifact-card-desc">${escapeHtml(a.description)}</div>` : '';
     const sessionAction = opts.hideSessionAction ? '' :
       `<button class="btn btn-sm" onclick="Artifacts.jumpToSession('${a.slug}','${a.sessionId}')">View session</button>`;
@@ -92,7 +110,6 @@ const Artifacts = {
         </div>
         ${desc}
         <div class="artifact-card-meta">
-          ${projectLabel}
           ${ticketBadge}
           <span class="artifact-card-time" title="${escapeAttr(a.updatedAt || '')}">${timeAgo(a.updatedAt)}</span>
         </div>
