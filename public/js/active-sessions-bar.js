@@ -85,6 +85,7 @@ const ActiveSessionsBar = {
       await ActiveSessionsBar._fetchProjectBranches();
       ActiveSessionsBar._render();
       ActiveSessionsBar._renderSidebar();
+      if (typeof Sessions !== 'undefined') Sessions.syncCloseButton();
     } catch (_) {}
   },
 

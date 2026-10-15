@@ -343,14 +343,16 @@ const SessionFiles = {
     const isImage = !isDeleted && CodeView.isImage(relPath);
     const canDiff = SessionFiles._canDiff(ctx);
     const canPreview = !isDeleted && !isImage && CodeView.isPreviewable(relPath);
-    // Images render straight from disk; markdown and HTML land on their rendered form; everything
-    // else changed opens on its diff, and anything unchanged (or without a diff to show) falls
-    // back to source.
+    const scripts = ctx && typeof Sessions !== 'undefined' ? Sessions._ctxScriptsFor(relPath) : [];
+    // Images render straight from disk; a changed file with no diff but shell commands that touched
+    // it lands on those commands; markdown and HTML land on their rendered form; everything else
+    // changed opens on its diff, and anything unchanged (or without a diff to show) falls back to source.
     const mode = isImage ? 'image'
+      : (opts.mode === 'diff' || isDeleted) && !canDiff && scripts.length ? 'scripts'
       : canPreview ? 'preview'
       : (opts.mode === 'diff' || isDeleted) && canDiff ? 'diff' : 'source';
     SessionFiles.open = {
-      path: relPath, mode, ctx, canDiff, canPreview, isImage, isDeleted, loading: !isDeleted, saved: '', mtime: null,
+      path: relPath, mode, ctx, canDiff, canPreview, isImage, isDeleted, scripts, loading: !isDeleted, saved: '', mtime: null,
       changedLines: undefined, nextOffset: 0, doneLoading: true, loadingMore: false
     };
     SessionFiles.renderPane();
@@ -439,6 +441,7 @@ const SessionFiles = {
     if (mode === 'diff' && !SessionFiles.open.canDiff) return;
     if (mode === 'preview' && !SessionFiles.open.canPreview) return;
     if (mode === 'image' && !SessionFiles.open.isImage) return;
+    if (mode === 'scripts' && !SessionFiles.open.scripts.length) return;
     SessionFiles._stashBuffer();
     SessionFiles.open.mode = mode;
     SessionFiles.renderPane();
@@ -464,6 +467,9 @@ const SessionFiles = {
     const hasPreview = open.canPreview;
     const isDiff = open.mode === 'diff';
     const isImageMode = open.mode === 'image';
+    const isScripts = open.mode === 'scripts';
+    const hasScripts = open.scripts.length > 0;
+    const readOnly = isDiff || isImageMode || isScripts;
     const modeBtn = (mode, label) =>
       `<button class="sf-mode-btn${open.mode === mode ? ' active' : ''}" onclick="SessionFiles.setMode('${mode}')">${label}</button>`;
 
@@ -472,12 +478,13 @@ const SessionFiles = {
         <span class="sf-dirty sf-pane-dirty" id="sf-pane-dirty" style="display:none" title="Unsaved changes">&#9679;</span>
         <span class="sf-pane-search-count" id="sf-pane-search-count" style="display:none"></span>
         <div class="sf-pane-actions">
-          ${hasDiff || hasPreview || open.isImage ? `<div class="sf-mode-toggle">
+          ${hasDiff || hasPreview || open.isImage || hasScripts ? `<div class="sf-mode-toggle">
             ${open.isImage ? modeBtn('image', 'Image') : modeBtn('source', 'Source')}
             ${hasPreview ? modeBtn('preview', 'Preview') : ''}
             ${hasDiff ? modeBtn('diff', 'Diff') : ''}
+            ${hasScripts ? modeBtn('scripts', `Scripts (${open.scripts.length})`) : ''}
           </div>` : ''}
-          ${isDiff || isImageMode ? '' : '<button class="btn btn-sm btn-primary" id="sf-save-btn" onclick="SessionFiles.save()" disabled>Save</button>'}
+          ${readOnly ? '' : '<button class="btn btn-sm btn-primary" id="sf-save-btn" onclick="SessionFiles.save()" disabled>Save</button>'}
           <div class="action-menu">
             <button class="btn btn-sm action-menu-btn" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)" aria-label="File actions">&#8942;</button>
             <div class="action-menu-panel">
@@ -490,7 +497,7 @@ const SessionFiles = {
         </div>
       </div>
       <div class="sf-pane-body" id="sf-pane-body"></div>
-      ${isDiff || isImageMode ? '' : `<div class="sf-status-bar">
+      ${readOnly ? '' : `<div class="sf-status-bar">
         <span class="sf-status-state" id="sf-status-state"></span>
         <span class="sf-status-sep">&middot;</span>
         <span id="sf-status-autosave"></span>
@@ -507,6 +514,8 @@ const SessionFiles = {
       const src = `/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/raw?path=${encodeURIComponent(open.path)}`
         + (open.mtime ? `&mtime=${open.mtime}` : '');
       body.innerHTML = `<div class="sf-preview-pane sf-image-pane"><img class="sf-image-preview" src="${escapeAttr(src)}" alt="${escapeHtml(name)}"></div>`;
+    } else if (isScripts) {
+      body.innerHTML = SessionFiles.scriptsHtml(open.scripts, !open.canDiff);
     } else if (open.loading) {
       showLoading(body, isDiff ? 'Computing diff...' : 'Loading file...');
     } else if (open.error) {
@@ -542,6 +551,26 @@ const SessionFiles = {
     SessionFiles._applySearchHighlight();
     SessionFiles.renderStatus();
     SessionFiles._updateDirtyMarkers();
+  },
+
+  /** Shell commands of the session that wrote or removed a file, in session order. */
+  scriptsHtml(scripts, noSnapshot) {
+    const note = noSnapshot
+      ? 'Changed by shell commands — no "before" snapshot was recorded, so here is exactly what ran against this file.'
+      : 'Shell commands of this session that touched this file.';
+    return `<div class="sf-scripts">
+      <div class="diff-readonly-note">${escapeHtml(note)}</div>
+      ${scripts.map(sc => `<div class="sf-script">
+        <div class="sf-script-header">
+          <span class="sf-script-tool">${escapeHtml(sc.tool)}</span>
+          ${sc.prompt ? `<span class="sf-script-prompt">#${sc.prompt}</span>` : ''}
+          <span class="sf-script-desc">${escapeHtml(sc.description || '')}</span>
+          ${sc.timestamp ? `<span class="sf-script-time">${timeAgo(sc.timestamp)}</span>` : ''}
+          <button class="btn btn-sm" onclick="copyToClipboard(this.closest('.sf-script').querySelector('code').textContent, 'Script copied')">Copy</button>
+        </div>
+        <pre class="sf-script-cmd"><code>${escapeHtml(sc.command)}</code></pre>
+      </div>`).join('')}
+    </div>`;
   },
 
   /** When a project search is active, highlight its matches in the open file and show the count.

@@ -133,6 +133,21 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       if (!filePrompts.has(relNorm)) filePrompts.set(relNorm, new Set());
       filePrompts.get(relNorm).add(promptIdx);
     };
+    // relative path -> shell commands that wrote or removed it, in session order
+    const fileScripts = new Map();
+    const addScript = (relNorm, block, obj, promptIdx) => {
+      if (!fileScripts.has(relNorm)) fileScripts.set(relNorm, []);
+      const list = fileScripts.get(relNorm);
+      if (block.id && list.some(sc => sc.id === block.id)) return;
+      list.push({
+        id: block.id || null,
+        tool: block.name,
+        command: block.input.command || '',
+        description: block.input.description || '',
+        timestamp: obj.timestamp || null,
+        prompt: promptIdx || null
+      });
+    };
 
     for (const line of sessionContent.split('\n')) {
       if (!line.trim()) continue;
@@ -213,6 +228,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
                     fileMap[relNorm] = { hash: null, maxVersion: 0, isNew: false };
                   }
                   touch(relNorm, promptIdx);
+                  addScript(relNorm, block, obj, promptIdx);
                   break;
                 }
               }
@@ -232,6 +248,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
                 const isTrackedDir = [...existingKeys].some(k => k.startsWith(prefix));
                 if (fs.existsSync(abs) || isTrackedDir) continue;
                 touch(relNorm, promptIdx);
+                addScript(relNorm, block, obj, promptIdx);
                 if (existingKeys.has(relNorm)) continue;
                 existingKeys.add(relNorm);
                 fileMap[relNorm] = { hash: null, maxVersion: 0, isNew: false };
@@ -291,9 +308,11 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       // No snapshot: the session's own earlier full Read of the file stands in as the "before" text.
       const readBase = !info.hash && !info.isNew && !isDeleted && readBases.has(filePath);
       const relKey = projectDir && path.isAbsolute(filePath) ? path.relative(path.resolve(projectDir), path.resolve(filePath)) : filePath;
-      const touchedBy = filePrompts.get(relKey.replace(/\\/g, '/'));
+      const relNormKey = relKey.replace(/\\/g, '/');
+      const touchedBy = filePrompts.get(relNormKey);
       const promptIdxs = touchedBy ? [...touchedBy].sort((a, b) => a - b) : [];
-      return { path: filePath, hash: info.hash, versions, isNew: info.isNew, isDeleted, mtime, readBase, prompts: promptIdxs };
+      const scripts = fileScripts.get(relNormKey) || [];
+      return { path: filePath, hash: info.hash, versions, isNew: info.isNew, isDeleted, mtime, readBase, prompts: promptIdxs, scripts };
     });
     // Every entry came from a snapshot backup or a Write/Edit/MultiEdit/NotebookEdit call, so all of
     // them were touched by this session. Files without a recorded snapshot have no diff, but their

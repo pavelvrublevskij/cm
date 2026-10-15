@@ -319,6 +319,7 @@ Object.assign(Sessions, {
       // (e.g. moved to another path) has no current source to show, so it must read as deleted,
       // not new — otherwise the badge promises source that a click won't be able to produce.
       const status = f.isDeleted ? 'deleted' : (f.isNew ? 'new' : 'edited');
+      const byScript = Sessions._ctxEditedByScript(f);
       html += `<div class="sf-row sf-row-file ctx-file-item ctx-file-${status}${f.path === openPath ? ' sf-row-active' : ''}" style="--sf-depth:${depth}"
         data-session="${escapeHtml(sessionId)}"
         data-hash="${escapeHtml(f.hash || '')}"
@@ -330,10 +331,20 @@ Object.assign(Sessions, {
         onclick="Sessions._openCtxRow(this)">
         <span class="sf-name">${escapeHtml(f.name)}</span>
         <span class="sf-dirty" style="display:none" title="Unsaved changes">&#9679;</span>
-        <span class="ctx-file-badge ctx-file-badge-${status}">${status}</span>
+        <span class="ctx-file-badge ctx-file-badge-${byScript ? 'script' : status}">${byScript ? 'edited by script' : status}</span>
       </div>`;
     });
     return html;
+  },
+
+  /** Changed only by shell commands, with no recorded "before" text to diff against. */
+  _ctxEditedByScript(f) {
+    return !f.isDeleted && !f.isNew && !f.hash && !f.readBase && !!(f.scripts && f.scripts.length);
+  },
+
+  _ctxScriptsFor(path) {
+    const f = Sessions._ctxVisibleFiles().find(f => f.path === path);
+    return f && f.scripts ? f.scripts : [];
   },
 
   toggleCtxDir(dirPath) {

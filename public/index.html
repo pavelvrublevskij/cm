@@ -575,6 +575,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
             <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
               <button class="btn btn-sm" onclick="Sessions.goBack()">&#8592; Back</button>
+              <button class="btn btn-sm btn-danger" id="session-detail-close-btn" style="display:none" onclick="Sessions.closeDetail()">Close session</button>
               <div style="display:flex;align-items:center;gap:6px;min-width:0">
                 <span id="session-detail-remote-icon"></span>
                 <h2 id="session-detail-title" style="margin:0">Session</h2>
@@ -592,6 +593,7 @@
                   <button class="action-menu-item" id="session-detail-resume-btn" onclick="event.stopPropagation(); Sessions.resumeFromMenu()">Resume in OS Terminal</button>
                   <button class="action-menu-item" id="session-detail-archive-btn" onclick="event.stopPropagation(); Sessions.archiveDetail()">Archive</button>
                   <button class="action-menu-item" id="session-detail-unarchive-btn" style="display:none" onclick="event.stopPropagation(); Sessions.unarchiveDetail()">Unarchive</button>
+                  <button class="action-menu-item" id="session-detail-close-menu" style="display:none" onclick="event.stopPropagation(); Sessions.closeDetail()">Close session</button>
                 </div>
               </div>
             </div>
