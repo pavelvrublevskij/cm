@@ -1063,6 +1063,7 @@ const Sessions = {
     Sessions._detailHasPlan = false;
     const snapshot = Sessions._getSnapshot(slug, sessionId);
     Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0, readOnly: !!readOnly, readOnlyInstanceId: null };
+    Sessions.syncCloseButton();
     Sessions.renderDetailMeta(null);
     Sessions.applyReadOnlyState();
 
@@ -1452,6 +1453,28 @@ const Sessions = {
     const cached = Sessions.cache[slug] || [];
     const info = cached.find(s => s.sessionId === sessionId);
     App.navigate('session-detail', { slug, sessionId, sessionInfo: info });
+  },
+
+  /** Close is offered only while the open session is running somewhere (terminal or read-only viewer). */
+  syncCloseButton() {
+    const { slug, sessionId } = Sessions.detailState || {};
+    const running = !!(slug && sessionId) && (
+      (typeof ActiveSessionsBar !== 'undefined' && ActiveSessionsBar._sessions.some(s => s.slug === slug && s.sessionId === sessionId))
+      || (typeof TerminalPanel !== 'undefined' && TerminalPanel.hasAttachedPty())
+    );
+    ['session-detail-close-btn', 'session-detail-close-menu'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = running ? '' : 'none';
+    });
+  },
+
+  /** Ends the session everywhere: its terminal process, its active-session tracking and this tab's read-only viewer. */
+  async closeDetail() {
+    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
+    const { slug, sessionId, readOnly, readOnlyInstanceId } = Sessions.detailState;
+    if (!slug || !sessionId) return;
+    if (readOnly && readOnlyInstanceId) await ActiveSessionsBar.closeReadonly(slug, sessionId, readOnlyInstanceId);
+    await ActiveSessionsBar.close(slug, sessionId);
   },
 
   resumeFromMenu() {
