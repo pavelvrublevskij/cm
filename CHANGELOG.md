@@ -3,6 +3,7 @@
 ### Features
 
 - **Files edited by script** — shell-edited files with no recorded "before" snapshot are marked "edited by script"; click to see the exact commands that touched them.
+- **Close session button** — one-click "Close session" next to Back (and in the ⋮ menu) ends a running session.
 
 ## v1.8.0
 
