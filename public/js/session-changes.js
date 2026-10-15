@@ -62,10 +62,11 @@ const SessionChanges = {
         <div class="diff-readonly-note">Read-only — each file's recorded snapshot compared to the file on disk. Hover a line for <strong>&rarr; source</strong> to open it there.</div>
         ${files.map((f, i) => {
           const status = f.isDeleted ? 'deleted' : (f.isNew ? 'new' : 'edited');
+          const byScript = Sessions._ctxEditedByScript(f);
           return `<div class="sc-file" data-path="${escapeHtml(f.path)}">
             <div class="sc-file-header">
               <span class="sc-file-path" title="${escapeAttr(f.path)}">${escapeHtml(f.path)}</span>
-              <span class="ctx-file-badge ctx-file-badge-${status}">${status}</span>
+              <span class="ctx-file-badge ctx-file-badge-${byScript ? 'script' : status}">${byScript ? 'edited by script' : status}</span>
               <span class="sc-file-stats" id="sc-stats-${i}"></span>
               ${f.isDeleted ? '' : `<button class="btn btn-sm" onclick="SessionChanges.openSource(${escapeAttr(JSON.stringify(f.path))})">Open</button>`}
             </div>
@@ -78,6 +79,10 @@ const SessionChanges = {
     await Promise.all(files.map(async (f, i) => {
       const body = document.getElementById(`sc-body-${i}`);
       if (!SessionFiles._canDiff({ hash: f.hash, isNew: f.isNew ? '1' : '', readBase: f.readBase ? '1' : '' })) {
+        if (f.scripts && f.scripts.length) {
+          body.innerHTML = SessionFiles.scriptsHtml(f.scripts, true);
+          return;
+        }
         body.innerHTML = '<div class="empty-state"><p>No recorded snapshot for this file — open it to see its source.</p></div>';
         return;
       }

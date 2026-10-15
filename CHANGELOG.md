@@ -1,3 +1,9 @@
+## v1.8.1
+
+### Features
+
+- **Files edited by script** — shell-edited files with no recorded "before" snapshot are marked "edited by script"; click to see the exact commands that touched them.
+
 ## v1.8.0
 
 ### Features

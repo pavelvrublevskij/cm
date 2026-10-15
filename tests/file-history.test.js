@@ -509,6 +509,15 @@ test('context: file written by sed -i in Bash is listed', async () => {
   assert.ok(res.body.files.find(f => f.path === 'src/a.h'));
 });
 
+test('context: a shell-edited file lists the commands that wrote it, with prompt and description', async () => {
+  const res = await request(app).get(`/api/file-history/${SHELL_WRITE_SESSION_ID}/context`);
+  const f = res.body.files.find(f => f.path === 'src/a.h');
+  assert.strictEqual(f.scripts.length, 1);
+  assert.strictEqual(f.scripts[0].tool, 'Bash');
+  assert.strictEqual(f.scripts[0].command, 'sed -i "s/a/b/" src/a.h');
+  assert.strictEqual(f.scripts[0].prompt, 1);
+});
+
 test('context: read-only Bash targets and missing files are not listed', async () => {
   const res = await request(app).get(`/api/file-history/${SHELL_WRITE_SESSION_ID}/context`);
   assert.ok(!res.body.files.find(f => f.path === 'src/read-only.h'));

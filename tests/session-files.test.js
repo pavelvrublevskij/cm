@@ -149,7 +149,8 @@ const context = vm.createContext({
   showLoading: (container, text) => { container.innerHTML = text; },
   toast: (msg, type) => { harness.toasts.push({ msg, type }); },
   CodeMirror: makeCodeMirrorMock(),
-  Sessions: { _ctx: { projSlug: 'proj' }, toggleActionMenu() {}, openCtxFile() {}, revealCtxFile() {} },
+  timeAgo: () => '1m ago',
+  Sessions: { _ctx: { projSlug: 'proj' }, _ctxScriptsFor: p => harness.scripts[p] || [], toggleActionMenu() {}, openCtxFile() {}, revealCtxFile() {} },
   FileHistory: {
     fetchDiffCurrent: async () => ({ hunks: [{ oldStart: 1, newStart: 1, lines: [] }], stats: { added: 1, removed: 0 } }),
     renderDiff: (container) => { container.innerHTML = 'DIFF'; },
@@ -191,6 +192,7 @@ beforeEach(() => {
   harness.toasts = [];
   harness.copyTargets = [];
   harness.modalOpened = false;
+  harness.scripts = {};
   context.Sessions._ctx.projSlug = 'proj';
   FileViewCache._store = {};
   SessionFiles.reset('proj-slug');
@@ -559,6 +561,37 @@ test('a file the session edited without a snapshot offers source only', async ()
 
   SessionFiles.setMode('diff');
   assert.strictEqual(SessionFiles.open.mode, 'source', 'the diff mode stays unreachable');
+});
+
+test('a file edited only by shell commands opens on the scripts that touched it', async () => {
+  harness.apiHandler = () => ({ content: 'edited text', mtime: 1 });
+  harness.scripts['src/App.java'] = [
+    { tool: 'Bash', command: "python - <<'EOF'\nopen('src/App.java','w')\nEOF", description: 'Refactor App', timestamp: null, prompt: 2 }
+  ];
+  await SessionFiles.openFile('src/App.java', {
+    mode: 'diff',
+    ctx: { session: 's1', hash: '', from: '', path: 'src/App.java', isNew: '', isDeleted: '' }
+  });
+
+  assert.strictEqual(SessionFiles.open.mode, 'scripts');
+  const body = el('sf-pane-body').innerHTML;
+  assert.ok(body.includes("open('src/App.java','w')"), 'the command source is shown');
+  assert.ok(body.includes('Refactor App') && body.includes('#2'));
+  assert.ok(el('sf-pane').innerHTML.includes('Scripts (1)'));
+  assert.ok(!el('sf-pane').innerHTML.includes('sf-save-btn'), 'the scripts view is read-only');
+
+  SessionFiles.setMode('source');
+  assert.strictEqual(SessionFiles.open.mode, 'source');
+  assert.strictEqual(harness.cm.getValue(), 'edited text');
+});
+
+test('a file with no scripts cannot switch to the scripts view', async () => {
+  harness.apiHandler = () => ({ content: 'x', mtime: 1 });
+  await SessionFiles.openFile('lib/paths.js', {
+    ctx: { session: 's1', hash: '', from: '', path: 'lib/paths.js', isNew: '', isDeleted: '' }
+  });
+  SessionFiles.setMode('scripts');
+  assert.strictEqual(SessionFiles.open.mode, 'source');
 });
 
 test('a file with a recorded snapshot can switch to the diff', async () => {

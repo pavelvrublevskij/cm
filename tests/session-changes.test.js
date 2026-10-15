@@ -49,6 +49,7 @@ const context = vm.createContext({
     gotoSource: () => {},
     renderPane: () => { harness.paneRenders++; },
     _canDiff: ctx => !!ctx && (ctx.isNew === '1' || !!ctx.hash || ctx.readBase === '1'),
+    scriptsHtml: scripts => 'SCRIPTS:' + scripts.map(sc => sc.command).join('|'),
   },
   App: { navigate: () => {}, setHash: () => {} },
   TerminalPanel: { isOpen: () => false, shouldAutoOpen: () => false },
@@ -137,6 +138,25 @@ test('Changes only: renders one compact diff per listed file, each file once, in
   assert.ok(el('sc-body-2').innerHTML.includes('No recorded snapshot'), 'a file without a diff says so');
   assert.ok(el('sc-totals').innerHTML.includes('+4'), 'totals sum the diffable files');
   assert.strictEqual((el('sf-pane').innerHTML.match(/class="sc-file"/g) || []).length, 3);
+});
+
+test('Changes only: a file edited only by shell commands shows those commands instead of a diff', async () => {
+  setCtx([file('App.java', [1], { hash: null, scripts: [{ tool: 'Bash', command: 'python fix.py', prompt: 1 }] })]);
+  SessionChanges.active = true;
+  await SessionChanges.render();
+  assert.strictEqual(harness.diffCalls.length, 0);
+  assert.strictEqual(el('sc-body-0').innerHTML, 'SCRIPTS:python fix.py');
+  assert.ok(el('sf-pane').innerHTML.includes('edited by script'));
+});
+
+test('changed-file list labels a snapshot-less shell edit as edited by script', () => {
+  setCtx([
+    file('App.java', [1], { hash: null, scripts: [{ tool: 'Bash', command: 'sed -i s/a/b/ App.java' }] }),
+    file('a.js', [1], { scripts: [{ tool: 'Bash', command: 'sed -i s/a/b/ a.js' }] })
+  ]);
+  const html = Sessions._renderCtxFileList();
+  assert.strictEqual((html.match(/ctx-file-badge-script/g) || []).length, 1, 'a file with a diff keeps its normal badge');
+  assert.ok(html.includes('edited by script'));
 });
 
 test('Changes only: toggle off hands the pane back to the single-file view', () => {
