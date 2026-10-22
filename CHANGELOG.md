@@ -2,25 +2,21 @@
 
 ### Features
 
-- **Usage marks** — mark a date (e.g. a new skill) globally or per project; it shows as a line on the usage chart comparing the 7, 14 or 30 days before vs after it (chosen per mark): cost per session, cache hit and tokens per request, plus daily volume. Click a flag to edit or delete it.
-- **Suggested marks** — CLAUDE.md edits, skill changes, plugin installs and main-model switches are offered as one-click marks.
-- **Efficiency insights** — "Analyze efficiency" in the Token Usage filter bar uses AI (your local `claude`, with a model and effort you pick) to review the filtered usage and marks and suggest how to close efficiency gaps. Reports are saved under "Past reports", and sessions they mention link straight to the session.
-- **Quick checks** — free, rule-based hints under the usage summary: low cache hit, heavy Opus share, expensive or very long sessions.
-- **Git menu bar** — Branch, Commit, Remote and Stash menus in the git panel; a searchable branch picker (local + remote) on the branch name, with stash-or-bring-along when switching with uncommitted changes.
-- **AI commit messages** — the Commit button's ▾ menu writes a message for the ticked files with your local `claude` (model and effort selectable); review it, or generate and commit in one step.
-- **Resizable git columns** — drag the dividers between the changes list, shell/diff/history and recipes; widths are remembered.
-- **Health Check** — new page that flags invalid settings JSON, MCP servers that cannot start, skills that will not trigger well, oversized CLAUDE.md files, and stale or duplicate memories.
-- **Skill model and effort pickers** — the skill editor offers Model and Effort as dropdowns instead of free text.
-- **Global agents** — new Agents page for subagents in `~/.claude/agents/`, shared by every project; required fields are enforced and model, effort, permission mode, memory and color are dropdowns (project agents too).
-- **Arrow-key run menu** — `run.sh` / `run.bat` without an argument now open a menu you navigate with ↑/↓ and Enter (number keys still work); the header shows the CM version.
+- **Usage marks** — mark a change on the usage chart and compare usage before vs after it; suggested marks for setup changes.
+- **Efficiency insights** — AI review of the filtered usage with saved reports; free quick checks under the summary.
+- **Health Check** — flags broken settings, failing MCP servers, weak skills, oversized CLAUDE.md and stale memories.
+- **Global agents** — new Agents page for `~/.claude/agents/`.
+- **Skill and agent dropdowns** — model, effort and other fixed values are picked, not typed.
+- **Git panel** — menu bar with branch picker, AI commit messages, resizable columns.
+- **Arrow-key run menu** — `run.sh` / `run.bat` menu with ↑/↓ and Enter; version in the header.
 
 ### Bug fixes
 
-- **Agent file names are validated** — a crafted name could read, write or delete files outside a project's `.claude/agents` folder.
+- **Agent file names are validated** — they can no longer point outside `.claude/agents`.
 
 ### Removed
 
-- **CM.app** — the macOS launcher needed an Apple developer registration to run; use `./run.sh` instead.
+- **CM.app** — use `./run.sh` on macOS instead.
 
 ## v1.8.1
 
