@@ -15,6 +15,8 @@
 //   editContentLabel - label for the content textarea (default 'Content')
 //   editExtraFields(item, idp) - optional: returns extra formGroup HTML between name/desc and content
 //   readEditExtras(fm, idp)   - optional: reads extra inputs, mutates fm before save
+//   validate(fm)      - optional: returns an error message to block Save, or null
+//   editRequired      - bool: mark Name and Description as required (*) in the edit modal
 //   createFields(idp) - returns form HTML for the create modal body
 //   createBody(idp)   - reads create inputs, returns { key, frontmatter, content } or null on error
 //   onLoad(list)      - optional hook after successful load
@@ -75,8 +77,8 @@ function makeFrontmatterCrud(opts) {
           title: `Edit ${opts.itemLabel}: ${titleSuffix}`,
           width: 700,
           body: formRow(
-              formGroup('Name', `<input type="text" id="${idp}-edit-name" value="${escapeHtml(item.frontmatter.name || String(keyValue))}">`),
-              formGroup('Description', `<input type="text" id="${idp}-edit-desc" value="${escapeHtml(item.frontmatter.description || '')}">`)
+              formGroup(opts.editRequired ? 'Name *' : 'Name', `<input type="text" id="${idp}-edit-name" value="${escapeHtml(item.frontmatter.name || String(keyValue))}">`),
+              formGroup(opts.editRequired ? 'Description *' : 'Description', `<input type="text" id="${idp}-edit-desc" value="${escapeHtml(item.frontmatter.description || '')}">`)
             )
             + extra
             + formGroup(opts.editContentLabel || 'Content', `<textarea id="${idp}-edit-content" rows="12">${escapeHtml(item.content || '')}</textarea>`),
@@ -86,6 +88,8 @@ function makeFrontmatterCrud(opts) {
               fm.name = document.getElementById(`${idp}-edit-name`).value;
               fm.description = document.getElementById(`${idp}-edit-desc`).value;
               if (opts.readEditExtras) opts.readEditExtras(fm, idp);
+              const invalid = opts.validate ? opts.validate(fm) : null;
+              if (invalid) { toast(invalid, 'error'); return false; }
               const content = document.getElementById(`${idp}-edit-content`).value;
               try {
                 await api(`${m._base()}/${keyValue}`, { method: 'PUT', body: { frontmatter: fm, content } });

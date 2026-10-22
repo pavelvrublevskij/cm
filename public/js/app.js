@@ -177,6 +177,7 @@ const App = {
     // Simple views with direct ID mapping
     const simpleViews = {
       'dashboard': () => Dashboard.load(),
+      'health': () => Health.load(),
       'usage': () => Usage.load(),
       'artifacts': () => Artifacts.load(),
       'settings': () => Settings.load(),
@@ -185,6 +186,7 @@ const App = {
       'mcp-servers': () => McpServers.load(),
       'keybindings': () => Keybindings.load(),
       'skills': () => Skills.load(),
+      'agents': () => Agents.load(),
       'output-styles': () => OutputStyles.load(),
       'plugins': () => Plugins.load(),
       'manager-settings': () => ManagerSettings.load(),

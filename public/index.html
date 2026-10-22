@@ -33,6 +33,9 @@
             <span class="icon">&#9673;</span><span class="nav-label"> Dashboard</span>
             <span class="badge badge-active" id="nav-dashboard-active" style="display:none"></span>
           </div>
+          <div class="nav-item" data-view="health" title="Health Check">
+            <span class="icon">&#9877;</span><span class="nav-label"> Health Check</span>
+          </div>
           <div class="nav-item" data-view="artifacts" title="Artifacts" id="nav-artifacts" style="display:none">
             <span class="icon">&#128206;</span><span class="nav-label"> Artifacts</span>
             <span class="badge nav-label" id="nav-artifacts-count"></span>
@@ -54,6 +57,9 @@
           </div>
           <div class="nav-item" data-view="skills" title="Skills">
             <span class="icon">&#9733;</span><span class="nav-label"> Skills</span>
+          </div>
+          <div class="nav-item" data-view="agents" title="Agents">
+            <span class="icon">&#129302;</span><span class="nav-label"> Agents</span>
           </div>
           <div class="nav-item" data-view="output-styles" title="Output Styles">
             <span class="icon">&#9998;</span><span class="nav-label"> Output Styles</span>
@@ -93,6 +99,20 @@
     <main class="main">
       <div class="update-banner" id="update-banner" style="display:none"></div>
       <!-- Dashboard View -->
+      <!-- Health Check View -->
+      <div class="view" id="view-health">
+        <div class="view-header">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <h2>Health Check</h2>
+            <button class="btn btn-sm" id="health-recheck-btn" onclick="Health.load()">Check again</button>
+          </div>
+          <div class="subtitle">Read-only checks of your Claude Code setup — nothing is started or changed</div>
+        </div>
+        <div class="view-body">
+          <div id="health-body"></div>
+        </div>
+      </div>
+
       <div class="view" id="view-dashboard">
         <div class="view-header">
           <h2>Dashboard</h2>
@@ -397,6 +417,24 @@
       </div>
 
       <!-- Skills View -->
+      <div class="view" id="view-agents">
+        <div class="view-header">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <h2>Agents</h2>
+              <div class="subtitle">~/.claude/agents/ — Subagents available in every project</div>
+            </div>
+            <div class="btn-group">
+              <button class="btn" onclick="Agents.load()">Reload</button>
+              <button class="btn" onclick="Agents.showCreate()">+ New Agent</button>
+            </div>
+          </div>
+        </div>
+        <div class="view-body">
+          <div id="agents-content"></div>
+        </div>
+      </div>
+
       <div class="view" id="view-skills">
         <div class="view-header">
           <div style="display:flex;align-items:center;justify-content:space-between">
@@ -921,6 +959,8 @@
   <script src="/js/usage-marks.js"></script>
   <script src="/js/usage-insights.js"></script>
   <script src="/js/usage-hints.js"></script>
+  <script src="/js/health.js"></script>
+  <script src="/js/agents.js"></script>
   <script src="/js/term-view.js"></script>
   <script src="/js/terminal.js"></script>
   <script src="/js/terminal-skills.js"></script>

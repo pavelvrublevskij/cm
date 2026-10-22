@@ -9,7 +9,14 @@
 - **Git menu bar** — Branch, Commit, Remote and Stash menus in the git panel; a searchable branch picker (local + remote) on the branch name, with stash-or-bring-along when switching with uncommitted changes.
 - **AI commit messages** — the Commit button's ▾ menu writes a message for the ticked files with your local `claude` (model and effort selectable); review it, or generate and commit in one step.
 - **Resizable git columns** — drag the dividers between the changes list, shell/diff/history and recipes; widths are remembered.
+- **Health Check** — new page that flags invalid settings JSON, MCP servers that cannot start, skills that will not trigger well, oversized CLAUDE.md files, and stale or duplicate memories.
+- **Skill model and effort pickers** — the skill editor offers Model and Effort as dropdowns instead of free text.
+- **Global agents** — new Agents page for subagents in `~/.claude/agents/`, shared by every project; required fields are enforced and model, effort, permission mode, memory and color are dropdowns (project agents too).
 - **Arrow-key run menu** — `run.sh` / `run.bat` without an argument now open a menu you navigate with ↑/↓ and Enter (number keys still work); the header shows the CM version.
+
+### Bug fixes
+
+- **Agent file names are validated** — a crafted name could read, write or delete files outside a project's `.claude/agents` folder.
 
 ### Removed
 

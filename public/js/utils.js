@@ -678,6 +678,115 @@ const KB_CONTEXTS = ['Chat', 'Global', 'Autocomplete', 'Settings', 'Confirmation
 const MCP_TYPES = ['stdio', 'sse', 'http'];
 const VALUE_TYPES = ['string', 'number', 'boolean', 'object', 'array'];
 
+// Skill frontmatter values Claude Code accepts. '' leaves the key out (Claude Code's default).
+const SKILL_MODELS = [
+  ['', 'Default'], ['inherit', 'Inherit (session model)'], ['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku'], ['fable', 'Fable']
+];
+const SKILL_EFFORTS = [
+  ['', 'Default'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']
+];
+
+/**
+ * A <select> for a frontmatter value from a fixed list. A value already in the file that is not in
+ * the list (e.g. a full model id) is kept as an extra option, so saving never silently changes it.
+ */
+function frontmatterSelectHtml(id, options, current) {
+  const value = current == null ? '' : String(current);
+  const list = options.some(([v]) => v === value) ? options : options.concat([[value, value + ' (custom)']]);
+  return `<select id="${escapeAttr(id)}">${list.map(([v, label]) =>
+    `<option value="${escapeAttr(v)}"${v === value ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select>`;
+}
+
+/** Model and effort fields of the skill editor, and reading them back into frontmatter. */
+function skillModelEffortFields(item, idp) {
+  return formRow(
+    formGroup('Model', frontmatterSelectHtml(`${idp}-edit-model`, SKILL_MODELS, item.frontmatter.model)),
+    formGroup('Effort', frontmatterSelectHtml(`${idp}-edit-effort`, SKILL_EFFORTS, item.frontmatter.effort))
+  );
+}
+
+// Agent frontmatter values Claude Code accepts (sub-agents docs). '' leaves the key out.
+const AGENT_PERMISSION_MODES = [
+  ['', 'Default'], ['default', 'Ask for permission'], ['acceptEdits', 'Accept edits'], ['auto', 'Auto'],
+  ['dontAsk', "Don't ask"], ['bypassPermissions', 'Bypass permissions'], ['plan', 'Plan']
+];
+const AGENT_MEMORY = [['', 'None'], ['user', 'User'], ['project', 'Project'], ['local', 'Local']];
+const AGENT_COLORS = [['', 'None'], ['red', 'Red'], ['blue', 'Blue'], ['green', 'Green'], ['yellow', 'Yellow'],
+  ['purple', 'Purple'], ['orange', 'Orange'], ['pink', 'Pink'], ['cyan', 'Cyan']];
+const AGENT_SELECTS = [
+  ['model', 'Model', SKILL_MODELS], ['effort', 'Effort', SKILL_EFFORTS],
+  ['permissionMode', 'Permission mode', AGENT_PERMISSION_MODES], ['memory', 'Memory', AGENT_MEMORY], ['color', 'Color', AGENT_COLORS]
+];
+
+/** Optional agent fields: tool lists as text, everything with a fixed set of values as a dropdown. */
+function agentOptionalFields(fm, idp) {
+  const text = (key, label, placeholder) => formGroup(label,
+    `<input type="text" id="${idp}-${key}" value="${escapeAttr(fm[key] || '')}" placeholder="${placeholder}">`);
+  const select = ([key, label, options]) => formGroup(label, frontmatterSelectHtml(`${idp}-${key}`, options, fm[key]));
+  return formRow(text('tools', 'Tools', 'All tools (leave empty) or e.g. Read, Grep, Bash'),
+      text('disallowedTools', 'Disallowed tools', 'e.g. Write, Edit'))
+    + formRow(...AGENT_SELECTS.slice(0, 2).map(select))
+    + formRow(...AGENT_SELECTS.slice(2).map(select));
+}
+
+function readAgentOptionalFields(fm, idp) {
+  for (const key of ['tools', 'disallowedTools']) {
+    const value = document.getElementById(`${idp}-${key}`).value.trim();
+    if (value) fm[key] = value; else delete fm[key];
+  }
+  for (const [key] of AGENT_SELECTS) {
+    const value = document.getElementById(`${idp}-${key}`).value;
+    if (value) fm[key] = value; else delete fm[key];
+  }
+}
+
+/** Claude Code skips an agent without a name; names are at most 256 chars, no ':', not starting with '-'. */
+function validateAgent(fm) {
+  const name = String(fm.name || '').trim();
+  if (!name) return 'Name is required';
+  if (name.length > 256) return 'Name must be at most 256 characters';
+  if (name.includes(':')) return 'Name cannot contain ":"';
+  if (name.startsWith('-')) return 'Name cannot start with "-"';
+  if (!String(fm.description || '').trim()) return 'Description is required — Claude uses it to decide when to delegate';
+  return null;
+}
+
+/** "Code Reviewer!" -> "code-reviewer.md"; null when nothing usable is left. */
+function agentFileName(name) {
+  const base = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return base ? base + '.md' : null;
+}
+
+/** Create dialog for an agent: required fields first and marked, then the optional ones. */
+function agentCreateFields(idp, folder) {
+  return formGroup('Name *', `<input type="text" id="${idp}-new-name" placeholder="code-reviewer" oninput="document.getElementById('${idp}-new-file').textContent = (agentFileName(this.value) || '…')">`)
+    + `<div class="info-note" style="margin:-4px 0 10px">Saved as <code>${escapeHtml(folder)}<span id="${idp}-new-file">…</span></code></div>`
+    + formGroup('Description *', `<textarea id="${idp}-new-desc" rows="3" placeholder="When Claude should delegate to this agent, e.g. Reviews code for quality and security; use after writing or changing code."></textarea>`)
+    + agentOptionalFields({}, idp + '-new');
+}
+
+/** Reads the create dialog; toasts and returns null when a required field is missing or the file exists. */
+function agentCreateBody(idp, existing) {
+  const fm = {
+    name: document.getElementById(`${idp}-new-name`).value.trim(),
+    description: document.getElementById(`${idp}-new-desc`).value.trim()
+  };
+  const error = validateAgent(fm);
+  if (error) { toast(error, 'error'); return null; }
+  const file = agentFileName(fm.name);
+  if (!file) { toast('Name needs at least one letter or digit', 'error'); return null; }
+  if (existing.some(a => a.filename === file)) { toast('An agent file ' + file + ' already exists', 'error'); return null; }
+  readAgentOptionalFields(fm, idp + '-new');
+  return { key: file, frontmatter: fm, content: '' };
+}
+
+function readSkillModelEffort(fm, idp) {
+  for (const key of ['model', 'effort']) {
+    const value = document.getElementById(`${idp}-edit-${key}`).value;
+    if (value) fm[key] = value; else delete fm[key];
+  }
+}
+
 // Indentation of the sidebar project tree, shared by Projects.renderNav (project rows) and
 // ActiveSessionsBar._renderSidebar (the session rows hanging off them). Both must agree or a
 // project's sessions stop lining up underneath it.
