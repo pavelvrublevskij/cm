@@ -4,6 +4,8 @@ const { decodeSlug } = require('../lib/slug');
 const { getModelPricingMap, calcCostMultiModel, addTokens, emptyTokens, buildIndex } = require('../lib/usage-index');
 const { getLastFetchedAt, PRICING_URL, resolveModelPrice } = require('../lib/pricing');
 const { getFilteredByModel, sumByModel, aggregateByPeriod } = require('../lib/usage-filters');
+const marks = require('../lib/usage-marks');
+const insights = require('../lib/usage-insights');
 
 function toArray(v) {
   if (v == null) return [];
@@ -158,6 +160,60 @@ router.get('/by-project', wrapRoute((req, res) => {
     .sort((a, b) => b.cost - a.cost);
 
   res.json({ projects: list });
+}));
+
+function localToday() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/** GET /api/usage/marks?projects=...&from=...&to=... — marks in the period, with before/after impact within it */
+router.get('/marks', wrapRoute((req, res) => {
+  const { from, to } = filterDateRange(req);
+  const index = buildIndex();
+  const today = localToday();
+  const list = marks.listMarks(filterProjects(req))
+    .filter(m => marks.markInPeriod(m, from, to))
+    .map(m => ({
+      ...m,
+      projectName: m.project ? decodeSlug(m.project) : null,
+      impact: marks.markImpact(index, m, today)
+    }));
+  res.json({ marks: list });
+}));
+
+/** POST /api/usage/marks */
+router.post('/marks', wrapRoute((req, res) => {
+  const result = marks.createMark(req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json(result.mark);
+}));
+
+/** PUT /api/usage/marks/:id */
+router.put('/marks/:id', wrapRoute((req, res) => {
+  const result = marks.updateMark(req.params.id, req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  if (result.notFound) return res.status(404).json({ error: 'Mark not found' });
+  res.json(result.mark);
+}));
+
+/** DELETE /api/usage/marks/:id */
+router.delete('/marks/:id', wrapRoute((req, res) => {
+  if (!marks.deleteMark(req.params.id)) return res.status(404).json({ error: 'Mark not found' });
+  res.json({ ok: true });
+}));
+
+/** POST /api/usage/insights?projects=...&from=...&to=... { model, effort } — runs the local claude CLI over usage stats */
+router.post('/insights', wrapRoute(async (req, res) => {
+  const model = (req.body && req.body.model) || 'default';
+  const effort = (req.body && req.body.effort) || 'default';
+  if (!insights.INSIGHT_MODELS.includes(model)) return res.status(400).json({ error: 'Unknown model: ' + model });
+  if (!insights.INSIGHT_EFFORTS.includes(effort)) return res.status(400).json({ error: 'Unknown effort: ' + effort });
+  const { from, to, fromTime, toTime } = filterDateRange(req);
+  const stats = insights.buildInsightStats(buildIndex(), { projects: filterProjects(req), models: filterModels(req), from, to, fromTime, toTime, today: localToday() });
+  if (!stats.sessions.count) return res.status(400).json({ error: 'No usage data for the current filters' });
+  const report = await insights.runClaude(insights.buildPrompt(stats), { model, effort });
+  res.json({ report, model, effort, generatedAt: new Date().toISOString() });
 }));
 
 module.exports = router;

@@ -24,22 +24,74 @@ if printf '%s' "$OSTYPE" | grep -qE "msys|mingw|cygwin"; then
   IS_WINDOWS=true
 fi
 
+VERSION=$(sed -n 's/^  "version": *"\([^"]*\)".*/\1/p' "$SCRIPT_DIR/package.json" | head -1)
+
 print_header() {
     printf "\n"
     printf "${BOLD}${CYAN}╔══════════════════════════════════════════════╗${NC}\n"
-    printf "${BOLD}${CYAN}║          CM                                  ║${NC}\n"
+    printf "${BOLD}${CYAN}║          %-36s║${NC}\n" "CM - $VERSION"
     printf "${BOLD}${CYAN}╚══════════════════════════════════════════════╝${NC}\n"
     printf "\n"
 }
 
-print_menu() {
-    printf "  ${BOLD}1)${NC}  ${GREEN}Start${NC}       Install deps, start server, open browser\n"
-    printf "  ${BOLD}2)${NC}  ${RED}Stop${NC}        Stop the running server\n"
-    printf "  ${BOLD}3)${NC}  ${CYAN}Update git${NC}  Pull latest from GitHub (requires git)\n"
-    printf "  ${BOLD}4)${NC}  ${CYAN}Update zip${NC}  Download latest release zip from GitHub\n"
-    printf "\n"
-    printf "  ${BOLD}0)${NC}  ${DIM}Exit${NC}\n"
-    printf "\n"
+INV='\033[30;46m'
+
+MENU_KEYS=(1 2 3 4 0)
+MENU_LABELS=(
+    "1)  Start       Install deps, start server, open browser"
+    "2)  Stop        Stop the running server"
+    "3)  Update git  Pull latest from GitHub (requires git)"
+    "4)  Update zip  Download latest release zip from GitHub"
+    "0)  Exit"
+)
+
+# Draws the whole list in a single write; with $1 = 1 it first moves back up over the previous
+# frame. Pure bash, no $(...) - on Git Bash every subshell forks a process, which is slow enough
+# on Windows to make the menu visibly flicker.
+draw_menu() {
+    local i frame=''
+    [ "${1:-0}" = 1 ] && frame="\033[${#MENU_KEYS[@]}A"
+    for i in "${!MENU_KEYS[@]}"; do
+        if [ "$i" -eq "$SELECTED" ]; then
+            frame+="\r\033[2K  ${INV}> ${MENU_LABELS[$i]}${NC}\n"
+        else
+            frame+="\r\033[2K    ${MENU_LABELS[$i]}\n"
+        fi
+    done
+    printf '%b' "$frame"
+}
+
+# Arrow-key menu: Up/Down to move, Enter to confirm, or press the option's digit.
+choose_option() {
+    local count=${#MENU_KEYS[@]} key rest i prev done=false
+    SELECTED=0
+    printf "  ${DIM}Use ↑/↓ and Enter, or press a number${NC}\n\n"
+    printf '\033[?25l'
+    trap 'printf "\033[?25h"' EXIT
+    draw_menu 0
+    while ! $done; do
+        prev=$SELECTED
+        IFS= read -rsn1 key
+        if [ "$key" = $'\033' ]; then
+            IFS= read -rsn2 -t 1 rest || true
+            case "$rest" in
+                '[A') SELECTED=$(( (SELECTED - 1 + count) % count )) ;;
+                '[B') SELECTED=$(( (SELECTED + 1) % count )) ;;
+            esac
+        elif [ -z "$key" ]; then
+            done=true
+        else
+            for i in "${!MENU_KEYS[@]}"; do
+                if [ "${MENU_KEYS[$i]}" = "$key" ]; then
+                    SELECTED=$i
+                    done=true
+                fi
+            done
+        fi
+        [ "$SELECTED" -ne "$prev" ] && draw_menu 1
+    done
+    printf '\033[?25h'
+    CHOICE=${MENU_KEYS[$SELECTED]}
 }
 
 open_browser() {
@@ -333,10 +385,7 @@ print_header
 CHOICE=$(printf '%s' "${1:-}" | tr -d '\r')
 
 if [ -z "$CHOICE" ]; then
-    print_menu
-    printf "  ${BOLD}Select option:${NC} "
-    read -r CHOICE
-    CHOICE=$(printf '%s' "$CHOICE" | tr -d '\r')
+    choose_option
     printf "\n"
 fi
 

@@ -206,6 +206,10 @@
               <input type="datetime-local" id="filter-to" onchange="Usage.applyCustomDates()">
             </div>
             <button class="btn btn-sm filter-clear-all" onclick="Usage.clearFilters()">Clear all</button>
+            <div class="filter-ai-row">
+              <button class="btn btn-sm btn-primary" id="usage-insights-btn" onclick="UsageInsights.open()" title="Use AI (your local claude) to find efficiency gaps in the filtered usage">&#10024; Analyze efficiency</button>
+              <span class="filter-ai-note">Uses AI on the filtered usage</span>
+            </div>
           </div>
           <div class="dashboard-stats" id="usage-summary"></div>
 
@@ -213,12 +217,15 @@
             <div class="chart-card chart-card-wide">
               <div class="chart-card-header">
                 <h3 class="chart-card-title">Cost &amp; Tokens over Time</h3>
+                <div class="chart-card-actions">
+                <button class="btn btn-sm" id="usage-add-mark-btn" onclick="UsageMarks.openEditor()" title="Mark a date (e.g. a new skill) to see how usage changed after it">&#9873; Add mark</button>
                 <div class="tab-bar tab-bar-mini" id="usage-period-tabs-chart">
                   <button class="tab-btn" data-group="hour" onclick="Usage.setGroup('hour', this)">Hour</button>
                   <button class="tab-btn" data-group="day" onclick="Usage.setGroup('day', this)">Day</button>
                   <button class="tab-btn" data-group="week" onclick="Usage.setGroup('week', this)">Week</button>
                   <button class="tab-btn" data-group="month" onclick="Usage.setGroup('month', this)">Month</button>
                   <button class="tab-btn" data-group="year" onclick="Usage.setGroup('year', this)">Year</button>
+                </div>
                 </div>
               </div>
               <div class="chart-canvas-wrap"><canvas id="chart-period"></canvas></div>
@@ -240,6 +247,14 @@
               <div class="chart-canvas-wrap"><canvas id="chart-projects"></canvas></div>
               <div class="chart-empty" id="chart-projects-empty" hidden>No project usage.</div>
             </div>
+          </div>
+
+          <div class="usage-marks-section" id="usage-marks">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin:24px 0 12px">
+              <h3 style="margin:0">Marks</h3>
+              <button class="btn btn-sm" onclick="UsageMarks.openEditor()">&#9873; Add mark</button>
+            </div>
+            <div id="usage-marks-list"></div>
           </div>
 
           <div class="usage-tables-section">
@@ -897,6 +912,8 @@
   <script src="/js/date-filter.js"></script>
   <script src="/js/usage.js"></script>
   <script src="/js/usage-charts.js"></script>
+  <script src="/js/usage-marks.js"></script>
+  <script src="/js/usage-insights.js"></script>
   <script src="/js/term-view.js"></script>
   <script src="/js/terminal.js"></script>
   <script src="/js/terminal-skills.js"></script>

@@ -52,6 +52,20 @@ const Tour = {
       view: 'usage'
     },
     {
+      element: '#usage-add-mark-btn',
+      title: 'Marks',
+      text: 'Mark a date when you change something — a new skill, a trimmed CLAUDE.md — globally or for one project. It shows as a line on the chart, and the Marks table compares average daily tokens and cost before vs after.',
+      position: 'bottom',
+      view: 'usage'
+    },
+    {
+      element: '#usage-insights-btn',
+      title: 'Efficiency Insights',
+      text: 'Analyze efficiency uses AI: after you confirm and pick a model and effort, your local claude reviews the usage stats and marks for the current filters and reports efficiency gaps with suggestions. No API key needed — it runs on your Claude login.',
+      position: 'bottom',
+      view: 'usage'
+    },
+    {
       element: '#projects-grid',
       title: 'Projects and Worktrees',
       text: 'Every project Claude Code has seen. Git worktrees and linked repos of the same codebase are grouped into one entry, and the Sessions list gets a "Subprojects" filter to fold every session in the group into one list.',

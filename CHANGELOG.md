@@ -1,3 +1,15 @@
+## v1.9.0
+
+### Features
+
+- **Usage marks** — mark a date (e.g. a new skill) globally or per project; it shows as a line on the usage chart comparing average daily tokens and cost in the 7, 14 or 30 days before vs after it (chosen per mark). Click a flag to edit or delete it.
+- **Efficiency insights** — "Analyze efficiency" in the Token Usage filter bar uses AI (your local `claude`, with a model and effort you pick) to review the filtered usage and marks and suggest how to close efficiency gaps.
+- **Arrow-key run menu** — `run.sh` / `run.bat` without an argument now open a menu you navigate with ↑/↓ and Enter (number keys still work); the header shows the CM version.
+
+### Removed
+
+- **CM.app** — the macOS launcher needed an Apple developer registration to run; use `./run.sh` instead.
+
 ## v1.8.1
 
 ### Features

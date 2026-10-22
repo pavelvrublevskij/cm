@@ -10,9 +10,7 @@ Runs entirely on your machine. No cloud, no accounts, no external dependencies b
 
 ## Quick Start
 
-> **macOS:** just double-click `CM.app` in Finder — no terminal needed.
-
-**Linux / Git Bash on Windows:**
+**macOS / Linux / Git Bash on Windows:**
 ```bash
 ./run.sh 1
 ```
@@ -24,7 +22,7 @@ run.bat 1
 
 The script will install Node.js if missing, install dependencies, and open the app in your browser automatically.
 
-Available options:
+Run the script without an argument to pick an option from a menu (↑/↓ and Enter, or press its number), or pass the option directly:
 
 | Option | Action |
 |--------|--------|

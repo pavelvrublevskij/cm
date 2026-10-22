@@ -3404,6 +3404,19 @@ mark.search-highlight {
 .filter-clear-all {
   margin-left: auto;
 }
+/* A full-width row of its own under the filter fields. */
+.filter-ai-row {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.filter-ai-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
 .filter-plan-label {
   display: flex;
   align-items: center;
@@ -3545,6 +3558,7 @@ mark.search-highlight {
 
 /* When charts mode is on, hide tables; when tables mode, hide charts */
 #view-usage[data-view-mode="charts"] .usage-tables-section { display: none; }
+#view-usage[data-view-mode="charts"] .usage-marks-section { display: none; }
 #view-usage[data-view-mode="tables"] .charts-grid { display: none; }
 
 /* Hide the duplicate period tab-bar inside the chart card when in tables mode,
@@ -5708,4 +5722,158 @@ mark.search-highlight {
 .artifact-card-actions {
   display: flex;
   gap: 8px;
+}
+
+/* Usage marks & insights */
+.chart-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.usage-marks-section .mark-desc {
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: pre-wrap;
+}
+.mark-scope-global {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.mark-delta {
+  margin-left: 4px;
+  color: var(--text-muted);
+}
+.mark-delta-good { color: var(--success, #3fb950); }
+.mark-delta-bad { color: var(--danger, #f85149); }
+.usage-insights-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+.usage-insights-modal .modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.usage-insights-report {
+  margin-top: 12px;
+}
+.usage-insights-criteria {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.usage-insights-criteria-title {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.usage-insights-criteria-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.usage-insights-criteria-list dt {
+  color: var(--text-muted);
+}
+.usage-insights-criteria-list dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+/* Period chart HTML tooltip (marks need colored before -> after changes) */
+.chart-html-tooltip {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0;
+  max-width: 460px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  color: var(--text-primary);
+  font-size: 12px;
+  transition: opacity 0.1s;
+}
+.chart-tip-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.chart-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.6;
+}
+.chart-tip-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.chart-tip-marks {
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.mark-tip + .mark-tip {
+  margin-top: 8px;
+}
+.mark-tip-head {
+  color: var(--accent);
+  font-weight: 600;
+}
+.mark-tip-scope {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.mark-tip-global {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.mark-tip-desc {
+  margin-top: 2px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+.mark-impact {
+  margin-top: 4px;
+}
+.mark-impact-title {
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.mark-impact-grid {
+  display: grid;
+  grid-template-columns: max-content max-content max-content max-content;
+  gap: 1px 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.mark-impact-grid > span:nth-child(4n+1) {
+  color: var(--text-muted);
+}
+.mark-impact-grid .mark-delta {
+  margin-left: 0;
+}
+.mark-window-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.mark-tip-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
 }
