@@ -712,6 +712,12 @@ test('every git route refuses cleanly with no git installed', async () => {
       request(app).post(`/api/projects/${slug}/git/push`),
       request(app).post(`/api/projects/${slug}/git/pull`),
       request(app).post(`/api/projects/${slug}/git/fetch`),
+      request(app).get(`/api/projects/${slug}/git/branches`),
+      request(app).post(`/api/projects/${slug}/git/checkout`).send({ branch: 'main' }),
+      request(app).post(`/api/projects/${slug}/git/branch`).send({ name: 'x' }),
+      request(app).get(`/api/projects/${slug}/git/stashes`),
+      request(app).post(`/api/projects/${slug}/git/stash`).send({}),
+      request(app).post(`/api/projects/${slug}/git/stash/pop`).send({ ref: 'stash@{0}' }),
     ];
 
     for (const res of await Promise.all(calls)) {
@@ -739,4 +745,172 @@ test('the rest of the app is unaffected by git being missing', async () => {
       assert.strictEqual(res.status, 200, `${url} must not depend on git`);
     }
   });
+});
+
+// ── branches and stash ───────────────────────────────────────────────────────
+// Own origin and clone, so creating branches and stashes here cannot disturb the repos above.
+
+const BR_ORIGIN = path.join(HOME, 'git-br-origin.git');
+const BR_PEER = path.join(HOME, 'git-br-peer');
+const BR = path.join(HOME, 'git-br-work');
+
+function setupBranchRepo() {
+  for (const dir of [BR_ORIGIN, BR_PEER, BR]) fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(BR_ORIGIN, { recursive: true });
+  run(['init', '--bare', '-q'], BR_ORIGIN);
+  run(['symbolic-ref', 'HEAD', 'refs/heads/main'], BR_ORIGIN);
+
+  run(['clone', '-q', BR_ORIGIN, BR_PEER], HOME);
+  identity(BR_PEER);
+  run(['checkout', '-q', '-B', 'main'], BR_PEER);
+  commit(BR_PEER, 'a.txt', 'base\n', 'base');
+  run(['push', '-q', '-u', 'origin', 'main'], BR_PEER);
+  run(['checkout', '-q', '-b', 'feature/remote-only'], BR_PEER);
+  commit(BR_PEER, 'r.txt', 'remote\n', 'remote-only work');
+  run(['push', '-q', '-u', 'origin', 'feature/remote-only'], BR_PEER);
+
+  run(['clone', '-q', '-b', 'main', BR_ORIGIN, BR], HOME);
+  identity(BR);
+  run(['branch', '-q', 'feature/local'], BR);
+}
+
+const brSlug = () => slugForPath(BR);
+
+test('branches lists local ones with the current marked, and remote ones nothing local covers', async () => {
+  setupBranchRepo();
+  const res = await request(app).get(`/api/projects/${brSlug()}/git/branches`);
+
+  assert.strictEqual(res.status, 200);
+  const local = Object.fromEntries(res.body.local.map(b => [b.name, b]));
+  assert.strictEqual(local.main.current, true);
+  assert.strictEqual(local.main.upstream, 'origin/main');
+  assert.strictEqual(local['feature/local'].current, false);
+  assert.deepStrictEqual(res.body.remote, [{ name: 'origin/feature/remote-only', localName: 'feature/remote-only' }],
+    'origin/main is tracked by main and origin/HEAD is not a branch, so neither is offered');
+});
+
+test('checkout switches to a local branch', async () => {
+  setupBranchRepo();
+  const res = await request(app).post(`/api/projects/${brSlug()}/git/checkout`).send({ branch: 'feature/local' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(currentBranch(BR), 'feature/local');
+});
+
+test('checkout of a remote branch creates the local branch tracking it', async () => {
+  setupBranchRepo();
+  const res = await request(app).post(`/api/projects/${brSlug()}/git/checkout`)
+    .send({ branch: 'origin/feature/remote-only', remote: true });
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(currentBranch(BR), 'feature/remote-only');
+  assert.strictEqual(await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], BR), 'origin/feature/remote-only');
+});
+
+test('checkout refuses a branch the list does not report, including option-like names', async () => {
+  setupBranchRepo();
+  for (const body of [{ branch: 'no/such' }, { branch: '--orphan=x' }, { branch: 'feature/local', remote: true }, {}]) {
+    const res = await request(app).post(`/api/projects/${brSlug()}/git/checkout`).send(body);
+    assert.strictEqual(res.status, 400, JSON.stringify(body));
+  }
+  assert.strictEqual(currentBranch(BR), 'main', 'HEAD never moved');
+});
+
+test('checkout with stash parks every change, untracked included, then switches', async () => {
+  setupBranchRepo();
+  fs.writeFileSync(path.join(BR, 'a.txt'), 'edited\n');
+  fs.writeFileSync(path.join(BR, 'new.txt'), 'untracked\n');
+
+  const res = await request(app).post(`/api/projects/${brSlug()}/git/checkout`).send({ branch: 'feature/local', stash: true });
+
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(currentBranch(BR), 'feature/local');
+  assert.strictEqual(await git(['status', '--porcelain'], BR), '', 'the tree is clean');
+  const stashes = (await request(app).get(`/api/projects/${brSlug()}/git/stashes`)).body.stashes;
+  assert.strictEqual(stashes.length, 1);
+  assert.strictEqual(stashes[0].ref, 'stash@{0}');
+  assert.match(stashes[0].message, /Auto-stash before switching to feature\/local/);
+});
+
+test('checkout without stash carries changes along, and git refusal is reported when they would be overwritten', async () => {
+  setupBranchRepo();
+  fs.writeFileSync(path.join(BR, 'new.txt'), 'untracked\n');
+  let res = await request(app).post(`/api/projects/${brSlug()}/git/checkout`).send({ branch: 'feature/local' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(fs.readFileSync(path.join(BR, 'new.txt'), 'utf-8'), 'untracked\n', 'the change came along');
+
+  run(['switch', '-q', 'main'], BR);
+  fs.writeFileSync(path.join(BR, 'r.txt'), 'would be overwritten\n');
+  res = await request(app).post(`/api/projects/${brSlug()}/git/checkout`)
+    .send({ branch: 'origin/feature/remote-only', remote: true });
+  assert.strictEqual(res.status, 500);
+  assert.ok(res.body.error);
+  assert.strictEqual(currentBranch(BR), 'main');
+});
+
+test('branch creates a new branch from HEAD and switches to it', async () => {
+  setupBranchRepo();
+  const res = await request(app).post(`/api/projects/${brSlug()}/git/branch`).send({ name: 'feature/new-one' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(currentBranch(BR), 'feature/new-one');
+});
+
+test('branch refuses names git would reject or read as an option', async () => {
+  setupBranchRepo();
+  for (const name of ['', '   ', '-b', '--help', 'bad..name', 'with space', 'feature/local']) {
+    const res = await request(app).post(`/api/projects/${brSlug()}/git/branch`).send({ name });
+    assert.notStrictEqual(res.status, 200, JSON.stringify(name));
+  }
+  assert.strictEqual(currentBranch(BR), 'main');
+});
+
+test('stash push, list, apply, pop and drop', async () => {
+  setupBranchRepo();
+  const base = `/api/projects/${brSlug()}/git`;
+
+  fs.writeFileSync(path.join(BR, 'a.txt'), 'first\n');
+  assert.strictEqual((await request(app).post(`${base}/stash`).send({ message: 'first' })).status, 200);
+  fs.writeFileSync(path.join(BR, 'only-untracked.txt'), 'u\n');
+  assert.strictEqual((await request(app).post(`${base}/stash`).send({ message: 'second', untracked: true })).status, 200);
+  assert.strictEqual(fs.existsSync(path.join(BR, 'only-untracked.txt')), false, '-u took the untracked file');
+
+  let stashes = (await request(app).get(`${base}/stashes`)).body.stashes;
+  assert.deepStrictEqual(stashes.map(s => s.ref), ['stash@{0}', 'stash@{1}']);
+  assert.match(stashes[0].message, /second/);
+  assert.match(stashes[1].message, /first/);
+  assert.ok(stashes[0].when);
+
+  assert.strictEqual((await request(app).post(`${base}/stash/apply`).send({ ref: 'stash@{0}' })).status, 200);
+  assert.strictEqual(fs.existsSync(path.join(BR, 'only-untracked.txt')), true);
+  assert.strictEqual((await request(app).get(`${base}/stashes`)).body.stashes.length, 2, 'apply keeps the entry');
+
+  assert.strictEqual((await request(app).post(`${base}/stash/drop`).send({ ref: 'stash@{0}' })).status, 200);
+  run(['clean', '-fdq'], BR);
+  assert.strictEqual((await request(app).post(`${base}/stash/pop`).send({ ref: 'stash@{0}' })).status, 200);
+  assert.match(fs.readFileSync(path.join(BR, 'a.txt'), 'utf-8'), /^first\r?\n$/, 'core.autocrlf may restore CRLF');
+  stashes = (await request(app).get(`${base}/stashes`)).body.stashes;
+  assert.deepStrictEqual(stashes, []);
+});
+
+test('stash operations accept only a stash@{n} ref', async () => {
+  setupBranchRepo();
+  for (const ref of [undefined, 'HEAD', 'stash@{x}', '--all', 'stash@{0} extra']) {
+    const res = await request(app).post(`/api/projects/${brSlug()}/git/stash/drop`).send({ ref });
+    assert.strictEqual(res.status, 400, String(ref));
+    assert.strictEqual(res.body.error, 'Invalid stash');
+  }
+});
+
+test('branch and stash routes reject a traversal slug', async () => {
+  const calls = [
+    request(app).get('/api/projects/bad..slug/git/branches'),
+    request(app).post('/api/projects/bad..slug/git/checkout').send({ branch: 'main' }),
+    request(app).post('/api/projects/bad..slug/git/branch').send({ name: 'x' }),
+    request(app).get('/api/projects/bad..slug/git/stashes'),
+    request(app).post('/api/projects/bad..slug/git/stash').send({}),
+    request(app).post('/api/projects/bad..slug/git/stash/apply').send({ ref: 'stash@{0}' }),
+  ];
+  for (const res of await Promise.all(calls)) {
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.error, 'Invalid slug');
+  }
 });

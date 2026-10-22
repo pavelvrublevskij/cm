@@ -138,6 +138,7 @@ const context = vm.createContext({
       return harness.hold ? harness.hold.promise : undefined;
     },
   },
+  GitMenu: { render: () => { harness.menuRenders++; } },
   setTimeout: fn => fn(),
   escapeHtml: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;'),
   escapeAttr: s => String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;')
@@ -271,6 +272,7 @@ function connectFakeShell() {
 }
 
 beforeEach(() => {
+  harness.menuRenders = 0;
   harness.store = {};
   harness.els = {};
   harness.sent = [];
@@ -739,6 +741,29 @@ test('refreshIfMounted repaints the changes card and keeps a half-typed message'
   assert.strictEqual(el('git-panel-msg').value, 'half typed', 'the draft survives the repaint');
 });
 
+test('the menu bar is painted on mount and repainted on refresh, so it shows the new branch', async () => {
+  await GitPanel.mount(HOST, 'proj');
+  assert.match(el(HOST).innerHTML, /id="git-menubar-host"/);
+  const afterMount = harness.menuRenders;
+  assert.ok(afterMount >= 1);
+
+  harness.gitInfo.branch = 'feature/switched';
+  await GitPanel.refreshIfMounted();
+  assert.strictEqual(harness.menuRenders, afterMount + 1);
+  assert.strictEqual(el('git-pane-subject').textContent, 'feature/switched', 'the pane header follows too');
+});
+
+test('canPush allows a first push without upstream and needs unpushed commits otherwise', () => {
+  GitPanel._info = { hasRemote: true, upstream: null, unpushed: [] };
+  assert.strictEqual(GitPanel.canPush(), true);
+  GitPanel._info = { hasRemote: true, upstream: 'origin/x', unpushed: [] };
+  assert.strictEqual(GitPanel.canPush(), false);
+  GitPanel._info = { hasRemote: true, upstream: 'origin/x', unpushed: [{ sha: 'a' }] };
+  assert.strictEqual(GitPanel.canPush(), true);
+  GitPanel._info = { hasRemote: false, upstream: null, unpushed: [] };
+  assert.strictEqual(GitPanel.canPush(), false);
+});
+
 test('refreshIfMounted does nothing when the panel is not mounted', async () => {
   await GitPanel.mount(HOST, 'proj');
   GitPanel.unmount();
@@ -1186,7 +1211,7 @@ test('every action is disabled while one is in flight', async () => {
 
   const pending = GitPanel.push();
   const html = el('git-changes-actions').innerHTML;
-  assert.strictEqual((html.match(/disabled/g) || []).length, 3, 'all three buttons are disabled');
+  assert.strictEqual((html.match(/disabled/g) || []).length, 4, 'all four buttons (Commit, its AI menu toggle, Commit & Push, Push) are disabled');
 
   release();
   await pending;

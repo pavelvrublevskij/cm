@@ -163,7 +163,7 @@
               <div class="multi-select" data-key="models">
                 <button type="button" class="multi-select-trigger" onclick="Usage.toggleDropdown('models', event)">
                   <span class="multi-select-label" id="filter-models-label">All models</span>
-                  <span class="multi-select-chevron">&#9662;</span>
+                  <span class="dd-arrow"></span>
                 </button>
                 <div class="multi-select-panel" id="filter-models-panel" hidden>
                   <input type="text" class="multi-select-search" placeholder="Search models..." oninput="Usage.filterOptions('models', this.value)">
@@ -176,7 +176,7 @@
               <div class="multi-select" data-key="projects">
                 <button type="button" class="multi-select-trigger" onclick="Usage.toggleDropdown('projects', event)">
                   <span class="multi-select-label" id="filter-projects-label">All projects</span>
-                  <span class="multi-select-chevron">&#9662;</span>
+                  <span class="dd-arrow"></span>
                 </button>
                 <div class="multi-select-panel" id="filter-projects-panel" hidden>
                   <input type="text" class="multi-select-search" placeholder="Search projects..." oninput="Usage.filterOptions('projects', this.value)">
@@ -209,15 +209,18 @@
             <div class="filter-ai-row">
               <button class="btn btn-sm btn-primary" id="usage-insights-btn" onclick="UsageInsights.open()" title="Use AI (your local claude) to find efficiency gaps in the filtered usage">&#10024; Analyze efficiency</button>
               <span class="filter-ai-note">Uses AI on the filtered usage</span>
+              <button class="btn btn-sm" id="usage-insights-history-btn" onclick="UsageInsights.openHistory()" title="Reopen saved efficiency reports">Past reports</button>
             </div>
           </div>
           <div class="dashboard-stats" id="usage-summary"></div>
+          <div class="usage-hints" id="usage-hints"></div>
 
           <div class="charts-grid" id="usage-charts-grid">
             <div class="chart-card chart-card-wide">
               <div class="chart-card-header">
                 <h3 class="chart-card-title">Cost &amp; Tokens over Time</h3>
                 <div class="chart-card-actions">
+                <button class="btn btn-sm usage-suggest-btn" onclick="UsageMarks.openSuggestions()" title="Changes in your setup worth marking" hidden></button>
                 <button class="btn btn-sm" id="usage-add-mark-btn" onclick="UsageMarks.openEditor()" title="Mark a date (e.g. a new skill) to see how usage changed after it">&#9873; Add mark</button>
                 <div class="tab-bar tab-bar-mini" id="usage-period-tabs-chart">
                   <button class="tab-btn" data-group="hour" onclick="Usage.setGroup('hour', this)">Hour</button>
@@ -252,7 +255,10 @@
           <div class="usage-marks-section" id="usage-marks">
             <div style="display:flex;align-items:center;justify-content:space-between;margin:24px 0 12px">
               <h3 style="margin:0">Marks</h3>
-              <button class="btn btn-sm" onclick="UsageMarks.openEditor()">&#9873; Add mark</button>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-sm usage-suggest-btn" onclick="UsageMarks.openSuggestions()" title="Changes in your setup worth marking" hidden></button>
+                <button class="btn btn-sm" onclick="UsageMarks.openEditor()">&#9873; Add mark</button>
+              </div>
             </div>
             <div id="usage-marks-list"></div>
           </div>
@@ -914,6 +920,7 @@
   <script src="/js/usage-charts.js"></script>
   <script src="/js/usage-marks.js"></script>
   <script src="/js/usage-insights.js"></script>
+  <script src="/js/usage-hints.js"></script>
   <script src="/js/term-view.js"></script>
   <script src="/js/terminal.js"></script>
   <script src="/js/terminal-skills.js"></script>
@@ -925,6 +932,8 @@
   <script src="/js/git.js"></script>
   <script src="/js/git-recipes.js"></script>
   <script src="/js/git-panel.js"></script>
+  <script src="/js/git-menu.js"></script>
+  <script src="/js/git-branch-picker.js"></script>
   <script src="/js/active-sessions-bar.js"></script>
   <script src="/js/sidebar-resize.js"></script>
   <script src="/js/app.js"></script>

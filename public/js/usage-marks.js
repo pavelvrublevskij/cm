@@ -5,6 +5,66 @@
 const UsageMarks = {
   marks: [],
 
+  suggestions: [],
+
+  /** Changes worth marking (CLAUDE.md edits, skills, plugins, model switches) in the current filters. */
+  async fetchSuggestions() {
+    const data = await api('/api/usage/mark-suggestions?_=1' + Usage.buildQuery());
+    UsageMarks.suggestions = data.suggestions || [];
+    return UsageMarks.suggestions;
+  },
+
+  renderSuggestButtons() {
+    const n = UsageMarks.suggestions.length;
+    document.querySelectorAll('.usage-suggest-btn').forEach(btn => {
+      btn.hidden = n === 0;
+      btn.textContent = '\u{1F4A1} ' + n + ' suggested';
+    });
+  },
+
+  openSuggestions() {
+    const rows = UsageMarks.suggestions.map((s, i) => `
+      <div class="mark-suggestion-row">
+        <div class="mark-suggestion-meta">
+          <div><strong>${escapeHtml(s.date)}</strong> <span class="${s.project ? 'mark-tip-scope' : 'mark-tip-scope mark-tip-global'}">${escapeHtml(UsageMarks.scopeName(s))}</span> ${escapeHtml(s.title)}</div>
+          <div class="mark-suggestion-desc">${escapeHtml(s.description || '')}</div>
+        </div>
+        <div class="mark-suggestion-actions">
+          <button class="btn btn-sm btn-primary" onclick="UsageMarks.addFromSuggestion(${i})">Add mark</button>
+          <button class="btn btn-sm" onclick="UsageMarks.dismissSuggestion(${i}, this)">Dismiss</button>
+        </div>
+      </div>`).join('');
+    openModal({
+      title: 'Suggested Marks',
+      width: 680,
+      cls: 'usage-insights-modal',
+      cancelLabel: 'Close',
+      body: `<div class="info-note">Changes found in your Claude Code setup and usage for the current filters. Add one as a mark to compare usage before and after it.</div>
+        <div class="mark-suggestion-list">${rows || '<div class="empty-state"><p>No suggestions.</p></div>'}</div>`
+    });
+  },
+
+  addFromSuggestion(i) {
+    const s = UsageMarks.suggestions[i];
+    if (!s) return;
+    document.querySelectorAll('.modal-overlay').forEach(o => o.remove());
+    UsageMarks.openEditor(null, { date: s.date, title: s.title, description: s.description, project: s.project });
+  },
+
+  async dismissSuggestion(i, btn) {
+    const s = UsageMarks.suggestions[i];
+    if (!s) return;
+    try {
+      await api('/api/usage/mark-suggestions/dismiss', { method: 'POST', body: { key: s.key } });
+      const row = btn.closest('.mark-suggestion-row');
+      if (row) row.remove();
+      UsageMarks.suggestions = UsageMarks.suggestions.map(x => x === s ? null : x).filter(Boolean);
+      UsageMarks.renderSuggestButtons();
+    } catch (e) {
+      toast('Could not dismiss: ' + e.message, 'error');
+    }
+  },
+
   async fetch() {
     const data = await api('/api/usage/marks?_=1' + Usage.buildQuery());
     UsageMarks.marks = data.marks || [];
@@ -13,8 +73,9 @@ const UsageMarks = {
 
   async reload() {
     try {
-      await UsageMarks.fetch();
+      await Promise.all([UsageMarks.fetch(), UsageMarks.fetchSuggestions()]);
       UsageMarks.render();
+      UsageMarks.renderSuggestButtons();
       if (typeof UsageCharts !== 'undefined' && UsageCharts.lastData && Usage.viewMode === 'charts') {
         UsageCharts.renderPeriod(UsageCharts.lastData.periods, UsageCharts.palette());
       }
@@ -91,16 +152,31 @@ const UsageMarks = {
   },
 
   /**
-   * The before/after comparison as a small grid: which days were compared, average tokens and
-   * cost per day in each, and the change (green when usage dropped, red when it rose).
+   * The before/after comparison as a grid with Before / After / Change columns. Efficiency rows
+   * come first and are colored (green = better); volume rows follow uncolored, since they mostly
+   * reflect how much you worked rather than how efficiently.
    */
   impactHtml(i) {
+    const b = i.before;
+    const a = i.after;
+    const dash = '—';
+    const cost = v => v == null ? dash : Usage.fmtCost(v);
+    const pct = v => v == null ? dash : v.toFixed(0) + '%';
+    const tok = v => v == null ? dash : fmtTokens(Math.round(v));
+    const row = (label, before, after, change) =>
+      `<span class="mark-impact-label">${label}</span><span>${before}</span><span>${after}</span><span>${change}</span>`;
     return `<div class="mark-impact">
-        <div class="mark-impact-title">Avg per day, ${i.window} days before vs after (days with usage only)</div>
+        <div class="mark-impact-title">${i.window} days before vs ${i.window} days from the mark</div>
         <div class="mark-impact-grid">
-          <span>Before</span><span>${escapeHtml(UsageMarks.fmtRange(i.before))}</span><span>${fmtTokens(Math.round(i.before.avgTokensPerDay))}</span><span>${Usage.fmtCost(i.before.avgCostPerDay)}</span>
-          <span>After</span><span>${escapeHtml(UsageMarks.fmtRange(i.after))}</span><span>${fmtTokens(Math.round(i.after.avgTokensPerDay))}</span><span>${Usage.fmtCost(i.after.avgCostPerDay)}</span>
-          <span>Change</span><span></span><span>${UsageMarks.fmtPct(i.tokensChangePct)}</span><span>${UsageMarks.fmtPct(i.costChangePct)}</span>
+          ${row('', 'Before', 'After', 'Change').replace(/<span>/g, '<span class="mark-impact-head">')}
+          ${row('Days', escapeHtml(UsageMarks.fmtRange(b)), escapeHtml(UsageMarks.fmtRange(a)), '')}
+          <span class="mark-impact-section">Efficiency</span>
+          ${row('Cost / session', cost(b.costPerSession), cost(a.costPerSession), UsageMarks.fmtPct(i.costPerSessionChangePct))}
+          ${row('Cache hit', pct(b.cacheHitPct), pct(a.cacheHitPct), UsageMarks.fmtPts(i.cacheHitChangePts))}
+          ${row('Tokens / request', tok(b.tokensPerRequest), tok(a.tokensPerRequest), UsageMarks.fmtPct(i.tokensPerRequestChangePct))}
+          <span class="mark-impact-section">Volume per active day (depends on how much you worked)</span>
+          ${row('Tokens / day', tok(b.avgTokensPerDay), tok(a.avgTokensPerDay), UsageMarks.fmtPct(i.tokensChangePct, 'neutral'))}
+          ${row('Cost / day', cost(b.avgCostPerDay), cost(a.avgCostPerDay), UsageMarks.fmtPct(i.costChangePct, 'neutral'))}
         </div>
       </div>`;
   },
@@ -118,11 +194,21 @@ const UsageMarks = {
     }).join('');
   },
 
-  fmtPct(pct) {
+  /** Change in %; lower is better (green) unless mode is 'neutral' (no color). */
+  fmtPct(pct, mode) {
     if (pct === null || pct === undefined) return '<span class="mark-delta">n/a</span>';
-    const cls = pct < 0 ? 'mark-delta-good' : pct > 0 ? 'mark-delta-bad' : '';
+    const cls = mode === 'neutral' ? '' : pct < 0 ? 'mark-delta-good' : pct > 0 ? 'mark-delta-bad' : '';
     const sign = pct > 0 ? '+' : '';
     return `<span class="mark-delta ${cls}">${sign}${pct.toFixed(0)}%</span>`;
+  },
+
+  /** Change in percentage points, where higher is better (cache hit). */
+  fmtPts(pts) {
+    if (pts === null || pts === undefined) return '<span class="mark-delta">n/a</span>';
+    const rounded = Math.round(pts);
+    const cls = rounded > 0 ? 'mark-delta-good' : rounded < 0 ? 'mark-delta-bad' : '';
+    const sign = rounded > 0 ? '+' : '';
+    return `<span class="mark-delta ${cls}">${sign}${rounded} pts</span>`;
   },
 
   render() {
@@ -161,11 +247,13 @@ const UsageMarks = {
     el.innerHTML = buildTable(cols, rows);
   },
 
-  openEditor(id) {
+  /** Opens the Add/Edit Mark dialog: edits mark `id`, or adds a new one (optionally prefilled from a suggestion). */
+  openEditor(id, prefill) {
     const mark = id ? UsageMarks.marks.find(m => m.id === id) : null;
+    const init = mark || prefill || null;
     const today = new Date();
     const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
-    const selected = mark ? mark.project : (Usage.currentProjects.size === 1 ? Array.from(Usage.currentProjects.keys())[0] : '');
+    const selected = init ? init.project : (Usage.currentProjects.size === 1 ? Array.from(Usage.currentProjects.keys())[0] : '');
     const projectOptions = ['<option value="">Global (all projects)</option>']
       .concat(Usage.allProjects
         .map(p => ({ slug: p.slug, base: Usage.basename(p.name), name: p.name }))
@@ -174,11 +262,11 @@ const UsageMarks = {
       .join('');
     const body =
       formRow(
-        formGroup('Date', `<input type="date" id="mark-date" value="${escapeHtml(mark ? mark.date : todayStr)}">`),
+        formGroup('Date', `<input type="date" id="mark-date" value="${escapeHtml(init ? init.date : todayStr)}">`),
         formGroup('Scope', `<select id="mark-project">${projectOptions}</select>`)
       ) +
-      formGroup('Title', `<input type="text" id="mark-title" maxlength="80" placeholder="e.g. Added code optimization skill" value="${escapeHtml(mark ? mark.title : '')}">`) +
-      formGroup('Description', `<textarea id="mark-description" rows="3" placeholder="What changed?">${escapeHtml(mark ? mark.description : '')}</textarea>`) +
+      formGroup('Title', `<input type="text" id="mark-title" maxlength="80" placeholder="e.g. Added code optimization skill" value="${escapeHtml(init ? init.title : '')}">`) +
+      formGroup('Description', `<textarea id="mark-description" rows="3" placeholder="What changed?">${escapeHtml(init ? init.description || '' : '')}</textarea>`) +
       formGroup('Compare', `<select id="mark-window" onchange="UsageMarks.updateWindowHint()">${[7, 14, 30].map(d =>
         `<option value="${d}"${d === (mark && mark.window || 7) ? ' selected' : ''}>${d} days</option>`).join('')}</select>
         <div class="mark-window-hint" id="mark-window-hint"></div>`);

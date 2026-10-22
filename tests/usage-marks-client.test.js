@@ -96,19 +96,36 @@ test('tooltipHtml shows date, scope badge, title and description, escaped', () =
   assert.strictEqual((html.match(/mark-tip-desc/g) || []).length, 1);
 });
 
-test('impactHtml shows the compared days, averages and the colored change', () => {
-  const html = UsageMarks.impactHtml({
-    window: 7,
-    before: { from: '2026-10-03', to: '2026-10-09', avgTokensPerDay: 1000, avgCostPerDay: 2 },
-    after: { from: '2026-10-10', to: '2026-10-16', partial: false, avgTokensPerDay: 500, avgCostPerDay: 3 },
-    tokensChangePct: -50,
-    costChangePct: 50
-  });
-  assert.match(html, /7 days before vs after/);
-  assert.match(html, /<span>Before<\/span><span>Oct 3 \u2013 Oct 9<\/span><span>1000<\/span><span>\$2\.00<\/span>/);
-  assert.match(html, /<span>After<\/span><span>Oct 10 \u2013 Oct 16<\/span><span>500<\/span><span>\$3\.00<\/span>/);
-  assert.match(html, /mark-delta-good">-50%/);
-  assert.match(html, /mark-delta-bad">\+50%/);
+const IMPACT = {
+  window: 7,
+  before: { from: '2026-10-03', to: '2026-10-09', avgTokensPerDay: 1000, avgCostPerDay: 2, costPerSession: 4, cacheHitPct: 90, tokensPerRequest: 300 },
+  after: { from: '2026-10-10', to: '2026-10-16', partial: false, avgTokensPerDay: 500, avgCostPerDay: 3, costPerSession: 3, cacheHitPct: 95, tokensPerRequest: null },
+  tokensChangePct: -50,
+  costChangePct: 50,
+  costPerSessionChangePct: -25,
+  cacheHitChangePts: 5,
+  tokensPerRequestChangePct: null
+};
+
+test('impactHtml shows the compared days and colored efficiency changes', () => {
+  const html = UsageMarks.impactHtml(IMPACT);
+  assert.match(html, /7 days before vs 7 days from the mark/);
+  assert.match(html, /Days<\/span><span>Oct 3 \u2013 Oct 9<\/span><span>Oct 10 \u2013 Oct 16<\/span>/);
+  assert.match(html, /Cost \/ session<\/span><span>\$4\.00<\/span><span>\$3\.00<\/span><span><span class="mark-delta mark-delta-good">-25%/);
+  assert.match(html, /Cache hit<\/span><span>90%<\/span><span>95%<\/span><span><span class="mark-delta mark-delta-good">\+5 pts/);
+  assert.match(html, /Tokens \/ request<\/span><span>300<\/span><span>\u2014<\/span><span><span class="mark-delta">n\/a/);
+});
+
+test('impactHtml shows volume changes without good/bad color', () => {
+  const html = UsageMarks.impactHtml(IMPACT);
+  assert.match(html, /Tokens \/ day<\/span><span>1000<\/span><span>500<\/span><span><span class="mark-delta ">-50%/);
+  assert.match(html, /Cost \/ day<\/span><span>\$2\.00<\/span><span>\$3\.00<\/span><span><span class="mark-delta ">\+50%/);
+});
+
+test('fmtPts treats a higher cache hit as better', () => {
+  assert.match(UsageMarks.fmtPts(3.4), /mark-delta-good">\+3 pts/);
+  assert.match(UsageMarks.fmtPts(-2.6), /mark-delta-bad">-3 pts/);
+  assert.match(UsageMarks.fmtPts(0.2), /mark-delta ">0 pts/);
 });
 
 test('fmtRange marks a window that is still running', () => {

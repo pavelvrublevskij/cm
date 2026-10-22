@@ -54,14 +54,21 @@ const Tour = {
     {
       element: '#usage-add-mark-btn',
       title: 'Marks',
-      text: 'Mark a date when you change something — a new skill, a trimmed CLAUDE.md — globally or for one project. It shows as a line on the chart, and the Marks table compares average daily tokens and cost before vs after.',
+      text: 'Mark a date when you change something — a new skill, a trimmed CLAUDE.md — globally or for one project. It shows as a flag on the chart; hover it to compare cost per session, cache hit and tokens per request before vs after. "Suggested" offers changes CM spotted in your setup.',
       position: 'bottom',
       view: 'usage'
     },
     {
       element: '#usage-insights-btn',
       title: 'Efficiency Insights',
-      text: 'Analyze efficiency uses AI: after you confirm and pick a model and effort, your local claude reviews the usage stats and marks for the current filters and reports efficiency gaps with suggestions. No API key needed — it runs on your Claude login.',
+      text: 'Analyze efficiency uses AI: after you confirm and pick a model and effort, your local claude reviews the usage stats and marks for the current filters and reports efficiency gaps with suggestions. No API key needed — it runs on your Claude login. Reports are kept under Past reports.',
+      position: 'bottom',
+      view: 'usage'
+    },
+    {
+      element: '#usage-hints',
+      title: 'Quick Checks',
+      text: 'Free checks for the current filters, no AI: low cache hit, heavy Opus share, expensive or very long sessions. Click a chip to see what it means and what to do.',
       position: 'bottom',
       view: 'usage'
     },

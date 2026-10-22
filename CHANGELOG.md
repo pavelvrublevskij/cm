@@ -2,8 +2,13 @@
 
 ### Features
 
-- **Usage marks** — mark a date (e.g. a new skill) globally or per project; it shows as a line on the usage chart comparing average daily tokens and cost in the 7, 14 or 30 days before vs after it (chosen per mark). Click a flag to edit or delete it.
-- **Efficiency insights** — "Analyze efficiency" in the Token Usage filter bar uses AI (your local `claude`, with a model and effort you pick) to review the filtered usage and marks and suggest how to close efficiency gaps.
+- **Usage marks** — mark a date (e.g. a new skill) globally or per project; it shows as a line on the usage chart comparing the 7, 14 or 30 days before vs after it (chosen per mark): cost per session, cache hit and tokens per request, plus daily volume. Click a flag to edit or delete it.
+- **Suggested marks** — CLAUDE.md edits, skill changes, plugin installs and main-model switches are offered as one-click marks.
+- **Efficiency insights** — "Analyze efficiency" in the Token Usage filter bar uses AI (your local `claude`, with a model and effort you pick) to review the filtered usage and marks and suggest how to close efficiency gaps. Reports are saved under "Past reports", and sessions they mention link straight to the session.
+- **Quick checks** — free, rule-based hints under the usage summary: low cache hit, heavy Opus share, expensive or very long sessions.
+- **Git menu bar** — Branch, Commit, Remote and Stash menus in the git panel; a searchable branch picker (local + remote) on the branch name, with stash-or-bring-along when switching with uncommitted changes.
+- **AI commit messages** — the Commit button's ▾ menu writes a message for the ticked files with your local `claude` (model and effort selectable); review it, or generate and commit in one step.
+- **Resizable git columns** — drag the dividers between the changes list, shell/diff/history and recipes; widths are remembered.
 - **Arrow-key run menu** — `run.sh` / `run.bat` without an argument now open a menu you navigate with ↑/↓ and Enter (number keys still work); the header shows the CM version.
 
 ### Removed

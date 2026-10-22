@@ -110,6 +110,21 @@ test('mark impact compares the mark window before vs after, scoped to the mark p
   assert.strictEqual(mark.projectName.length > 0, true);
 });
 
+test('mark impact reports efficiency that does not grow with workload', async () => {
+  const m = await request(app).post('/api/usage/marks').send({ date: '2025-06-10', title: 'Efficiency', project: SLUG });
+  const res = await request(app).get('/api/usage/marks?projects=' + SLUG);
+  const { impact } = res.body.marks.find(x => x.id === m.body.id);
+  // One session spans both windows: two requests of 1000 tokens before, two of 500 after.
+  assert.strictEqual(impact.before.sessions, 1);
+  assert.strictEqual(impact.before.requests, 2);
+  assert.strictEqual(impact.before.tokensPerRequest, 1000);
+  assert.strictEqual(impact.after.tokensPerRequest, 500);
+  assert.strictEqual(impact.tokensPerRequestChangePct, -50);
+  assert.strictEqual(impact.costPerSessionChangePct, -50);
+  assert.strictEqual(impact.before.cacheHitPct, 0);
+  assert.strictEqual(impact.cacheHitChangePts, 0);
+});
+
 test('mark impact with no usage before the mark reports null change', async () => {
   const m = await request(app).post('/api/usage/marks').send({ date: '2025-06-10', title: 'Empty', project: OTHER });
   const res = await request(app).get('/api/usage/marks?projects=' + OTHER);
