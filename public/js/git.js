@@ -147,6 +147,22 @@ const GitActions = {
     return GitActions._remote(() => GitApi.fetch(GitActions._slug), 'Fetched');
   },
 
+  checkout(branch, remote, stash) {
+    return GitActions._remote(() => GitApi.checkout(GitActions._slug, branch, remote, stash), `Switched to ${branch}`);
+  },
+
+  createBranch(name) {
+    return GitActions._remote(() => GitApi.createBranch(GitActions._slug, name), `Created ${name}`);
+  },
+
+  stash(message, untracked) {
+    return GitActions._remote(() => GitApi.stash(GitActions._slug, message, untracked), 'Stashed');
+  },
+
+  stashOp(op, ref) {
+    return GitActions._remote(() => GitApi.stashOp(GitActions._slug, op, ref), `${ref}: ${op} done`);
+  },
+
   /** Run one git call and report it. Returns false when git refused, so a chain can stop. */
   async _call(call, okMessage) {
     try {

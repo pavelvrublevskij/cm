@@ -1,8 +1,10 @@
 const { Router } = require('express');
 const { safeSlug, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
-const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus, diffNumstat } = require('../lib/git');
+const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus, diffNumstat, listBranches, listStashes } = require('../lib/git');
 const { computeDiff } = require('../lib/diff');
+const commitMessage = require('../lib/commit-message');
+const insights = require('../lib/usage-insights');
 const { resolveProjectPath } = require('../lib/project-files');
 const fs = require('fs');
 const path = require('path');
@@ -97,6 +99,29 @@ router.post('/:slug/git/commit', wrapRoute(async (req, res) => {
 }));
 
 /**
+ * POST { files, model, effort } — a commit message for the ticked files, written by the user's own
+ * claude CLI from what committing them would record. Nothing is staged or committed here.
+ */
+router.post('/:slug/git/commit-message', wrapRoute(async (req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const { files } = req.body || {};
+  const model = (req.body && req.body.model) || 'default';
+  const effort = (req.body && req.body.effort) || 'default';
+  if (!Array.isArray(files) || !files.length) return res.status(400).json({ error: 'No files selected' });
+  if (!insights.INSIGHT_MODELS.includes(model)) return res.status(400).json({ error: 'Unknown model: ' + model });
+  if (!insights.INSIGHT_EFFORTS.includes(effort)) return res.status(400).json({ error: 'Unknown effort: ' + effort });
+  const projectPath = decodeSlug(req.params.slug);
+  if (!projectPath) return res.status(400).json({ error: 'Cannot resolve project path' });
+  if (!(await gitOk(projectPath))) return res.status(400).json({ error: GIT_UNAVAILABLE });
+
+  const changes = await commitMessage.collectChanges(projectPath, files);
+  if (!changes.trim()) return res.status(400).json({ error: 'The selected files have no changes' });
+  const subjects = await commitMessage.recentSubjects(projectPath);
+  const text = await insights.runClaude(commitMessage.buildPrompt(changes, subjects), { model, effort });
+  res.json({ message: commitMessage.cleanMessage(text) });
+}));
+
+/**
  * What committing this file would record: HEAD versus the working tree, which is what the panel
  * stages. An untracked file has no HEAD side and reads as all added; a deleted one has no working
  * side and reads as all removed. Binary content is reported rather than rendered as garbage.
@@ -170,6 +195,86 @@ for (const [op, args] of Object.entries(REMOTE_OPS)) {
     if (!(await gitOk(projectPath))) return res.status(400).json({ error: GIT_UNAVAILABLE });
 
     const output = await git(args, projectPath);
+    res.json({ ok: true, output });
+  }));
+}
+
+/** The project's repository path, or null once the refusal has already been sent. */
+async function repoPath(req, res) {
+  if (!safeSlug(req.params.slug)) { res.status(400).json({ error: 'Invalid slug' }); return null; }
+  const projectPath = decodeSlug(req.params.slug);
+  if (!projectPath || !(await gitOk(projectPath))) { res.status(400).json({ error: GIT_UNAVAILABLE }); return null; }
+  return projectPath;
+}
+
+router.get('/:slug/git/branches', wrapRoute(async (req, res) => {
+  const projectPath = await repoPath(req, res);
+  if (!projectPath) return;
+  res.json(await listBranches(projectPath));
+}));
+
+/**
+ * Switch to a local branch, or to a remote one by creating the local branch that tracks it. Only a
+ * name the branch list itself reports is accepted, so nothing user-typed reaches git as an argument.
+ * With `stash`, uncommitted work (untracked files included) is stashed first; without it, git carries
+ * the changes over or refuses when they would be overwritten.
+ */
+router.post('/:slug/git/checkout', wrapRoute(async (req, res) => {
+  const projectPath = await repoPath(req, res);
+  if (!projectPath) return;
+  const { branch, remote, stash } = req.body;
+
+  const { local, remote: remotes } = await listBranches(projectPath);
+  const known = remote ? remotes.some(b => b.name === branch) : local.some(b => b.name === branch);
+  if (!known) return res.status(400).json({ error: `Unknown branch: ${branch}` });
+
+  const outputs = [];
+  if (stash) outputs.push(await git(['stash', 'push', '-u', '-m', `Auto-stash before switching to ${branch}`], projectPath));
+  outputs.push(await git(remote ? ['switch', '--track', branch] : ['switch', branch], projectPath));
+  res.json({ ok: true, output: outputs.filter(Boolean).join('\n') });
+}));
+
+/** Create a branch from HEAD and switch to it; uncommitted changes come along. */
+router.post('/:slug/git/branch', wrapRoute(async (req, res) => {
+  const projectPath = await repoPath(req, res);
+  if (!projectPath) return;
+  const name = (req.body.name || '').trim();
+  const valid = name && !name.startsWith('-')
+    && await git(['check-ref-format', '--branch', name], projectPath).then(() => true, () => false);
+  if (!valid) return res.status(400).json({ error: `Invalid branch name: ${name}` });
+
+  const output = await git(['switch', '-c', name], projectPath);
+  res.json({ ok: true, output });
+}));
+
+router.get('/:slug/git/stashes', wrapRoute(async (req, res) => {
+  const projectPath = await repoPath(req, res);
+  if (!projectPath) return;
+  res.json({ stashes: await listStashes(projectPath) });
+}));
+
+router.post('/:slug/git/stash', wrapRoute(async (req, res) => {
+  const projectPath = await repoPath(req, res);
+  if (!projectPath) return;
+  const message = (req.body.message || '').trim();
+  const args = ['stash', 'push'];
+  if (req.body.untracked) args.push('-u');
+  if (message) args.push('-m', message);
+
+  const output = await git(args, projectPath);
+  res.json({ ok: true, output });
+}));
+
+const STASH_REF_RE = /^stash@\{\d+\}$/;
+
+for (const op of ['apply', 'pop', 'drop']) {
+  router.post(`/:slug/git/stash/${op}`, wrapRoute(async (req, res) => {
+    const projectPath = await repoPath(req, res);
+    if (!projectPath) return;
+    const ref = req.body.ref;
+    if (typeof ref !== 'string' || !STASH_REF_RE.test(ref)) return res.status(400).json({ error: 'Invalid stash' });
+
+    const output = await git(['stash', op, ref], projectPath);
     res.json({ ok: true, output });
   }));
 }

@@ -8,19 +8,17 @@ const Skills = makeFrontmatterCrud({
   cardTitle: s => `<span style="color:var(--accent);font-family:var(--font-mono)">/${escapeHtml(s.name)}</span>`,
   editTitle: (item, name) => '/' + name,
   infoNote: `Skills are custom slash commands you can invoke with <code>/skill-name</code>.
-    Each skill is a <code>SKILL.md</code> file with YAML frontmatter (name, description, allowed-tools, model) and markdown instructions.
+    Each skill is a <code>SKILL.md</code> file with YAML frontmatter (name, description, allowed-tools, model, effort) and markdown instructions.
     Stored in <code>~/.claude/skills/&lt;name&gt;/SKILL.md</code> (global) or <code>.claude/skills/</code> (per-project).
     Use <code>$ARGUMENTS</code> in content to receive user input.`,
   emptyText: 'No custom skills configured',
-  editExtraFields: (item, idp) => formRow(
-    formGroup('Allowed Tools', `<input type="text" id="${idp}-edit-tools" value="${escapeHtml(item.frontmatter['allowed-tools'] || '')}" placeholder="Read, Grep, Bash(npm *)">`),
-    formGroup('Model', `<input type="text" id="${idp}-edit-model" value="${escapeHtml(item.frontmatter.model || '')}" placeholder="default">`)
-  ),
+  editExtraFields: (item, idp) =>
+    formGroup('Allowed Tools', `<input type="text" id="${idp}-edit-tools" value="${escapeHtml(item.frontmatter['allowed-tools'] || '')}" placeholder="Read, Grep, Bash(npm *)">`)
+    + skillModelEffortFields(item, idp),
   readEditExtras: (fm, idp) => {
     const tools = document.getElementById(`${idp}-edit-tools`).value.trim();
     if (tools) fm['allowed-tools'] = tools; else delete fm['allowed-tools'];
-    const model = document.getElementById(`${idp}-edit-model`).value.trim();
-    if (model) fm.model = model; else delete fm.model;
+    readSkillModelEffort(fm, idp);
   },
   createFields: idp =>
     formGroup('Skill Name (folder name)', `<input type="text" id="${idp}-new-name" placeholder="my-skill">`)

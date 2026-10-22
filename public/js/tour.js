@@ -52,6 +52,39 @@ const Tour = {
       view: 'usage'
     },
     {
+      element: '#usage-add-mark-btn',
+      title: 'Marks',
+      text: 'Mark a date when you change something — a new skill, a trimmed CLAUDE.md — globally or for one project. It shows as a flag on the chart; hover it to compare cost per session, cache hit and tokens per request before vs after. "Suggested" offers changes CM spotted in your setup.',
+      position: 'bottom',
+      view: 'usage'
+    },
+    {
+      element: '#usage-insights-btn',
+      title: 'Efficiency Insights',
+      text: 'Analyze efficiency uses AI: after you confirm and pick a model and effort, your local claude reviews the usage stats and marks for the current filters and reports efficiency gaps with suggestions. No API key needed — it runs on your Claude login. Reports are kept under Past reports.',
+      position: 'bottom',
+      view: 'usage'
+    },
+    {
+      element: '#usage-hints',
+      title: 'Quick Checks',
+      text: 'Free checks for the current filters, no AI: low cache hit, heavy Opus share, expensive or very long sessions. Click a chip to see what it means and what to do.',
+      position: 'bottom',
+      view: 'usage'
+    },
+    {
+      element: '.nav-item[data-view="agents"]',
+      title: 'Global Agents',
+      text: 'Create subagents in ~/.claude/agents/ that work in every project. Name and description are required; model, effort, permission mode, memory and color are dropdowns, so no value can be mistyped.',
+      position: 'right'
+    },
+    {
+      element: '.nav-item[data-view="health"]',
+      title: 'Health Check',
+      text: 'A read-only check of your setup: settings files that are not valid JSON, MCP servers whose command is missing, skills that will not trigger well, oversized CLAUDE.md files, and stale or duplicate memories. Each finding links to where you can fix it.',
+      position: 'right'
+    },
+    {
       element: '#projects-grid',
       title: 'Projects and Worktrees',
       text: 'Every project Claude Code has seen. Git worktrees and linked repos of the same codebase are grouped into one entry, and the Sessions list gets a "Subprojects" filter to fold every session in the group into one list.',

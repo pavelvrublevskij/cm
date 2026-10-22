@@ -1,3 +1,23 @@
+## v1.9.0
+
+### Features
+
+- **Usage marks** — mark a change on the usage chart and compare usage before vs after it; suggested marks for setup changes.
+- **Efficiency insights** — AI review of the filtered usage with saved reports; free quick checks under the summary.
+- **Health Check** — flags broken settings, failing MCP servers, weak skills, oversized CLAUDE.md and stale memories.
+- **Global agents** — new Agents page for `~/.claude/agents/`.
+- **Skill and agent dropdowns** — model, effort and other fixed values are picked, not typed.
+- **Git panel** — menu bar with branch picker, AI commit messages, resizable columns.
+- **Arrow-key run menu** — `run.sh` / `run.bat` menu with ↑/↓ and Enter; version in the header.
+
+### Bug fixes
+
+- **Agent file names are validated** — they can no longer point outside `.claude/agents`.
+
+### Removed
+
+- **CM.app** — use `./run.sh` on macOS instead.
+
 ## v1.8.1
 
 ### Features

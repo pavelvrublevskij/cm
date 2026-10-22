@@ -10,11 +10,13 @@ setlocal enabledelayedexpansion
 set PORT=3000
 set URL=http://127.0.0.1:%PORT%
 set MIN_NODE=18
+set VERSION=
+for /f "tokens=2 delims=:, " %%v in ('findstr /b /c:"  \"version\"" "%~dp0package.json"') do if not defined VERSION set VERSION=%%~v
 
 :: Header
 echo.
 echo ======================================
-echo        CM
+echo        CM - %VERSION%
 echo ======================================
 echo.
 
@@ -24,14 +26,9 @@ if not "%~1"=="" (
     goto :run_choice
 )
 
-:: Menu
-echo   1)  Start       Install deps, start server, open browser
-echo   2)  Stop        Stop the running server
-echo   3)  Update git  Pull latest from GitHub (requires git)
-echo   4)  Update zip  Download latest release zip from GitHub
-echo   0)  Exit
-echo.
-set /p CHOICE="  Select option: "
+:: Arrow-key menu; the script exits with the chosen option's number
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-menu.ps1"
+set CHOICE=%errorlevel%
 echo.
 
 :run_choice

@@ -106,7 +106,10 @@ const Usage = {
       const [summary, periods, projects] = await Promise.all([
         api('/api/usage/summary?_=1' + q),
         api('/api/usage/by-period?group=' + Usage.currentGroup + q),
-        api('/api/usage/by-project?_=1' + q)
+        api('/api/usage/by-project?_=1' + q),
+        UsageMarks.fetch(),
+        UsageMarks.fetchSuggestions(),
+        UsageHints.fetch()
       ]);
       Usage.allModels = summary.allModels || [];
       Usage.allProjects = summary.allProjects || [];
@@ -116,6 +119,9 @@ const Usage = {
       Usage.renderPricing(summary.modelPricing, summary.byModel, summary.pricingUpdated, summary.pricingSource);
       Usage.renderPeriods(periods.periods);
       Usage.renderProjects(projects.projects);
+      UsageMarks.render();
+      UsageMarks.renderSuggestButtons();
+      UsageHints.render();
       if (typeof UsageCharts !== 'undefined') {
         UsageCharts.lastData = { summary: summary, periods: periods.periods, projects: projects.projects };
         if (Usage.viewMode === 'charts') {

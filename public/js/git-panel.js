@@ -31,6 +31,7 @@ const GitPanel = {
 
   BUSY_LABEL: {
     'commit': 'Committing…',
+    'generate': 'Writing message…',
     'commit-push': 'Committing & pushing…',
     'push': 'Pushing…',
     'pull': 'Pulling…',
@@ -103,12 +104,16 @@ const GitPanel = {
     }
 
     el.innerHTML = `
-      <div class="git-panel-layout${GitPanel._layoutClasses()}" id="git-panel-layout">
+      <div id="git-menubar-host"></div>
+      <div class="git-panel-layout${GitPanel._layoutClasses()}" id="git-panel-layout" style="${GitPanel._splitStyle()}">
         <div class="git-changes" id="git-changes"></div>
+        <div class="git-split-handle" data-side="left" onmousedown="GitPanel.startSplitDrag(event, 'left')" title="Drag to resize"></div>
         ${GitPanel._shellHtml()}
+        <div class="git-split-handle git-split-handle-right" data-side="right" onmousedown="GitPanel.startSplitDrag(event, 'right')" title="Drag to resize"></div>
         ${GitPanel._recipesHtml()}
       </div>`;
 
+    GitMenu.render();
     GitPanel._renderChanges();
     GitPanel._renderRecipes();
     GitPanel._showShell(GitPanel.shellOpen());
@@ -272,7 +277,9 @@ const GitPanel = {
     const info = await GitApi.info(GitPanel._slug);
     if (!info) return;                       // transient failure: keep showing what we had
     GitPanel._info = info;
+    GitMenu.render();
     GitPanel._renderChanges();
+    GitPanel._applyPaneState();
     GitPanel.invalidateLog();
     if (draft) {
       const box = document.getElementById('git-panel-msg');
@@ -464,13 +471,101 @@ const GitPanel = {
     const info = GitPanel._info || {};
     const files = info.files || [];
     const unpushed = (info.unpushed || []).length;
-    // A brand new local branch has no upstream to diff against, so `unpushed` is always empty —
-    // that must not block the first push, which is what sets the upstream in the first place.
-    const canPush = info.hasRemote && (!info.upstream || unpushed > 0);
 
-    return GitPanel._actionButton('commit', 'Commit', 'GitPanel.commit(false)', files.length, ' btn-primary')
+    return GitPanel._commitSplitHtml(files.length)
       + GitPanel._actionButton('commit-push', 'Commit &amp; Push', 'GitPanel.commit(true)', files.length)
-      + GitPanel._actionButton('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', canPush);
+      + GitPanel._actionButton('push', `Push${unpushed ? ` (${unpushed})` : ''}`, 'GitPanel.push()', GitPanel.canPush());
+  },
+
+  AI_MODELS: [
+    ['haiku', 'Haiku'], ['sonnet', 'Sonnet'], ['opus', 'Opus'], ['fable', 'Fable'], ['default', 'Default (your claude setting)']
+  ],
+  AI_EFFORTS: [
+    ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max'], ['default', 'Default (your claude setting)']
+  ],
+  AI_SETTINGS_KEY: 'claude-manager-git-ai-commit',
+
+  /** Model and effort for AI commit messages; Haiku and low by default, since a message is a quick job. */
+  aiSettings() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(GitPanel.AI_SETTINGS_KEY) || '{}') || {}; } catch (_) {}
+    const known = (list, v, dflt) => list.some(([value]) => value === v) ? v : dflt;
+    return { model: known(GitPanel.AI_MODELS, saved.model, 'haiku'), effort: known(GitPanel.AI_EFFORTS, saved.effort, 'low') };
+  },
+
+  setAiSetting(key, value) {
+    const next = Object.assign(GitPanel.aiSettings(), { [key]: value });
+    try { localStorage.setItem(GitPanel.AI_SETTINGS_KEY, JSON.stringify(next)); } catch (_) {}
+  },
+
+  /**
+   * Commit as a split button: the main part commits, the ▾ part opens AI message options —
+   * generate a message to review, or generate and commit in one go — with model and effort.
+   */
+  _commitSplitHtml(enabled) {
+    const off = GitPanel._busy || !enabled ? ' disabled' : '';
+    const running = GitPanel._busy === 'commit' || GitPanel._busy === 'generate';
+    const body = running ? `<span class="btn-spinner"></span>${GitPanel.BUSY_LABEL[GitPanel._busy]}` : 'Commit';
+    const ai = GitPanel.aiSettings();
+    const options = (list, selected) => list.map(([v, label]) => `<option value="${v}"${v === selected ? ' selected' : ''}>${label}</option>`).join('');
+    return `<div class="git-split action-menu">
+        <button class="btn btn-sm btn-primary git-split-main" onclick="GitPanel.commit(false)"${off}${running ? ' aria-busy="true"' : ''}>${body}</button><button class="btn btn-sm btn-primary git-split-toggle" onclick="event.stopPropagation(); GitPanel.toggleCommitMenu(this)" title="Commit options" aria-label="Commit options"${off}><span class="dd-arrow"></span></button>
+        <div class="action-menu-panel git-commit-menu" onclick="event.stopPropagation()">
+          <button class="action-menu-item" onclick="GitPanel.generateMessage(false)">&#10024; Generate message with AI</button>
+          <button class="action-menu-item" onclick="GitPanel.generateMessage(true)">&#10024; Generate with AI &amp; commit</button>
+          <div class="git-ai-settings">
+            <div class="git-ai-field">Model <select aria-label="AI model" onchange="GitPanel.setAiSetting('model', this.value)">${options(GitPanel.AI_MODELS, ai.model)}</select></div>
+            <div class="git-ai-field">Effort <select aria-label="AI effort" onchange="GitPanel.setAiSetting('effort', this.value)">${options(GitPanel.AI_EFFORTS, ai.effort)}</select></div>
+          </div>
+          <div class="git-ai-note">Uses AI: the selected files' changes are sent to Claude through your local claude CLI, counting toward your Claude usage.</div>
+        </div>
+      </div>`;
+  },
+
+  toggleCommitMenu(btn) {
+    const panel = btn.parentNode.querySelector('.git-commit-menu');
+    if (!panel) return;
+    const open = !panel.classList.contains('open');
+    panel.classList.toggle('open', open);
+    if (open) {
+      // Fixed and opening upward: the changes column scrolls, so an absolute menu would be clipped.
+      const rect = btn.parentNode.getBoundingClientRect();
+      panel.style.left = Math.max(8, rect.left) + 'px';
+      panel.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+    }
+    if (open && !GitPanel._commitMenuListener) {
+      GitPanel._commitMenuListener = () => document.querySelectorAll('.git-commit-menu.open').forEach(p => p.classList.remove('open'));
+      document.addEventListener('click', GitPanel._commitMenuListener);
+    }
+  },
+
+  /** Fills the message box with an AI-written message for the ticked files; optionally commits right after. */
+  async generateMessage(andCommit) {
+    document.querySelectorAll('.git-commit-menu.open').forEach(p => p.classList.remove('open'));
+    const files = GitPanel.selectedFiles();
+    if (!files.length) { toast('No files selected', 'error'); return; }
+    const { model, effort } = GitPanel.aiSettings();
+    let message = '';
+    await GitPanel._withBusy('generate', async () => {
+      try {
+        message = (await GitApi.commitMessage(GitPanel._slug, files, model, effort)).message || '';
+      } catch (e) {
+        toast('Could not generate a commit message: ' + e.message, 'error');
+      }
+    });
+    if (!message) return;
+    const box = document.getElementById('git-panel-msg');
+    if (box) box.value = message;
+    if (andCommit) GitPanel.commit(false);
+  },
+
+  /**
+   * A brand new local branch has no upstream to diff against, so `unpushed` is always empty —
+   * that must not block the first push, which is what sets the upstream in the first place.
+   */
+  canPush() {
+    const info = GitPanel._info || {};
+    return !!info.hasRemote && (!info.upstream || (info.unpushed || []).length > 0);
   },
 
   /**
@@ -824,6 +919,71 @@ const GitPanel = {
 
   _sendResize() {
     if (GitPanel._view) GitPanel._view.resize();
+  },
+
+  SPLIT_KEY: 'claude-manager-git-split',
+  SPLIT_MIN: { left: 240, right: 180 },
+  SPLIT_MIDDLE_MIN: 300,
+
+  /** Saved column widths in px ({ left, right }); missing ones keep the stylesheet defaults. */
+  splitWidths() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(GitPanel.SPLIT_KEY) || '{}') || {};
+      const out = {};
+      for (const side of ['left', 'right']) {
+        if (Number.isFinite(saved[side]) && saved[side] >= GitPanel.SPLIT_MIN[side]) out[side] = Math.round(saved[side]);
+      }
+      return out;
+    } catch (_) {
+      return {};
+    }
+  },
+
+  _splitStyle() {
+    const w = GitPanel.splitWidths();
+    return (w.left ? `--git-left: ${w.left}px;` : '') + (w.right ? `--git-right: ${w.right}px;` : '');
+  },
+
+  /**
+   * Width for one side column while dragging, kept within its minimum and leaving the middle column
+   * (shell / diff / history) at least SPLIT_MIDDLE_MIN.
+   */
+  clampSplit(side, px, layoutWidth, otherWidth) {
+    const max = layoutWidth - otherWidth - GitPanel.SPLIT_MIDDLE_MIN - 24;
+    return Math.round(Math.max(GitPanel.SPLIT_MIN[side], Math.min(max, px)));
+  },
+
+  /** Drag a column divider: left resizes the changes list, right the recipes column. */
+  startSplitDrag(e, side) {
+    const layout = document.getElementById('git-panel-layout');
+    if (!layout) return;
+    const col = side === 'left' ? document.getElementById('git-changes') : document.getElementById('git-recipes-col');
+    const other = side === 'left' ? document.getElementById('git-recipes-col') : document.getElementById('git-changes');
+    if (!col) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = col.getBoundingClientRect().width;
+    const otherWidth = other && other.offsetParent ? other.getBoundingClientRect().width : 0;
+    const layoutWidth = layout.getBoundingClientRect().width;
+    let width = startWidth;
+    document.body.classList.add('git-split-dragging');
+
+    const move = ev => {
+      const dx = ev.clientX - startX;
+      width = GitPanel.clampSplit(side, side === 'left' ? startWidth + dx : startWidth - dx, layoutWidth, otherWidth);
+      layout.style.setProperty(side === 'left' ? '--git-left' : '--git-right', width + 'px');
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.classList.remove('git-split-dragging');
+      const saved = GitPanel.splitWidths();
+      saved[side] = width;
+      try { localStorage.setItem(GitPanel.SPLIT_KEY, JSON.stringify(saved)); } catch (_) {}
+      GitPanel._sendResize();
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
   }
 };
 

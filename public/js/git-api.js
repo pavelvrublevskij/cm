@@ -42,6 +42,11 @@ const GitApi = {
     return api(`${GitApi.base(slug)}/git/commit`, { method: 'POST', body: { message, files } });
   },
 
+  /** A commit message for the ticked files, written by the user's local claude CLI. */
+  commitMessage(slug, files, model, effort) {
+    return api(`${GitApi.base(slug)}/git/commit-message`, { method: 'POST', body: { files, model, effort } });
+  },
+
   push(slug) {
     return api(`${GitApi.base(slug)}/git/push`, { method: 'POST' });
   },
@@ -53,6 +58,33 @@ const GitApi = {
 
   fetch(slug) {
     return api(`${GitApi.base(slug)}/git/fetch`, { method: 'POST' });
+  },
+
+  /** { local: [{ name, upstream, current }], remote: [{ name, localName }] } */
+  branches(slug) {
+    return api(`${GitApi.base(slug)}/git/branches`);
+  },
+
+  /** `remote` checks out a remote branch as a new tracking branch; `stash` stashes changes first. */
+  checkout(slug, branch, remote, stash) {
+    return api(`${GitApi.base(slug)}/git/checkout`, { method: 'POST', body: { branch, remote, stash } });
+  },
+
+  createBranch(slug, name) {
+    return api(`${GitApi.base(slug)}/git/branch`, { method: 'POST', body: { name } });
+  },
+
+  stashes(slug) {
+    return api(`${GitApi.base(slug)}/git/stashes`);
+  },
+
+  stash(slug, message, untracked) {
+    return api(`${GitApi.base(slug)}/git/stash`, { method: 'POST', body: { message, untracked } });
+  },
+
+  /** op is 'apply' | 'pop' | 'drop'; ref is a stash@{n} the stash list reported. */
+  stashOp(slug, op, ref) {
+    return api(`${GitApi.base(slug)}/git/stash/${op}`, { method: 'POST', body: { ref } });
   },
 };
 

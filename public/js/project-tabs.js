@@ -125,30 +125,12 @@ const ProjectAgents = makeFrontmatterCrud({
   editContentLabel: 'Instructions',
   addCreateBtn: true,
   emptyHtml: '<div class="empty-state"><p>No custom agents</p><p style="color:var(--text-secondary);margin-top:8px">Custom agents are subagent definitions in .claude/agents/</p></div>',
-  editExtraFields: (item, idp) => formRow(
-    formGroup('Tools', `<input type="text" id="${idp}-edit-tools" value="${escapeHtml(item.frontmatter.tools || '')}" placeholder="Read, Grep, Bash(*)">`),
-    formGroup('Model', `<input type="text" id="${idp}-edit-model" value="${escapeHtml(item.frontmatter.model || '')}" placeholder="default">`)
-  ),
-  readEditExtras: (fm, idp) => {
-    const tools = document.getElementById(`${idp}-edit-tools`).value.trim();
-    if (tools) fm.tools = tools; else delete fm.tools;
-    const model = document.getElementById(`${idp}-edit-model`).value.trim();
-    if (model) fm.model = model; else delete fm.model;
-  },
-  createFields: idp =>
-    formGroup('Filename', `<input type="text" id="${idp}-new-file" placeholder="my-agent.md">`)
-    + formGroup('Name', `<input type="text" id="${idp}-new-name" placeholder="Agent Name">`)
-    + formGroup('Description', `<input type="text" id="${idp}-new-desc" placeholder="What this agent does">`),
-  createBody: idp => {
-    let filename = document.getElementById(`${idp}-new-file`).value.trim();
-    if (!filename) { toast('Filename required', 'error'); return null; }
-    if (!filename.endsWith('.md')) filename += '.md';
-    return {
-      key: filename,
-      frontmatter: { name: document.getElementById(`${idp}-new-name`).value, description: document.getElementById(`${idp}-new-desc`).value },
-      content: ''
-    };
-  }
+  editRequired: true,
+  editExtraFields: (item, idp) => agentOptionalFields(item.frontmatter, idp + '-edit'),
+  readEditExtras: (fm, idp) => readAgentOptionalFields(fm, idp + '-edit'),
+  validate: validateAgent,
+  createFields: idp => agentCreateFields(idp, '.claude/agents/'),
+  createBody: idp => agentCreateBody(idp, ProjectAgents.list)
 });
 
 // --- Project Skills Tab ---
@@ -164,15 +146,13 @@ const ProjectSkills = makeFrontmatterCrud({
   editTitle: (item, name) => '/' + name,
   addCreateBtn: true,
   emptyHtml: '<div class="empty-state"><p>No project-level skills</p><p style="color:var(--text-secondary);margin-top:8px">Skills are custom slash commands in .claude/skills/</p></div>',
-  editExtraFields: (item, idp) => formRow(
-    formGroup('Allowed Tools', `<input type="text" id="${idp}-edit-tools" value="${escapeHtml(item.frontmatter['allowed-tools'] || '')}" placeholder="Read, Grep, Bash(npm *)">`),
-    formGroup('Model', `<input type="text" id="${idp}-edit-model" value="${escapeHtml(item.frontmatter.model || '')}" placeholder="default">`)
-  ),
+  editExtraFields: (item, idp) =>
+    formGroup('Allowed Tools', `<input type="text" id="${idp}-edit-tools" value="${escapeHtml(item.frontmatter['allowed-tools'] || '')}" placeholder="Read, Grep, Bash(npm *)">`)
+    + skillModelEffortFields(item, idp),
   readEditExtras: (fm, idp) => {
     const tools = document.getElementById(`${idp}-edit-tools`).value.trim();
     if (tools) fm['allowed-tools'] = tools; else delete fm['allowed-tools'];
-    const model = document.getElementById(`${idp}-edit-model`).value.trim();
-    if (model) fm.model = model; else delete fm.model;
+    readSkillModelEffort(fm, idp);
   },
   createFields: idp =>
     formGroup('Skill Name (folder name)', `<input type="text" id="${idp}-new-name" placeholder="my-skill">`)

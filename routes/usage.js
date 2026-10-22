@@ -4,6 +4,11 @@ const { decodeSlug } = require('../lib/slug');
 const { getModelPricingMap, calcCostMultiModel, addTokens, emptyTokens, buildIndex } = require('../lib/usage-index');
 const { getLastFetchedAt, PRICING_URL, resolveModelPrice } = require('../lib/pricing');
 const { getFilteredByModel, sumByModel, aggregateByPeriod } = require('../lib/usage-filters');
+const marks = require('../lib/usage-marks');
+const insights = require('../lib/usage-insights');
+const { buildHints } = require('../lib/usage-hints');
+const history = require('../lib/usage-insights-history');
+const suggestions = require('../lib/usage-mark-suggestions');
 
 function toArray(v) {
   if (v == null) return [];
@@ -158,6 +163,106 @@ router.get('/by-project', wrapRoute((req, res) => {
     .sort((a, b) => b.cost - a.cost);
 
   res.json({ projects: list });
+}));
+
+function localToday() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/** The page's filters (projects, models, period) as the insights/hints helpers take them. */
+function scopeFilters(req) {
+  const { from, to, fromTime, toTime } = filterDateRange(req);
+  return { projects: filterProjects(req), models: filterModels(req), from, to, fromTime, toTime, today: localToday() };
+}
+
+/** GET /api/usage/hints?projects=...&models=...&from=...&to=... — free rule-based efficiency hints */
+router.get('/hints', wrapRoute((req, res) => {
+  res.json({ hints: buildHints(buildIndex(), scopeFilters(req)) });
+}));
+
+/** GET /api/usage/mark-suggestions?projects=...&from=...&to=... — changes worth marking in the period */
+router.get('/mark-suggestions', wrapRoute((req, res) => {
+  const { from, to } = filterDateRange(req);
+  res.json({ suggestions: suggestions.listSuggestions(buildIndex(), { projects: filterProjects(req), from, to }) });
+}));
+
+/** POST /api/usage/mark-suggestions/dismiss { key } — hide a suggestion for good */
+router.post('/mark-suggestions/dismiss', wrapRoute((req, res) => {
+  const key = req.body && req.body.key;
+  if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key is required' });
+  suggestions.dismissSuggestion(key);
+  res.json({ ok: true });
+}));
+
+/** GET /api/usage/marks?projects=...&from=...&to=... — marks in the period, with before/after impact within it */
+router.get('/marks', wrapRoute((req, res) => {
+  const { from, to } = filterDateRange(req);
+  const index = buildIndex();
+  const today = localToday();
+  const list = marks.listMarks(filterProjects(req))
+    .filter(m => marks.markInPeriod(m, from, to))
+    .map(m => ({
+      ...m,
+      projectName: m.project ? decodeSlug(m.project) : null,
+      impact: marks.markImpact(index, m, today)
+    }));
+  res.json({ marks: list });
+}));
+
+/** POST /api/usage/marks */
+router.post('/marks', wrapRoute((req, res) => {
+  const result = marks.createMark(req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json(result.mark);
+}));
+
+/** PUT /api/usage/marks/:id */
+router.put('/marks/:id', wrapRoute((req, res) => {
+  const result = marks.updateMark(req.params.id, req.body || {});
+  if (result.error) return res.status(400).json({ error: result.error });
+  if (result.notFound) return res.status(404).json({ error: 'Mark not found' });
+  res.json(result.mark);
+}));
+
+/** DELETE /api/usage/marks/:id */
+router.delete('/marks/:id', wrapRoute((req, res) => {
+  if (!marks.deleteMark(req.params.id)) return res.status(404).json({ error: 'Mark not found' });
+  res.json({ ok: true });
+}));
+
+/** POST /api/usage/insights?projects=...&from=...&to=... { model, effort } — runs the local claude CLI over usage stats */
+router.post('/insights', wrapRoute(async (req, res) => {
+  const model = (req.body && req.body.model) || 'default';
+  const effort = (req.body && req.body.effort) || 'default';
+  if (!insights.INSIGHT_MODELS.includes(model)) return res.status(400).json({ error: 'Unknown model: ' + model });
+  if (!insights.INSIGHT_EFFORTS.includes(effort)) return res.status(400).json({ error: 'Unknown effort: ' + effort });
+  const index = buildIndex();
+  const filters = scopeFilters(req);
+  const stats = insights.buildInsightStats(index, filters);
+  if (!stats.sessions.count) return res.status(400).json({ error: 'No usage data for the current filters' });
+  const report = await insights.runClaude(insights.buildPrompt(stats), { model, effort });
+  const sessionLinks = insights.sessionLinksFor(index, filters);
+  const saved = history.saveReport({ report, model, effort, scope: stats.scope, sessionLinks, generatedAt: new Date().toISOString() });
+  res.json(saved);
+}));
+
+/** GET /api/usage/insights/history — saved reports, newest first, without report text */
+router.get('/insights/history', wrapRoute((req, res) => {
+  res.json({ reports: history.listReports() });
+}));
+
+/** GET /api/usage/insights/history/:id — one saved report with its text */
+router.get('/insights/history/:id', wrapRoute((req, res) => {
+  const entry = history.getReport(req.params.id);
+  if (!entry) return res.status(404).json({ error: 'Report not found' });
+  res.json(entry);
+}));
+
+/** DELETE /api/usage/insights/history/:id */
+router.delete('/insights/history/:id', wrapRoute((req, res) => {
+  if (!history.deleteReport(req.params.id)) return res.status(404).json({ error: 'Report not found' });
+  res.json({ ok: true });
 }));
 
 module.exports = router;

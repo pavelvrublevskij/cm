@@ -397,7 +397,7 @@ const Sessions = {
       </div>
       <button class="${archivedBtnClass}" title="${archivedBtnTitle}" onclick="Sessions.toggleArchived('${slug}')">Archive</button>
       <div class="action-menu">
-        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)">New Session &#9662;</button>
+        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)">New Session <span class="dd-arrow"></span></button>
         <div class="action-menu-panel">
           <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.newSessionOS('${slug}')">In OS terminal</button>
           <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.newSessionBrowser('${slug}')">In browser terminal</button>

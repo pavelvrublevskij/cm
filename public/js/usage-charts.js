@@ -120,8 +120,9 @@ const UsageCharts = {
     // API returns descending; reverse for natural left-to-right time progression.
     const ordered = [...periods].reverse();
     const labels = ordered.map(x => x.label);
-
-    const tooltipBg = this.hexToRgba(p.bg, 0.96);
+    const markMap = typeof UsageMarks !== 'undefined' ? UsageMarks.byLabelIndex(Usage.currentGroup, labels) : {};
+    const staleTip = document.getElementById('usage-period-tooltip');
+    if (staleTip) staleTip.style.opacity = 0;
 
     const stacks = [
       { key: 'input_tokens',                label: 'Input',       color: p.input },
@@ -171,30 +172,28 @@ const UsageCharts = {
 
     this.charts.period = new Chart(canvas, {
       data: { labels, datasets: [...tokenDatasets, costDataset] },
+      plugins: [{ id: 'usageMarks', afterDatasetsDraw: (chart) => UsageCharts.drawMarks(chart, markMap, p) }],
       options: {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
+        onClick: (evt) => {
+          const mark = UsageCharts.markAt(evt.x, evt.y);
+          if (mark) UsageMarks.openEditor(mark.id);
+        },
+        onHover: (evt, _els, chart) => {
+          chart.canvas.style.cursor = UsageCharts.markAt(evt.x, evt.y) ? 'pointer' : '';
+        },
         plugins: {
           legend: {
             position: 'bottom',
             labels: { boxWidth: 10, boxHeight: 10, padding: 14, usePointStyle: true, color: p.muted },
           },
+          // HTML tooltip: Chart.js's canvas tooltip can't color individual lines, and the
+          // marks' before -> after changes need the same green/red as the Marks table.
           tooltip: {
-            backgroundColor: tooltipBg,
-            titleColor: p.text,
-            bodyColor: p.text,
-            borderColor: p.border,
-            borderWidth: 1,
-            padding: 10,
-            usePointStyle: true,
-            callbacks: {
-              label: (ctx) => {
-                const v = ctx.parsed.y;
-                if (ctx.dataset.yAxisID === 'y2') return `Cost: ${UsageCharts.fmtCost(v)}`;
-                return `${ctx.dataset.label}: ${UsageCharts.fmtTokensShort(v)}`;
-              },
-            },
+            enabled: false,
+            external: (context) => UsageCharts.periodTooltip(context, markMap),
           },
         },
         scales: {
@@ -220,6 +219,90 @@ const UsageCharts = {
         animation: { duration: 600, easing: 'easeOutQuart' },
       },
     });
+  },
+
+  /** Renders the period chart's tooltip as a fixed-position HTML panel next to the hovered column. */
+  periodTooltip(context, markMap) {
+    const { chart, tooltip } = context;
+    let el = document.getElementById('usage-period-tooltip');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'usage-period-tooltip';
+      el.className = 'chart-html-tooltip';
+      document.body.appendChild(el);
+    }
+    if (tooltip.opacity === 0) { el.style.opacity = 0; return; }
+
+    const points = tooltip.dataPoints || [];
+    const idx = points.length ? points[0].dataIndex : -1;
+    const marks = markMap[idx] || [];
+    const rows = points.map(dp => {
+      const ds = dp.dataset;
+      const color = ds.type === 'line' ? ds.borderColor : (ds.hoverBackgroundColor || ds.backgroundColor);
+      const v = dp.parsed.y;
+      const value = ds.yAxisID === 'y2' ? UsageCharts.fmtCost(v) : UsageCharts.fmtTokensShort(v);
+      return `<div class="chart-tip-row"><span class="chart-tip-swatch" style="background:${color}"></span>${escapeHtml(ds.label)}: ${escapeHtml(value)}</div>`;
+    }).join('');
+    el.innerHTML = `<div class="chart-tip-title">${escapeHtml((tooltip.title || []).join(' '))}</div>` +
+      (marks.length ? `<div class="chart-tip-marks">${UsageMarks.tooltipHtml(marks)}<div class="mark-tip-hint">Click a flag on the chart to edit or delete it</div></div>` : '') +
+      rows;
+    el.style.opacity = 1;
+
+    const rect = chart.canvas.getBoundingClientRect();
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    let x = rect.left + tooltip.caretX + 14;
+    if (x + w > window.innerWidth - 8) x = rect.left + tooltip.caretX - w - 14;
+    let y = rect.top + tooltip.caretY - h / 2;
+    y = Math.max(8, Math.min(y, window.innerHeight - h - 8));
+    el.style.left = Math.max(8, x) + 'px';
+    el.style.top = y + 'px';
+  },
+
+  /** Flag label rectangles from the last draw, in canvas pixels, for click/hover hit-testing. */
+  markHits: [],
+
+  /** The mark whose flag label is at canvas position (x, y), or null. */
+  markAt(x, y) {
+    const hit = this.markHits.find(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+    return hit ? hit.mark : null;
+  },
+
+  /** Dashed vertical line at the start of each marked period, flagged with the mark titles. */
+  drawMarks(chart, markMap, p) {
+    const x = chart.scales.x;
+    const area = chart.chartArea;
+    const ctx = chart.ctx;
+    this.markHits = [];
+    ctx.save();
+    ctx.font = '11px ' + Chart.defaults.font.family;
+    ctx.textBaseline = 'top';
+    for (const [idxStr, marks] of Object.entries(markMap)) {
+      const idx = Number(idxStr);
+      const center = x.getPixelForValue(idx);
+      const left = idx > 0 ? (x.getPixelForValue(idx - 1) + center) / 2 : area.left;
+      ctx.strokeStyle = p.accent;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(left, area.top);
+      ctx.lineTo(left, area.bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      marks.forEach((m, row) => {
+        const text = UsageMarks.flagText(m);
+        const w = ctx.measureText(text).width + 8;
+        const tx = Math.min(left + 3, area.right - w);
+        const ty = area.top + 2 + row * 17;
+        ctx.fillStyle = this.hexToRgba(p.bg, 0.9);
+        ctx.fillRect(tx, ty, w, 16);
+        ctx.fillStyle = p.accent;
+        ctx.fillText(text, tx + 4, ty + 2);
+        this.markHits.push({ x: tx, y: ty, w, h: 16, mark: m });
+      });
+    }
+    ctx.restore();
   },
 
   renderModels(summary, p) {
