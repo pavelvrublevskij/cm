@@ -104,10 +104,6 @@ Full-text search across all messages in a project — covers user messages, assi
 ### Themes
 Four built-in themes: Dark, Light, Matrix, and Default (Catppuccin). Cycle through them via the sidebar button.
 
-## Custom Skills
-
-This project includes a `/p-run` skill to start the development server.
-
 ## Architecture
 
 ```

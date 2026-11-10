@@ -1,3 +1,9 @@
+## v1.9.1
+
+### Features
+
+- **Choose the port** — `run.sh` / `run.bat` Start asks for the port (default 3000) and remembers it for Stop and autostart; Stop only stops CM, never another app on that port.
+
 ## v1.9.0
 
 ### Features

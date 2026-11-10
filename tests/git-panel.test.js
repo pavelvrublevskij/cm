@@ -82,6 +82,7 @@ FakeTerminal.prototype.loadAddon = function () {};
 FakeTerminal.prototype.open = function () {};
 FakeTerminal.prototype.write = function (d) { this.written.push(d); };
 FakeTerminal.prototype.focus = function () { harness.focused++; };
+FakeTerminal.prototype.refresh = function () {};
 FakeTerminal.prototype.onData = function () { return { dispose() {} }; };
 FakeTerminal.prototype.attachCustomKeyEventHandler = function () {};
 FakeTerminal.prototype.hasSelection = function () { return false; };

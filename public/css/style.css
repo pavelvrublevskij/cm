@@ -671,8 +671,7 @@ body {
 }
 .terminal-host { flex: 1 1 auto; min-height: 0; padding: 4px 8px; }
 .terminal-host .xterm,
-.terminal-host .xterm-viewport,
-.terminal-host .xterm-screen { height: 100% !important; }
+.terminal-host .xterm-viewport { height: 100% !important; }
 
 /* Skills popover — project skills typed into the session terminal */
 .terminal-skills-btn {

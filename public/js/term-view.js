@@ -65,10 +65,11 @@ const TermView = {
 
       focus() { term.focus(); },
 
-      /** Refit to the DOM and tell the pty its new size. */
+      /** Refit to the DOM, repaint every row, and tell the pty its new size. */
       resize() {
         if (!view.isConnected()) return;
         try { fit.fit(); } catch (_) {}
+        if (term.rows > 0) term.refresh(0, term.rows - 1);
         if (term.cols > 0 && term.rows > 0) view.send({ t: 'r', c: term.cols, r: term.rows });
       },
 
@@ -144,6 +145,7 @@ const TermView = {
     setTimeout(() => { try { fit.fit(); } catch (_) {} }, 0);
     view.connect();
     view.observeResize();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => view.resize());
     return view;
   },
 

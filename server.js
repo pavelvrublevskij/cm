@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 
 const app = express();
-const PORT = parseInt(process.env.PORT, 10) || 3000;
+const PORT = require('./lib/port').getPort();
 const HOST = process.env.HOST || '127.0.0.1';
 
 app.use(express.json());

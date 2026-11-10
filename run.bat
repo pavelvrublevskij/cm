@@ -7,7 +7,10 @@ setlocal enabledelayedexpansion
 ::   run.bat           Start the server
 ::   run.bat 1         Same, non-interactive
 
-set PORT=3000
+set PORT=
+for /f %%p in ('node "%~dp0scripts\port.js" 2^>nul') do set PORT=%%p
+if not defined PORT set PORT=3000
+set SERVER_JS=%~dp0server.js
 set URL=http://127.0.0.1:%PORT%
 set MIN_NODE=18
 set VERSION=
@@ -27,6 +30,7 @@ if not "%~1"=="" (
 )
 
 :: Arrow-key menu; the script exits with the chosen option's number
+set INTERACTIVE=1
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\run-menu.ps1"
 set CHOICE=%errorlevel%
 echo.
@@ -44,6 +48,13 @@ goto :eof
 echo [Start]
 echo.
 
+if "%INTERACTIVE%"=="1" (
+    set /p "PORT_INPUT=  Port [%PORT%]: "
+    if not "!PORT_INPUT!"=="" set PORT=!PORT_INPUT!
+    echo.
+)
+set URL=http://127.0.0.1:%PORT%
+
 :: Check Node.js
 where node >nul 2>&1
 if %errorlevel% neq 0 (
@@ -59,8 +70,14 @@ if %NODE_VER% lss %MIN_NODE% (
 )
 for /f "tokens=*" %%v in ('node -v') do echo   Node.js %%v found
 
-:: Kill existing instance on the same port
+:: Kill existing CM instance on the same port; never touch another application
 for /f "tokens=5" %%p in ('netstat -aon ^| findstr "127.0.0.1:%PORT% " ^| findstr "LISTENING"') do (
+    call :is_cm_pid %%p
+    if !errorlevel! neq 0 (
+        echo   Port %PORT% is used by another application ^(PID %%p^). Choose a different port.
+        echo.
+        goto :eof
+    )
     echo   Port %PORT% in use ^(PID %%p^), stopping previous instance...
     taskkill /PID %%p /F >nul 2>&1
     call :wait_port_free
@@ -85,8 +102,10 @@ call :ensure_pty_works
 echo.
 echo   Starting server...
 
+node "%~dp0scripts\port.js" %PORT%
+
 :: Start server as hidden background process
-powershell -command "Start-Process node -ArgumentList 'server.js' -WorkingDirectory '%~dp0' -WindowStyle Hidden"
+powershell -command "Start-Process node -ArgumentList '\"%SERVER_JS%\"' -WorkingDirectory '%~dp0' -WindowStyle Hidden"
 
 :: Wait for server
 call :wait_for_server
@@ -103,9 +122,15 @@ echo [Stop]
 echo.
 set FOUND=0
 for /f "tokens=5" %%p in ('netstat -aon ^| findstr "127.0.0.1:%PORT% " ^| findstr "LISTENING"') do (
-    echo   Stopping server (PID %%p)...
-    taskkill /PID %%p /F >nul 2>&1
-    set FOUND=1
+    call :is_cm_pid %%p
+    if !errorlevel! equ 0 (
+        echo   Stopping server ^(PID %%p^)...
+        taskkill /PID %%p /F >nul 2>&1
+        set FOUND=1
+    ) else (
+        echo   Port %PORT% is used by another application ^(PID %%p^), not stopping it.
+        set FOUND=2
+    )
 )
 if "%FOUND%"=="0" echo   Server is not running.
 echo.
@@ -176,6 +201,11 @@ echo Bye!
 goto :eof
 
 :: ─── Helpers ────────────────────────────────────────────────────────
+
+:: Only CM's own server: its command line points at this project's server.js
+:is_cm_pid
+powershell -NoProfile -Command "$c = (Get-CimInstance Win32_Process -Filter 'ProcessId=%~1').CommandLine; if ($c -and $c.Replace('/','\').ToLower().Contains('%SERVER_JS%'.ToLower())) { exit 0 } else { exit 1 }" >nul 2>&1
+exit /b %errorlevel%
 
 :verify_pty
 node "%~dp0scripts\verify-pty.js" >nul 2>&1

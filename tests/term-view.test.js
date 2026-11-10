@@ -18,6 +18,8 @@ const harness = {
   wsClosed: 0,
   termDisposed: 0,
   fitted: 0,
+  refreshed: [],
+  fontsReady: null,
   observed: [],
   ws: null,
   term: null,
@@ -58,6 +60,7 @@ FakeTerminal.prototype.loadAddon = function () {};
 FakeTerminal.prototype.open = function (host) { this.host = host; };
 FakeTerminal.prototype.write = function (d) { this.written.push(d); };
 FakeTerminal.prototype.focus = function () { this.focused = true; };
+FakeTerminal.prototype.refresh = function (start, end) { harness.refreshed.push([start, end]); };
 FakeTerminal.prototype.onData = function (fn) {
   this.dataHandler = fn;
   const self = this;
@@ -81,7 +84,10 @@ FakeWebSocket.prototype.send = function (p) { harness.sent.push(JSON.parse(p)); 
 FakeWebSocket.prototype.close = function () { harness.wsClosed++; };
 
 const context = vm.createContext({
-  document: { getElementById: id => (id in harness.els || id === 'host' ? el(id) : null) },
+  document: {
+    getElementById: id => (id in harness.els || id === 'host' ? el(id) : null),
+    fonts: { get ready() { return { then: fn => { harness.fontsReady = fn; } }; } },
+  },
   get window() {
     return harness.hasXterm
       ? { Terminal: FakeTerminal, FitAddon: { FitAddon: FakeFit } }
@@ -119,6 +125,8 @@ beforeEach(() => {
   harness.wsClosed = 0;
   harness.termDisposed = 0;
   harness.fitted = 0;
+  harness.refreshed = [];
+  harness.fontsReady = null;
   harness.observed = [];
   harness.roDisconnected = false;
   harness.ws = null;
@@ -276,6 +284,22 @@ test('resize refits and reports, but only while connected', () => {
   harness.sent.length = 0;
   view.resize();
   assert.deepStrictEqual(harness.sent, [], 'nothing is sent to a dead socket');
+});
+
+test('resize repaints every row so text drawn before the host was visible is not left stale', () => {
+  const view = create();
+  harness.refreshed.length = 0;
+  view.resize();
+  assert.deepStrictEqual(harness.refreshed, [[0, 23]]);
+});
+
+test('the terminal refits and repaints once web fonts have loaded', () => {
+  create();
+  harness.fitted = 0;
+  harness.refreshed.length = 0;
+  harness.fontsReady();
+  assert.strictEqual(harness.fitted, 1);
+  assert.deepStrictEqual(harness.refreshed, [[0, 23]]);
 });
 
 // ── keyboard ─────────────────────────────────────────────────────────────────
