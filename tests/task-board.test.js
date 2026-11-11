@@ -84,7 +84,6 @@ test('editing a card changes its fields but keeps its column and project', async
 
 test('by hand a card moves ToDo → Ready and back, never into the workflow or Done', async () => {
   const card = await addCard({ title: 'Task', project: SLUG });
-  assert.strictEqual((await move(card.id, 'move-to-pr')).status, 400);
   assert.strictEqual((await move(card.id, 'done')).status, 400);
   assert.strictEqual((await move(card.id, 'nowhere')).status, 400);
   let res = await move(card.id, 'ready');
@@ -103,14 +102,13 @@ test('moving a closed card to Ready clears the closed mark', async () => {
   assert.strictEqual(res.body.card.closed, false);
 });
 
-test('Move to PR → Done is allowed by hand', async () => {
+test('a ticket left in the removed Move to PR column reads as Done', async () => {
   const card = await addCard({ title: 'Task', project: SLUG });
   const board = JSON.parse(fs.readFileSync(paths.TASK_BOARD_FILE, 'utf-8'));
   board.cards[0].column = 'move-to-pr';
   fs.writeFileSync(paths.TASK_BOARD_FILE, JSON.stringify(board));
-  const res = await move(card.id, 'done');
-  assert.strictEqual(res.status, 200);
-  assert.strictEqual(res.body.card.column, 'done');
+  const res = await request(app).get('/api/task-board');
+  assert.strictEqual(res.body.cards.find(c => c.id === card.id).column, 'done');
 });
 
 test('reordering inside a column puts the card at the given index within its lane', async () => {

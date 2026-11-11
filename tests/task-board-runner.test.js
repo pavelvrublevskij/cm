@@ -252,7 +252,7 @@ test('the Stop result is read from the transcript when the hook does not carry i
   assert.strictEqual(runner.lastAssistantText(path.join(HOME, 'outside.jsonl')), '');
 });
 
-test('after the last stage the ticket waits in Move to PR, claude ends, the next ticket starts', async () => {
+test('after the last stage the ticket goes to Done, claude ends, the next ticket starts', async () => {
   await setStages(['Plan']);
   const first = await addTicket({ title: 'Fix login', notes: 'ABC-1' });
   const second = await addTicket({ notes: 'ABC-2' });
@@ -268,7 +268,7 @@ test('after the last stage the ticket waits in Move to PR, claude ends, the next
   await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
 
   const c = await cardOf(first.id);
-  assert.strictEqual(c.column, 'move-to-pr');
+  assert.strictEqual(c.column, 'done');
   assert.strictEqual(c.run.status, 'done');
   assert.ok(spawned[0].entry.terminated);
   assert.strictEqual(spawned.length, 2);

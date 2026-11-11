@@ -6543,7 +6543,11 @@ body.git-split-dragging {
   top: 4px;
   right: 4px;
   background: var(--bg-tertiary);
+  color: var(--danger);
   visibility: hidden;
+}
+.tb-card-delete:hover {
+  color: var(--danger);
 }
 .tb-card--line .tb-card-delete {
   position: static;

@@ -30,19 +30,19 @@ test('an empty board says how to start', () => {
 
 test('every lane has the fixed columns around its workflow', () => {
   const ids = Array.from(TaskBoard.laneColumns(BOARD, 'C--work-zeta'), c => c.id);
-  assert.deepStrictEqual(ids, ['todo', 'ready', '', 'move-to-pr', 'done']);
+  assert.deepStrictEqual(ids, ['todo', 'ready', '', 'done']);
   const staged = { projects: { p: { stages: [{ id: 'plan', title: 'Plan' }, { id: 'impl', title: 'Implement' }] } } };
-  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(staged, 'p'), c => c.id), ['todo', 'ready', 'plan', 'impl', 'move-to-pr', 'done']);
+  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(staged, 'p'), c => c.id), ['todo', 'ready', 'plan', 'impl', 'done']);
 });
 
-test('only ToDo ↔ Ready and Move to PR → Done are manual moves', () => {
+test('only ToDo ↔ Ready are manual moves', () => {
   assert.ok(TaskBoard.canMove({ column: 'todo' }, 'ready'));
   assert.ok(TaskBoard.canMove({ column: 'ready' }, 'todo'));
-  assert.ok(TaskBoard.canMove({ column: 'move-to-pr' }, 'done'));
+  assert.ok(!TaskBoard.canMove({ column: 's-b' }, 'done'));
   assert.ok(TaskBoard.canMove({ column: 'done' }, 'done'));
   assert.ok(!TaskBoard.canMove({ column: 'todo' }, 'done'));
   assert.ok(!TaskBoard.canMove({ column: 'done' }, 'todo'));
-  assert.ok(!TaskBoard.canMove({ column: 'ready' }, 'move-to-pr'));
+  assert.ok(!TaskBoard.canMove({ column: 'ready' }, 'done'));
 });
 
 test('the board renders chips, lanes, escaped cards and the closed badge', () => {
@@ -90,7 +90,7 @@ const STAGED = {
 };
 
 test('compact mode folds the stages into one In progress column', () => {
-  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(STAGED, 'p', true), c => c.title), ['ToDo', 'Ready', 'In progress', 'Move to PR', 'Done']);
+  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(STAGED, 'p', true), c => c.title), ['ToDo', 'Ready', 'In progress', 'Done']);
   assert.match(TaskBoard.html(STAGED, [], true), /In progress <span class="tb-col-count">1</);
 });
 
@@ -179,8 +179,8 @@ test('a ticket in the workflow shows its run status, and why it waits', () => {
 });
 
 test('no run badge outside the workflow; a closed ticket says why on hover', () => {
-  assert.ok(!TaskBoard.inWorkflow({ column: 'move-to-pr' }));
-  assert.strictEqual(TaskBoard.badgeHtml({ column: 'move-to-pr', run: { status: 'done' } }), '');
+  assert.ok(!TaskBoard.inWorkflow({ column: 'done' }));
+  assert.strictEqual(TaskBoard.badgeHtml({ column: 'done', run: { status: 'done' } }), '');
   assert.ok(!TaskBoard.badgeHtml({ column: 'ready', readyAt: new Date().toISOString(), run: { status: 'running' } }).includes('running'));
   const closed = TaskBoard.badgeHtml({ column: 'todo', closed: true, run: { status: 'closed', message: 'Session ended: exited (code 1)' } });
   assert.match(closed, /title="Session ended: exited \(code 1\)">closed/);
@@ -194,7 +194,7 @@ test('only ToDo and Done cards have a delete icon, in both card modes', () => {
       assert.match(html, /tb-card-delete" draggable="false"/);
       assert.match(html, /event.stopPropagation\(\); TaskBoard.confirmDelete\('d'\)/);
     }
-    for (const column of ['ready', 's-b', 'move-to-pr']) {
+    for (const column of ['ready', 's-b']) {
       assert.ok(!TaskBoard.cardHtml({ id: 'd', title: 'x', notes: '', column }, null, compact).includes('tb-card-delete'));
     }
   }

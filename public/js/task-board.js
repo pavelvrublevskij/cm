@@ -1,13 +1,13 @@
 // --- Task Board ---
-// Kanban of tickets across projects: one swimlane per project. ToDo, Ready, Move to PR and Done are
-// fixed in every lane; the project's workflow stages sit between Ready and Move to PR.
+// Kanban of tickets across projects: one swimlane per project. ToDo, Ready and Done are fixed in
+// every lane; the project's workflow stages sit between Ready and Done.
 
 const TaskBoard = {
   HIDDEN_KEY: 'claude-manager-task-board-hidden',
   COMPACT_KEY: 'claude-manager-task-board-compact',
-  COLUMN_TITLES: { todo: 'ToDo', ready: 'Ready', 'move-to-pr': 'Move to PR', done: 'Done' },
+  COLUMN_TITLES: { todo: 'ToDo', ready: 'Ready', done: 'Done' },
   DELETABLE: ['todo', 'done'],
-  USER_MOVES: { todo: ['ready'], ready: ['todo'], 'move-to-pr': ['done'] },
+  USER_MOVES: { todo: ['ready'], ready: ['todo'] },
   RUN_LABELS: { starting: 'starting', running: 'running', needs_input: 'needs input', conflict: 'conflict' },
   board: { cards: [], projects: {}, status: {} },
   attention: [],
@@ -85,7 +85,7 @@ const TaskBoard = {
     }, ms);
   },
 
-  /** Inside the workflow: past Ready, not yet in Move to PR. */
+  /** Inside the workflow: past Ready, not yet Done. */
   inWorkflow(card) {
     return !TaskBoard.COLUMN_TITLES[card.column];
   },
@@ -172,7 +172,7 @@ const TaskBoard = {
     else if (compact) middle = [{ id: '', title: 'In progress', inProgress: true }];
     else middle = stages.map(s => ({ id: s.id, title: s.title || s.id, stage: true }));
     const fixed = id => ({ id, title: TaskBoard.COLUMN_TITLES[id] });
-    return [fixed('todo'), fixed('ready')].concat(middle, [fixed('move-to-pr'), fixed('done')]);
+    return [fixed('todo'), fixed('ready')].concat(middle, [fixed('done')]);
   },
 
   canMove(card, column) {
@@ -197,7 +197,7 @@ const TaskBoard = {
   deleteIconHtml(card) {
     if (!TaskBoard.DELETABLE.includes(card.column)) return '';
     return `<button class="icon-btn tb-card-delete" draggable="false" title="Delete ticket" aria-label="Delete ticket"
-        onclick="event.stopPropagation(); TaskBoard.confirmDelete('${escapeAttr(card.id)}')">&#128465;</button>`;
+        onclick="event.stopPropagation(); TaskBoard.confirmDelete('${escapeAttr(card.id)}')"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h-3ZM11 3V1.75A1.75 1.75 0 0 0 9.25 0h-2.5A1.75 1.75 0 0 0 5 1.75V3H2.75a.75.75 0 0 0 0 1.5h.67l.83 9.41A1.75 1.75 0 0 0 6 15.5h4a1.75 1.75 0 0 0 1.74-1.59l.84-9.41h.67a.75.75 0 0 0 0-1.5Zm-6.08 1.5h6.16l-.83 9.28a.25.25 0 0 1-.25.22H6a.25.25 0 0 1-.25-.22Z"/></svg></button>`;
   },
 
   /** Title, or the first line of the description when there is no title. Compact: a one-line card with stage dots. */
@@ -483,7 +483,7 @@ const TaskBoard = {
       ? wf.stages.map((s, i) => TaskBoard.stageRowHtml(wf, s, i)).join('')
       : '<div class="tb-col-empty">No stages yet — use Recommend, or add a stage.</div>';
     return `${top}
-      <div class="tb-wf-hint">After Ready the stages run in this order, each one starting by itself when the previous one is done. Then the ticket waits in Move to PR.</div>
+      <div class="tb-wf-hint">After Ready the stages run in this order, each one starting by itself when the previous one is done. Then the ticket goes to Done.</div>
       <div class="tb-wf-rows">${rows}</div>
       <div class="tb-wf-footer">
         <button class="btn btn-sm" onclick="TaskBoard.wfAdd()"${wf.stages.length >= 10 ? ' disabled' : ''}>+ Add stage</button>
