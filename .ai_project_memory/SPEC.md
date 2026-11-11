@@ -101,7 +101,7 @@ Hash routing (`#view/slug/sessionId[/readonly]`) — the URL survives refresh.
 |------|--------------|
 | Dashboard | Recent sessions, usage summary, quick links |
 | Projects | Project list → project tabs: sessions, memory, CLAUDE.md, MCP, settings, agents, skills, output styles, git, artifacts |
-| Sessions | History, rename, color, archive, search, conversation with tool-use views, subagents, activity, Files/Scratchpad tabs, in-page terminal, new/resume session, active sessions bar, branch-mismatch warning |
+| Sessions | History, rename, color (cards, active bar, session header line), archive, search, conversation with tool-use views, subagents, activity, Files/Scratchpad tabs, in-page terminal, new/resume session, active sessions bar, branch-mismatch warning |
 | Usage | Token/cost stats, charts, period/project breakdowns, marks, hints, AI efficiency insights |
 | Health | Checks for broken settings, failing MCP servers, weak skills, oversized CLAUDE.md, stale memories |
 | Settings | Tree editor + raw JSON for `settings.json` |

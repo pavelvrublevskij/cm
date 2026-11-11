@@ -77,6 +77,7 @@ function FakeTerminal() {
   this.cols = 80;
   this.rows = 24;
   this.written = [];
+  this.unicode = {};
 }
 FakeTerminal.prototype.loadAddon = function () {};
 FakeTerminal.prototype.open = function () {};
@@ -116,7 +117,7 @@ const context = vm.createContext({
       return [];
     },
   },
-  window: { Terminal: FakeTerminal, FitAddon: { FitAddon: FakeFit } },
+  window: { Terminal: FakeTerminal, FitAddon: { FitAddon: FakeFit }, Unicode11Addon: { Unicode11Addon: function () {} } },
   location: { protocol: 'http:', host: '127.0.0.1:3000' },
   WebSocket: FakeWebSocket,
   ResizeObserver: undefined,

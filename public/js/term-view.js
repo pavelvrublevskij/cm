@@ -12,7 +12,8 @@ const TermView = {
   /** True when the xterm.js CDN scripts are present. */
   librariesLoaded() {
     return typeof window.Terminal === 'function'
-      && !!(window.FitAddon && typeof window.FitAddon.FitAddon === 'function');
+      && !!(window.FitAddon && typeof window.FitAddon.FitAddon === 'function')
+      && !!(window.Unicode11Addon && typeof window.Unicode11Addon.Unicode11Addon === 'function');
   },
 
   /**
@@ -37,9 +38,14 @@ const TermView = {
       theme: { background: '#000000', foreground: '#e6edf3' },
       scrollback: TermView.SCROLLBACK,
       convertEol: false,
+      allowProposedApi: true,
     });
     const fit = new window.FitAddon.FitAddon();
     term.loadAddon(fit);
+    // Claude's TUI measures emoji/icons as two cells (Unicode 11); xterm defaults to Unicode 6
+    // widths, so without this every line with an icon is drawn shifted and overlapping.
+    term.loadAddon(new window.Unicode11Addon.Unicode11Addon());
+    term.unicode.activeVersion = '11';
     term.open(host);
 
     const view = {

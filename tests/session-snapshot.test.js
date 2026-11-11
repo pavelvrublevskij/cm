@@ -115,6 +115,7 @@ const context = vm.createContext({
   App: { navigate: () => {}, setHash: () => {} },
   TerminalPanel: { isOpen: () => false, hasAttachedPty: () => false, shouldAutoOpen: () => false, open: () => {} },
   ActiveSessionsBar: { _sessions: [], poll: () => {} },
+  SessionColors: { applyToDetailHeader: () => {} },
 });
 vm.runInContext(sessionsSrc + '\n' + contextSrc + '\n' + messagesSrc + '\nglobalThis._Sessions = Sessions;', context);
 const Sessions = context._Sessions;

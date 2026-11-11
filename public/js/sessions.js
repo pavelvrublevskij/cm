@@ -1064,6 +1064,7 @@ const Sessions = {
     const snapshot = Sessions._getSnapshot(slug, sessionId);
     Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0, readOnly: !!readOnly, readOnlyInstanceId: null };
     Sessions.syncCloseButton();
+    SessionColors.applyToDetailHeader();
     Sessions.renderDetailMeta(null);
     Sessions.applyReadOnlyState();
 

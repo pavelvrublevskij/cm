@@ -54,9 +54,11 @@ function FakeTerminal(opts) {
   this.written = [];
   this.keyHandler = null;
   this.dataHandler = null;
+  this.addons = [];
+  this.unicode = { activeVersion: '6' };
   harness.term = this;
 }
-FakeTerminal.prototype.loadAddon = function () {};
+FakeTerminal.prototype.loadAddon = function (addon) { this.addons.push(addon); };
 FakeTerminal.prototype.open = function (host) { this.host = host; };
 FakeTerminal.prototype.write = function (d) { this.written.push(d); };
 FakeTerminal.prototype.focus = function () { this.focused = true; };
@@ -72,6 +74,8 @@ FakeTerminal.prototype.dispose = function () { harness.termDisposed++; };
 
 function FakeFit() {}
 FakeFit.prototype.fit = function () { harness.fitted++; };
+
+function FakeUnicode11() {}
 
 function FakeWebSocket(url) {
   this.url = url;
@@ -90,7 +94,7 @@ const context = vm.createContext({
   },
   get window() {
     return harness.hasXterm
-      ? { Terminal: FakeTerminal, FitAddon: { FitAddon: FakeFit } }
+      ? { Terminal: FakeTerminal, FitAddon: { FitAddon: FakeFit }, Unicode11Addon: { Unicode11Addon: FakeUnicode11 } }
       : {};
   },
   WebSocket: FakeWebSocket,
@@ -147,6 +151,13 @@ test('librariesLoaded reports whether the xterm CDN arrived', () => {
 test('create returns null instead of throwing when the libraries are missing', () => {
   harness.hasXterm = false;
   assert.strictEqual(create(), null);
+});
+
+test('icons and emoji are measured as two cells, matching what Claude\'s TUI assumes', () => {
+  create();
+  assert.strictEqual(harness.term.opts.allowProposedApi, true);
+  assert.ok(harness.term.addons.some(a => a instanceof FakeUnicode11));
+  assert.strictEqual(harness.term.unicode.activeVersion, '11');
 });
 
 test('create returns null when the host element is absent', () => {

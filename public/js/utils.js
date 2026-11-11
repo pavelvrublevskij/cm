@@ -514,6 +514,17 @@ const SessionColors = {
       if (color) card.style.setProperty('--session-color', color);
       else card.style.removeProperty('--session-color');
     });
+    SessionColors.applyToDetailHeader();
+  },
+
+  applyToDetailHeader() {
+    const header = document.getElementById('session-detail-header');
+    if (!header) return;
+    const st = typeof Sessions !== 'undefined' ? Sessions.detailState : null;
+    const color = st ? SessionColors.get(st.slug, st.sessionId) : null;
+    header.classList.toggle('session-header--colored', !!color);
+    if (color) header.style.setProperty('--session-color', color);
+    else header.style.removeProperty('--session-color');
   },
 
   closeMenu() {

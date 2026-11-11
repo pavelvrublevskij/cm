@@ -344,6 +344,10 @@ body {
   z-index: 10;
 }
 
+.view-header.session-header--colored {
+  box-shadow: inset 0 3px 0 var(--session-color);
+}
+
 .view-header:has(.tab-bar) {
   padding-bottom: 0;
 }
