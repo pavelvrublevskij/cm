@@ -178,6 +178,7 @@ const App = {
     const simpleViews = {
       'dashboard': () => Dashboard.load(),
       'health': () => Health.load(),
+      'task-board': () => TaskBoard.load(),
       'usage': () => Usage.load(),
       'artifacts': () => Artifacts.load(),
       'settings': () => Settings.load(),

@@ -90,6 +90,7 @@ Written only through `writeDataJson()` / `safeDataWrite()`, which refuse any pat
 | `artifact-index.json` | Session artifact index |
 | `archived-sessions.json`, `session-colors.json` | Session archive and colors |
 | `skill-usage.json` | Skill usage counts |
+| `task-board.json` | Task board: cards (title, notes = description, project, column, closed, sessionId) and project lanes (`parallel`, later `stages`) |
 
 **Settings shared by several launch paths or by server and scripts belong in `app-config.json`**, never in script-local files.
 
@@ -103,6 +104,7 @@ Hash routing (`#view/slug/sessionId[/readonly]`) — the URL survives refresh.
 | Projects | Project list → project tabs: sessions, memory, CLAUDE.md, MCP, settings, agents, skills, output styles, git, artifacts |
 | Sessions | History, rename, color (cards, active bar, session header line), archive, search, conversation with tool-use views, subagents, activity, Files/Scratchpad tabs, in-page terminal, new/resume session, active sessions bar, branch-mismatch warning |
 | Usage | Token/cost stats, charts, period/project breakdowns, marks, hints, AI efficiency insights |
+| Task Board | Tickets across projects: one swimlane per project (project required; optional title + description/ticket number, not both empty; the description becomes the first prompt of the ticket's session); fixed columns ToDo, Ready, Move to PR, Done with the project's workflow stages between Ready and Move to PR; by hand only ToDo ↔ Ready and Move to PR → Done; delete only from ToDo/Done (sessions stay); per-lane Parallel checkbox; lane filter chips |
 | Health | Checks for broken settings, failing MCP servers, weak skills, oversized CLAUDE.md, stale memories |
 | Settings | Tree editor + raw JSON for `settings.json` |
 | Global CLAUDE.md | Markdown editor with preview |
@@ -119,7 +121,7 @@ Also: onboarding tour (`public/js/tour.js`, re-triggered by a minor version bump
 All JSON, all under `/api`. Groups map 1:1 to `routes/*.js`:
 `dashboard`, `settings`, `projects` (projects, sessions, terminal, memory, git, scratchpad, project-files), `claude-md`, `mcp`,
 `keybindings`, `skills`, `agents`, `output-styles`, `plugins`, `project-settings`, `usage`, `health`, `artifacts`, `plans`,
-`file-history`, `autostart`, plus `version`, `changelog`, `update/zip`, `terminal/repair`, `pricing*` in `server.js`.
+`file-history`, `autostart`, `task-board`, plus `version`, `changelog`, `update/zip`, `terminal/repair`, `pricing*` in `server.js`.
 Terminal and shells use WebSocket upgrades on the same server.
 
 ## 7. Invariants (never break)

@@ -33,6 +33,9 @@
             <span class="icon">&#9673;</span><span class="nav-label"> Dashboard</span>
             <span class="badge badge-active" id="nav-dashboard-active" style="display:none"></span>
           </div>
+          <div class="nav-item" data-view="task-board" title="Task Board">
+            <span class="icon">&#9638;</span><span class="nav-label"> Task Board</span>
+          </div>
           <div class="nav-item" data-view="health" title="Health Check">
             <span class="icon">&#9877;</span><span class="nav-label"> Health Check</span>
           </div>
@@ -99,6 +102,23 @@
     <main class="main">
       <div class="update-banner" id="update-banner" style="display:none"></div>
       <!-- Dashboard View -->
+      <!-- Task Board View -->
+      <div class="view" id="view-task-board">
+        <div class="view-header">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <h2>Task Board</h2>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" id="task-board-add-lane-btn" onclick="TaskBoard.openAddLane()">Add project lane</button>
+              <button class="btn btn-sm btn-primary" id="task-board-new-btn" onclick="TaskBoard.openEditor(null)">New ticket</button>
+            </div>
+          </div>
+          <div class="subtitle">Tickets by project, from ToDo to Done — everything stays on this machine</div>
+        </div>
+        <div class="view-body">
+          <div id="task-board-body"></div>
+        </div>
+      </div>
+
       <!-- Health Check View -->
       <div class="view" id="view-health">
         <div class="view-header">
@@ -961,6 +981,7 @@
   <script src="/js/usage-insights.js"></script>
   <script src="/js/usage-hints.js"></script>
   <script src="/js/health.js"></script>
+  <script src="/js/task-board.js"></script>
   <script src="/js/agents.js"></script>
   <script src="/js/term-view.js"></script>
   <script src="/js/terminal.js"></script>

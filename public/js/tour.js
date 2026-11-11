@@ -79,6 +79,12 @@ const Tour = {
       position: 'right'
     },
     {
+      element: '.nav-item[data-view="task-board"]',
+      title: 'Task Board',
+      text: 'Collect tickets for all your projects on one board, one lane per project. Write a description (ticket number, task) and an optional title; drag tickets from ToDo to Ready. ToDo, Ready, Move to PR and Done are fixed; tickets can be deleted from ToDo and Done, their sessions always stay in history.',
+      position: 'right'
+    },
+    {
       element: '.nav-item[data-view="health"]',
       title: 'Health Check',
       text: 'A read-only check of your setup: settings files that are not valid JSON, MCP servers whose command is missing, skills that will not trigger well, oversized CLAUDE.md files, and stale or duplicate memories. Each finding links to where you can fix it.',

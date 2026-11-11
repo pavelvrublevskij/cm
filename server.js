@@ -291,6 +291,7 @@ app.use('/api/projects', require('./routes/git'));
 app.use('/api/projects', require('./routes/scratchpad'));
 app.use('/api/projects', require('./routes/project-files'));
 app.use('/api/autostart', require('./routes/autostart'));
+app.use('/api/task-board', require('./routes/task-board'));
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

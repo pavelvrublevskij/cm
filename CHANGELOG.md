@@ -1,3 +1,9 @@
+## v2.0.0
+
+### Features
+
+- **Task Board** — tickets for all projects on one board, one lane per project; drag from ToDo to Ready, delete from ToDo/Done only.
+
 ## v1.9.1
 
 ### Features

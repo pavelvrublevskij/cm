@@ -6398,3 +6398,151 @@ body.git-split-dragging {
 .health-live-status {
   color: var(--text-muted);
 }
+
+/* Task Board */
+.tb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.tb-chip {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tb-chip.active {
+  color: var(--text-primary);
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+.tb-lane {
+  margin-bottom: 18px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.tb-lane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.tb-lane-name {
+  font-weight: 600;
+}
+.tb-parallel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.tb-lane-remove {
+  padding: 0 7px;
+}
+.tb-cols {
+  display: grid;
+  grid-template-columns: repeat(var(--tb-cols), minmax(180px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  overflow-x: auto;
+}
+.tb-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 90px;
+  padding: 8px;
+  background: var(--bg-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.tb-col--over {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.tb-col--placeholder {
+  border: 1px dashed var(--border);
+  background: transparent;
+}
+.tb-col-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+.tb-col-count {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.tb-col-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tb-col-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.tb-add {
+  align-self: flex-start;
+}
+.tb-card {
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+}
+.tb-card:hover {
+  border-color: var(--border-light);
+}
+.tb-card--dragging {
+  opacity: 0.5;
+}
+.tb-card--closed {
+  opacity: 0.75;
+}
+.tb-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tb-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 16px;
+}
+.tb-badge--closed {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.tb-card-title {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.tb-card-notes {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-editor-project {
+  padding: 6px 0;
+  color: var(--text-secondary);
+}
