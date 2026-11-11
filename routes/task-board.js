@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { wrapRoute } = require('../lib/file-helpers');
 const board = require('../lib/task-board');
+const runner = require('../lib/task-board-runner');
 
 function send(res, result) {
   if (result.notFound) return res.status(404).json({ error: 'Not found' });
@@ -11,7 +12,12 @@ function send(res, result) {
 /** GET /api/task-board — all cards, project lanes, and per-lane workflow status */
 router.get('/', wrapRoute((req, res) => {
   const data = board.readBoard();
-  res.json({ ...data, status: board.laneStatus(data) });
+  res.json({ ...data, status: board.laneStatus(data), readyDelayMs: runner.readyDelayMs() });
+}));
+
+/** GET /api/task-board/attention — tickets waiting for the user (needs input or conflict) */
+router.get('/attention', wrapRoute((req, res) => {
+  res.json(board.attention(board.readBoard()));
 }));
 
 /** POST /api/task-board/cards — new card in ToDo */
@@ -27,7 +33,31 @@ router.put('/cards/:id', wrapRoute((req, res) => {
 /** POST /api/task-board/cards/:id/move — { column, index } */
 router.post('/cards/:id/move', wrapRoute((req, res) => {
   const { column, index } = req.body || {};
-  send(res, board.moveCard(req.params.id, String(column || ''), index));
+  const result = board.moveCard(req.params.id, String(column || ''), index);
+  send(res, result);
+  if (!result.error && !result.notFound) runner.schedule();
+}));
+
+/** POST /api/task-board/cards/:id/stop — end a running ticket's session; it goes back to ToDo, closed */
+router.post('/cards/:id/stop', wrapRoute((req, res) => {
+  send(res, runner.stop(req.params.id));
+}));
+
+/** POST /api/task-board/cards/:id/reveal — the ticket's session is being opened: list it like any running session */
+router.post('/cards/:id/reveal', wrapRoute((req, res) => {
+  send(res, runner.reveal(req.params.id));
+}));
+
+/** GET /api/task-board/session/:sessionId — the running ticket this session belongs to, if any */
+router.get('/session/:sessionId', wrapRoute((req, res) => {
+  res.json({ card: runner.cardForSession(req.params.sessionId) });
+}));
+
+/** POST /api/task-board/hook — events from scripts/board-hook.js, authenticated by the run's token */
+router.post('/hook', wrapRoute((req, res) => {
+  const result = runner.handleHook(req.body || {});
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
 }));
 
 /** DELETE /api/task-board/cards/:id — only from ToDo or Done; the card's session stays in history */

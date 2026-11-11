@@ -35,6 +35,7 @@
           </div>
           <div class="nav-item" data-view="task-board" title="Task Board">
             <span class="icon">&#9638;</span><span class="nav-label"> Task Board</span>
+            <span class="badge badge-active badge-attention" id="nav-task-board-attention" title="Tickets waiting for your input" style="display:none"></span>
           </div>
           <div class="nav-item" data-view="health" title="Health Check">
             <span class="icon">&#9877;</span><span class="nav-label"> Health Check</span>
@@ -813,7 +814,7 @@
               </label>
 
               <h3 style="margin-top:24px">Conversation Refresh Rate</h3>
-              <div class="subtitle" style="margin:0 0 12px">How often the open session view polls for new messages. Minimum 1 second.</div>
+              <div class="subtitle" style="margin:0 0 12px">How often the open session view polls for new messages and the Task Board updates its tickets. Minimum 1 second.</div>
               <div style="display:flex;gap:8px;align-items:center">
                 <input type="number" id="conversation-refresh-rate" min="1" step="1" style="width:120px">
                 <span style="color:var(--text-muted)">seconds</span>

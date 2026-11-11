@@ -16,14 +16,28 @@ async function addCard(body) {
   return res.body.card;
 }
 
-function move(id, column, index) {
+async function withWorkflow(slug) {
+  const res = await request(app).put(`/api/task-board/lanes/${slug}/workflow`).send({ stages: [{ title: 'Do', type: 'prompt', prompt: 'Do it' }] });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+}
+
+/** Moving to Ready needs a workflow, so the lane gets a one-stage one first. */
+async function move(id, column, index) {
+  if (column === 'ready') await withWorkflow(SLUG);
   return request(app).post(`/api/task-board/cards/${id}/move`).send({ column, index });
 }
+
+test('a ticket cannot go to Ready before its project has a workflow', async () => {
+  const card = await addCard({ title: 'Task', project: SLUG });
+  const res = await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /workflow/);
+});
 
 test('GET /api/task-board starts empty', async () => {
   const res = await request(app).get('/api/task-board');
   assert.strictEqual(res.status, 200);
-  assert.deepStrictEqual(res.body, { cards: [], projects: {}, status: {} });
+  assert.deepStrictEqual(res.body, { cards: [], projects: {}, status: {}, readyDelayMs: 30000 });
 });
 
 test('a new card lands in ToDo and adds its project lane', async () => {
@@ -141,4 +155,35 @@ test('the board is stored in data/, not in ~/.claude', async () => {
   await addCard({ title: 'Task', project: SLUG });
   assert.ok(fs.existsSync(paths.TASK_BOARD_FILE));
   assert.ok(paths.TASK_BOARD_FILE.startsWith(paths.DATA_DIR));
+});
+
+test('attention lists only open tickets in a stage that need input or hit a conflict', async () => {
+  const lib = require('../lib/task-board');
+  const put = async (title, column, status, closed = false) => {
+    const card = await addCard({ title, project: SLUG });
+    lib.mutateCard(card.id, c => { c.column = column; c.closed = closed; c.sessionId = 'sid-' + title; c.run = { status, message: 'why ' + title }; });
+    return card;
+  };
+  await put('later', 'todo', 'needs_input');
+  await withWorkflow(SLUG);
+  const stage = (await request(app).get('/api/task-board')).body.projects[SLUG].stages[0].id;
+  const asking = await put('ask', stage, 'needs_input');
+  const blocked = await put('block', stage, 'conflict');
+  await put('busy', stage, 'running');
+  await put('stopped', stage, 'needs_input', true);
+  const res = await request(app).get('/api/task-board/attention');
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body, [
+    { id: asking.id, project: SLUG, sessionId: 'sid-ask', status: 'needs_input', message: 'why ask' },
+    { id: blocked.id, project: SLUG, sessionId: 'sid-block', status: 'conflict', message: 'why block' }
+  ]);
+});
+
+test('a ticket is edited only in ToDo', async () => {
+  const card = await addCard({ title: 'Locked', project: SLUG });
+  assert.strictEqual((await move(card.id, 'ready')).status, 200);
+  const res = await request(app).put('/api/task-board/cards/' + card.id).send({ title: 'Changed', notes: 'x' });
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /only in ToDo/);
+  assert.strictEqual((await request(app).get('/api/task-board')).body.cards[0].title, 'Locked');
 });

@@ -51,7 +51,7 @@ test('the board renders chips, lanes, escaped cards and the closed badge', () =>
   assert.match(html, /Zeta &lt;task&gt;/);
   assert.match(html, /first line</);
   assert.ok(!html.includes('second'));
-  assert.match(html, /tb-badge--closed">closed/);
+  assert.match(html, /tb-badge--closed" title="">closed/);
   assert.match(html, /No workflow yet/);
   assert.strictEqual((html.match(/\+ Ticket/g) || []).length, 2);
 });
@@ -165,4 +165,53 @@ test('compact cards are one line: heading, closed badge and stage dots', () => {
   assert.match(todo, /tb-badge--closed/);
   assert.ok(!todo.includes('more'));
   assert.ok(!todo.includes('tb-line-steps'));
+});
+
+test('a ticket in the workflow shows its run status, and why it waits', () => {
+  const card = { id: 'r', title: 'T', notes: '', project: 'p', column: 's-b', closed: false, run: { status: 'needs_input', message: 'Pick a <db>' } };
+  assert.ok(TaskBoard.inWorkflow(card));
+  const html = TaskBoard.cardHtml(card, null, false);
+  assert.match(html, /tb-badge tb-badge--needs_input" title="Pick a &lt;db&gt;">needs input</);
+  assert.match(html, /tb-card-run">Pick a &lt;db&gt;</);
+  assert.match(html, /onclick="TaskBoard.openCard\('r'\)"/);
+  assert.match(TaskBoard.cardHtml(card, null, true), /needs input</);
+  assert.match(TaskBoard.badgeHtml(Object.assign({}, card, { run: { status: 'running' } })), /tb-badge--running" title="">running/);
+});
+
+test('no run badge outside the workflow; a closed ticket says why on hover', () => {
+  assert.ok(!TaskBoard.inWorkflow({ column: 'move-to-pr' }));
+  assert.strictEqual(TaskBoard.badgeHtml({ column: 'move-to-pr', run: { status: 'done' } }), '');
+  assert.ok(!TaskBoard.badgeHtml({ column: 'ready', readyAt: new Date().toISOString(), run: { status: 'running' } }).includes('running'));
+  const closed = TaskBoard.badgeHtml({ column: 'todo', closed: true, run: { status: 'closed', message: 'Session ended: exited (code 1)' } });
+  assert.match(closed, /title="Session ended: exited \(code 1\)">closed/);
+  assert.ok(!TaskBoard.cardHtml({ id: 'c', title: 'x', notes: '', column: 'todo', closed: true, run: { message: 'gone' } }, null, false).includes('tb-card-run'));
+});
+
+test('only ToDo and Done cards have a delete icon, in both card modes', () => {
+  for (const compact of [false, true]) {
+    for (const column of ['todo', 'done']) {
+      const html = TaskBoard.cardHtml({ id: 'd', title: 'x', notes: '', column }, null, compact);
+      assert.match(html, /tb-card-delete" draggable="false"/);
+      assert.match(html, /event.stopPropagation\(\); TaskBoard.confirmDelete\('d'\)/);
+    }
+    for (const column of ['ready', 's-b', 'move-to-pr']) {
+      assert.ok(!TaskBoard.cardHtml({ id: 'd', title: 'x', notes: '', column }, null, compact).includes('tb-card-delete'));
+    }
+  }
+});
+
+test('a ticket in Ready counts down to its start, then shows queued', () => {
+  const t0 = Date.parse('2026-11-11T10:00:00Z');
+  const card = { column: 'ready', readyAt: '2026-11-11T10:00:00Z' };
+  assert.match(TaskBoard.badgeHtml(card, t0 + 4500, 30000), />starts in 26s</);
+  assert.match(TaskBoard.badgeHtml(card, t0 + 31000, 30000), />queued</);
+});
+
+test('attention: the toast counts waiting tickets and a waiting session gets its badge', () => {
+  assert.strictEqual(TaskBoard.attentionMessage(1), 'Task Board: 1 ticket needs your input');
+  assert.strictEqual(TaskBoard.attentionMessage(3), 'Task Board: 3 tickets need your input');
+  TaskBoard.attention = [{ id: 'a', sessionId: 's1', status: 'needs_input', message: 'Pick <one>' }];
+  assert.strictEqual(TaskBoard.attentionBadgeHtml('s1'), '<span class="tb-badge tb-badge--needs_input" title="Pick &lt;one&gt;">needs input</span>');
+  assert.strictEqual(TaskBoard.attentionBadgeHtml('s2'), '');
+  TaskBoard.attention = [];
 });

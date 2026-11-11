@@ -17,6 +17,7 @@ const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/ses
 const { getAllSessionColors, getSessionColors, setSessionColor, isValidColor } = require('../lib/session-colors');
 const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
+const { renameSession } = require('../lib/session-rename');
 
 const router = express.Router({ mergeParams: true });
 
@@ -757,41 +758,9 @@ router.post('/:slug/sessions/:sessionId/close-readonly', wrapRoute((req, res) =>
 }));
 
 router.post('/:slug/sessions/:sessionId/rename', wrapRoute((req, res) => {
-  const dir = safeSlug(req.params.slug);
-  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
-
-  const sessionId = req.params.sessionId;
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
-
-  const title = (req.body?.title || '').trim();
-  if (!title) return res.status(400).json({ error: 'Title is required' });
-  if (title.length > 500) return res.status(400).json({ error: 'Title too long' });
-
-  const filePath = path.join(dir, sessionId + '.jsonl');
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Session not found' });
-
-  backup(filePath);
-  const line = JSON.stringify({ type: 'custom-title', customTitle: title, sessionId }) + '\n';
-  const existing = fs.readFileSync(filePath, 'utf-8');
-  const needsNewline = existing.length > 0 && !existing.endsWith('\n');
-  fs.appendFileSync(filePath, (needsNewline ? '\n' : '') + line);
-
-  const indexFile = path.join(dir, 'sessions-index.json');
-  if (fs.existsSync(indexFile)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(indexFile, 'utf-8'));
-      const entry = (data.entries || []).find(e => e.sessionId === sessionId);
-      if (entry) {
-        backup(indexFile);
-        entry.summary = title;
-        fs.writeFileSync(indexFile, JSON.stringify(data, null, 2), 'utf-8');
-      }
-    } catch (_) { /* malformed index, skip */ }
-  }
-
-  res.json({ ok: true, title });
+  const result = renameSession(req.params.slug, req.params.sessionId, req.body?.title);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, title: result.title });
 }));
 
 router.post('/:slug/sessions/:sessionId/color', wrapRoute((req, res) => {

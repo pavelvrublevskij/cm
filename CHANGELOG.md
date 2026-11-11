@@ -2,8 +2,9 @@
 
 ### Features
 
-- **Task Board** — tickets for all projects on one board, one lane per project; drag from ToDo to Ready, delete from ToDo/Done only.
+- **Task Board** — tickets for all projects on one board, one lane per project; drag from ToDo to Ready, delete from ToDo/Done only, with a trash icon on the card.
 - **Project workflows** — stages between Ready and Move to PR built from the project's skills and agents; Recommend picks them for you, and you're told when skills change.
+- **Tickets run by themselves** — moving a ticket to Ready starts a background Claude session that works through the stages; click it to open the live terminal, it waits for you when it needs input. A sidebar count and a toast tell you when tickets need your input.
 
 ## v1.9.1
 

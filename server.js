@@ -316,6 +316,13 @@ if (require.main === module) {
   server.listen(PORT, HOST, () => {
     console.log(`CM running at http://${HOST}:${PORT}`);
 
+    require('./lib/task-board-runner').init({
+      spawn: terminalServer.spawnBackground,
+      bind: terminalServer.bindSessionId,
+      reveal: terminalServer.reveal,
+      url: `http://${HOST}:${PORT}`
+    });
+
     // Set only by the OS-native autostart launcher (Startup shortcut on Windows, env var from the
     // LaunchAgent/XDG entry on macOS/Linux) — a plain `npm start` never opens the browser, and
     // autostart only fires once per OS login.

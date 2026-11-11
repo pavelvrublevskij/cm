@@ -300,6 +300,19 @@ body {
   color: #2ea043;
 }
 
+.nav-item .badge.badge-attention,
+.nav-item.active .badge.badge-attention,
+.app.sidebar-collapsed .nav-item .badge.badge-attention {
+  background: var(--warning);
+  color: var(--bg-primary);
+}
+
+.asb-pill .tb-badge,
+.project-active-sub .tb-badge {
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
 .project-list {
   padding-left: 8px;
 }
@@ -2862,6 +2875,12 @@ mark.search-highlight {
   background: rgba(248, 81, 73, 0.15);
   border: 1px solid var(--danger);
   color: var(--danger);
+}
+
+.toast-warning {
+  background: rgba(210, 153, 34, 0.15);
+  border: 1px solid var(--warning);
+  color: var(--warning);
 }
 
 @keyframes slideIn {
@@ -6503,6 +6522,7 @@ body.git-split-dragging {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: grab;
+  position: relative;
 }
 .tb-card:hover {
   border-color: var(--border-light);
@@ -6517,6 +6537,21 @@ body.git-split-dragging {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.tb-card-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--bg-tertiary);
+  visibility: hidden;
+}
+.tb-card--line .tb-card-delete {
+  position: static;
+  height: 16px;
+  flex-shrink: 0;
+}
+.tb-card:hover .tb-card-delete {
+  visibility: visible;
 }
 .tb-badge {
   font-size: 10px;
@@ -6696,4 +6731,32 @@ body.git-split-dragging {
   height: 6px;
   border-radius: 50%;
   background: var(--bg-hover);
+}
+.tb-dot.tb-step--done {
+  background: var(--success);
+}
+.tb-dot.tb-step--current {
+  background: var(--accent);
+}
+.tb-badge--starting {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.tb-badge--running {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.tb-badge--needs_input {
+  color: var(--bg-primary);
+  background: var(--warning);
+}
+.tb-badge--conflict {
+  color: #fff;
+  background: var(--danger);
+}
+.tb-card-run {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--warning);
+  overflow-wrap: anywhere;
 }

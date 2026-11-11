@@ -8,9 +8,48 @@ const TaskBoard = {
   COLUMN_TITLES: { todo: 'ToDo', ready: 'Ready', 'move-to-pr': 'Move to PR', done: 'Done' },
   DELETABLE: ['todo', 'done'],
   USER_MOVES: { todo: ['ready'], ready: ['todo'], 'move-to-pr': ['done'] },
+  RUN_LABELS: { starting: 'starting', running: 'running', needs_input: 'needs input', conflict: 'conflict' },
   board: { cards: [], projects: {}, status: {} },
+  attention: [],
   _drag: null,
   _wf: null,
+  _poll: null,
+
+  /**
+   * Tickets waiting for the user, watched from every view at the conversation refresh rate: the
+   * sidebar count, a toast for a newly waiting ticket while the board is not open, and a badge on
+   * its session in the active sessions bar.
+   */
+  watchAttention() {
+    TaskBoard.refreshAttention().finally(() => setTimeout(TaskBoard.watchAttention, Sessions.refreshIntervalMs()));
+  },
+
+  async refreshAttention() {
+    let list;
+    try { list = await api('/api/task-board/attention'); } catch (_) { return; }
+    const known = new Set(TaskBoard.attention.map(a => a.id));
+    const fresh = list.some(a => !known.has(a.id));
+    TaskBoard.attention = list;
+    const badge = document.getElementById('nav-task-board-attention');
+    if (badge) {
+      badge.textContent = list.length;
+      badge.style.display = list.length ? '' : 'none';
+    }
+    ActiveSessionsBar._render();
+    ActiveSessionsBar._renderSidebar();
+    if (fresh && App.currentView !== 'task-board') toast(TaskBoard.attentionMessage(list.length), 'warning');
+  },
+
+  attentionMessage(count) {
+    return `Task Board: ${count} ${count === 1 ? 'ticket needs' : 'tickets need'} your input`;
+  },
+
+  /** The needs input / conflict badge for a ticket's session, or '' when it is not waiting. */
+  attentionBadgeHtml(sessionId) {
+    const a = TaskBoard.attention.find(x => x.sessionId === sessionId);
+    if (!a) return '';
+    return `<span class="tb-badge tb-badge--${a.status}" title="${escapeAttr(a.message)}">${TaskBoard.RUN_LABELS[a.status]}</span>`;
+  },
 
   async load() {
     const el = document.getElementById('task-board-body');
@@ -23,6 +62,68 @@ const TaskBoard = {
       el.innerHTML = '';
       toast('Failed to load the board: ' + e.message, 'error');
     }
+    TaskBoard.startPolling();
+  },
+
+  /** Keep running tickets current while the board is open (at the conversation refresh rate); stops once another view is shown. */
+  startPolling() {
+    const ms = Sessions.refreshIntervalMs();
+    setFooterStatus(`Live · refresh ${Math.round(ms / 1000)}s`, true);
+    if (TaskBoard._poll) return;
+    TaskBoard._poll = setInterval(async () => {
+      if (App.currentView !== 'task-board') {
+        clearInterval(TaskBoard._poll);
+        TaskBoard._poll = null;
+        if (App.currentView !== 'session-detail') setFooterStatus('Idle', false);
+        return;
+      }
+      if (TaskBoard._drag) return;
+      try {
+        TaskBoard.board = await api('/api/task-board');
+        TaskBoard.render();
+      } catch (_) { /* the next tick tries again */ }
+    }, ms);
+  },
+
+  /** Inside the workflow: past Ready, not yet in Move to PR. */
+  inWorkflow(card) {
+    return !TaskBoard.COLUMN_TITLES[card.column];
+  },
+
+  /**
+   * The closed mark (with why, on hover), the countdown of a ticket waiting in Ready, or the live
+   * run status of a ticket in the workflow.
+   */
+  badgeHtml(card, now = Date.now(), delay = TaskBoard.board.readyDelayMs || 30000) {
+    const run = card.run || {};
+    if (card.closed) return `<span class="tb-badge tb-badge--closed" title="${escapeAttr(run.message || '')}">closed</span>`;
+    if (card.column === 'ready') {
+      const left = Math.ceil(((Date.parse(card.readyAt) || 0) + delay - now) / 1000);
+      return left > 0
+        ? `<span class="tb-badge tb-badge--starting" title="Move it back to ToDo to cancel">starts in ${left}s</span>`
+        : '<span class="tb-badge tb-badge--starting" title="Starts when the ticket before it is done">queued</span>';
+    }
+    const label = TaskBoard.inWorkflow(card) && TaskBoard.RUN_LABELS[run.status];
+    if (!label) return '';
+    return `<span class="tb-badge tb-badge--${run.status}" title="${escapeAttr(run.message || '')}">${label}</span>`;
+  },
+
+  /** A ticket in the workflow opens its session (live terminal); any other opens the editor. */
+  openCard(id) {
+    const card = TaskBoard.findCard(id);
+    if (!card) return;
+    if (TaskBoard.inWorkflow(card) && card.sessionId) {
+      TaskBoard.openSession(card);
+      return;
+    }
+    TaskBoard.openEditor(id);
+  },
+
+  /** A ticket's session runs hidden; opening it lists it like any running session from then on. */
+  async openSession(card) {
+    try { await api('/api/task-board/cards/' + encodeURIComponent(card.id) + '/reveal', { method: 'POST' }); }
+    catch (e) { toast(e.message, 'error'); }
+    location.hash = '#session-detail/' + card.project + '/' + card.sessionId;
   },
 
   render() {
@@ -85,11 +186,18 @@ const TaskBoard = {
       stages.map((s, i) => `<span class="tb-dot${i < at ? ' tb-step--done' : i === at ? ' tb-step--current' : ''}"></span>`).join('')
     }</span>`;
     return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}" title="${escapeAttr(heading)}"
-        ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openEditor('${escapeAttr(card.id)}')">
+        ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         <span class="tb-line-text">${escapeHtml(heading)}</span>
-        ${card.closed ? '<span class="tb-badge tb-badge--closed">closed</span>' : ''}
+        ${TaskBoard.badgeHtml(card)}
         ${dots}
+        ${TaskBoard.deleteIconHtml(card)}
       </div>`;
+  },
+
+  deleteIconHtml(card) {
+    if (!TaskBoard.DELETABLE.includes(card.column)) return '';
+    return `<button class="icon-btn tb-card-delete" draggable="false" title="Delete ticket" aria-label="Delete ticket"
+        onclick="event.stopPropagation(); TaskBoard.confirmDelete('${escapeAttr(card.id)}')">&#128465;</button>`;
   },
 
   /** Title, or the first line of the description when there is no title. Compact: a one-line card with stage dots. */
@@ -98,11 +206,15 @@ const TaskBoard = {
     const heading = card.title || lines[0];
     if (compact) return TaskBoard.lineCardHtml(card, heading, stages);
     const notes = card.title ? lines[0] : lines[1];
+    const badge = TaskBoard.badgeHtml(card);
+    const message = card.run && card.run.message && TaskBoard.inWorkflow(card) ? card.run.message : '';
     return `<div class="tb-card${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}"
-        ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openEditor('${escapeAttr(card.id)}')">
-        ${card.closed ? '<div class="tb-card-head"><span class="tb-badge tb-badge--closed">closed</span></div>' : ''}
+        ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
+        ${TaskBoard.deleteIconHtml(card)}
+        ${badge ? `<div class="tb-card-head">${badge}</div>` : ''}
         ${heading ? `<div class="tb-card-title">${escapeHtml(heading)}</div>` : ''}
         ${notes ? `<div class="tb-card-notes">${escapeHtml(notes)}</div>` : ''}
+        ${message ? `<div class="tb-card-run">${escapeHtml(message)}</div>` : ''}
       </div>`;
   },
 
@@ -176,16 +288,24 @@ const TaskBoard = {
     const projectField = card
       ? formGroup('Project', `<div class="tb-editor-project">${escapeHtml(decodeName(card.project))}</div>`)
       : formGroup('Project', frontmatterSelectHtml('tb-project', options, lane || options[0][0]));
+    const editable = !card || card.column === 'todo';
+    const ro = editable ? '' : ' readonly';
     const body = projectField
-      + formGroup('Title (optional)', `<input type="text" id="tb-title" value="${escapeAttr(card ? card.title : '')}">`)
-      + formGroup('Description / ticket number', `<textarea id="tb-notes" rows="8" placeholder="What Claude should do — this becomes your first message in the session">${escapeHtml(card ? card.notes : '')}</textarea>`);
+      + formGroup('Title (optional)', `<input type="text" id="tb-title" value="${escapeAttr(card ? card.title : '')}"${ro}>`)
+      + formGroup('Description / ticket number', `<textarea id="tb-notes" rows="8" placeholder="What Claude should do — this becomes your first message in the session"${ro}>${escapeHtml(card ? card.notes : '')}</textarea>`);
     const buttons = [];
+    if (card && card.sessionId) {
+      buttons.push({ label: 'Open session', onClick: () => TaskBoard.openSession(card) });
+    }
+    if (card && TaskBoard.inWorkflow(card)) {
+      buttons.push({ label: 'Stop', danger: true, onClick: () => TaskBoard.stop(card.id) });
+    }
     if (card && TaskBoard.DELETABLE.includes(card.column)) {
       buttons.push({ label: 'Delete', danger: true, onClick: () => TaskBoard.confirmDelete(card.id) });
     }
-    buttons.push({ label: card ? 'Save' : 'Add', primary: true, onClick: () => TaskBoard.save(card) });
-    openModal({ title: card ? 'Edit ticket' : 'New ticket', width: 560, body, buttons });
-    setTimeout(() => { const t = document.getElementById('tb-notes'); if (t) t.focus(); }, 0);
+    if (editable) buttons.push({ label: card ? 'Save' : 'Add', primary: true, onClick: () => TaskBoard.save(card) });
+    openModal({ title: !card ? 'New ticket' : editable ? 'Edit ticket' : 'Ticket', width: 560, body, buttons });
+    if (editable) setTimeout(() => { const t = document.getElementById('tb-notes'); if (t) t.focus(); }, 0);
   },
 
   async save(card) {
@@ -202,6 +322,47 @@ const TaskBoard = {
       return false;
     }
     await TaskBoard.load();
+  },
+
+  async stop(id) {
+    try {
+      await api('/api/task-board/cards/' + encodeURIComponent(id) + '/stop', { method: 'POST' });
+    } catch (e) {
+      toast(e.message, 'error');
+      return false;
+    }
+    await TaskBoard.load();
+  },
+
+  /**
+   * Before closing a session: when it runs a Task Board ticket, ask whether to keep it running.
+   * Closing stops the workflow and sends the ticket back to ToDo, closed. Resolves true to go on closing.
+   */
+  async confirmCloseSession(sessionId) {
+    let card;
+    try { card = (await api('/api/task-board/session/' + encodeURIComponent(sessionId))).card; }
+    catch (_) { return true; }
+    if (!card) return true;
+    const name = card.title || (card.notes || '').trim().split('\n')[0];
+    return new Promise(resolve => {
+      let answered = false;
+      openModal({
+        title: 'Close Task Board session?',
+        body: `<p>This session runs the ticket <strong>${escapeHtml(name)}</strong>. Closing it stops the workflow and moves the ticket back to ToDo, marked closed.</p>`,
+        cancelLabel: 'Continue',
+        buttons: [{ label: 'Close', danger: true, onClick: async () => {
+          answered = true;
+          try { await api('/api/task-board/cards/' + encodeURIComponent(card.id) + '/stop', { method: 'POST' }); }
+          catch (e) { toast(e.message, 'error'); }
+          resolve(true);
+        } }],
+        onClose: () => {
+          if (answered) return;
+          resolve(false);
+          App.navigate('task-board');
+        }
+      });
+    });
   },
 
   confirmDelete(id) {

@@ -70,6 +70,7 @@ const App = {
 
     if (typeof ActiveCount !== 'undefined') ActiveCount.start();
     if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.start();
+    if (typeof TaskBoard !== 'undefined') TaskBoard.watchAttention();
     SessionColors.load();
     if (typeof Artifacts !== 'undefined') Artifacts.checkGlobalVisibility();
 
