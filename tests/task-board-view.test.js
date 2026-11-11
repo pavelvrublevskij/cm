@@ -82,3 +82,87 @@ test('a card without a title shows the first description line as its heading', (
   assert.match(html, /tb-card-notes">more detail</);
   assert.ok(!html.includes('hidden'));
 });
+
+const STAGED = {
+  projects: { p: { parallel: false, stages: [{ id: 's-a', title: 'Plan' }, { id: 's-b', title: 'Build' }, { id: 's-c', title: 'Review' }] } },
+  cards: [{ id: 'w', title: 'Working', notes: '', project: 'p', column: 's-b', closed: false }],
+  status: { p: { skillsChanged: true, missing: ['s-a'] } }
+};
+
+test('compact mode folds the stages into one In progress column', () => {
+  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(STAGED, 'p', true), c => c.title), ['ToDo', 'Ready', 'In progress', 'Move to PR', 'Done']);
+  assert.match(TaskBoard.html(STAGED, [], true), /In progress <span class="tb-col-count">1</);
+});
+
+test('full mode shows one column per stage and no step bar', () => {
+  const html = TaskBoard.html(STAGED, [], false);
+  assert.match(html, /data-column="s-b"/);
+  assert.match(html, /Build <span class="tb-col-count">1</);
+  assert.ok(!html.includes('tb-steps'));
+});
+
+test('a lane shows its workflow button and skill flags', () => {
+  const html = TaskBoard.html(STAGED, [], false);
+  assert.match(html, /TaskBoard.openWorkflow\('p'\)">Workflow · 3</);
+  assert.match(html, /Missing skill/);
+  assert.match(html, /Skills changed/);
+  const plain = TaskBoard.html(BOARD, [], false);
+  assert.match(plain, /Set up/);
+  assert.ok(!plain.includes('Skills changed'));
+});
+
+const WF = {
+  slug: 'p',
+  stages: [
+    { id: 's-a', title: 'Plan', type: 'skill', ref: 'gone-skill', prompt: '' },
+    { id: 's-b', title: 'Do <it>', type: 'prompt', ref: '', prompt: 'Implement it' }
+  ],
+  available: [
+    { kind: 'skill', name: 'writing-plans', source: 'project' },
+    { kind: 'agent', name: 'tester', source: 'global' }
+  ],
+  recommended: [{ title: 'Plan', type: 'skill', ref: 'writing-plans', prompt: '' }],
+  missing: ['s-a'],
+  skillsChanged: true,
+  diff: false
+};
+
+test('the workflow editor lists stages with type, reference and missing marker', () => {
+  const html = TaskBoard.workflowHtml(WF);
+  assert.strictEqual((html.match(/class="tb-wf-row"/g) || []).length, 2);
+  assert.match(html, /value="Do &lt;it&gt;"/);
+  assert.match(html, /tb-wf-ref tb-wf-ref--missing/);
+  assert.match(html, /gone-skill \(missing\)/);
+  assert.match(html, /writing-plans · project/);
+  assert.ok(!html.includes('tester · global'), 'agents are not offered for a skill stage');
+  assert.match(html, /Compare with recommended/);
+});
+
+test('the diff view shows current and recommended stages side by side', () => {
+  const html = TaskBoard.workflowHtml(Object.assign({}, WF, { diff: true }));
+  assert.match(html, /<h4>Current<\/h4>/);
+  assert.match(html, /<h4>Recommended<\/h4>/);
+  assert.match(html, /skill: writing-plans/);
+  assert.match(html, /Use recommended/);
+  assert.match(html, /Keep current/);
+});
+
+test('an empty workflow invites Recommend', () => {
+  const html = TaskBoard.workflowHtml(Object.assign({}, WF, { stages: [], skillsChanged: false }));
+  assert.match(html, /No stages yet/);
+  assert.ok(!html.includes('Compare with recommended'));
+});
+
+test('compact cards are one line: heading, closed badge and stage dots', () => {
+  const html = TaskBoard.html(STAGED, [], true);
+  assert.match(html, /tb-card tb-card--line" draggable="true" data-id="w" title="Working"/);
+  assert.match(html, /tb-line-text">Working</);
+  assert.match(html, /tb-line-steps" title="Build \(2\/3\)"/);
+  assert.strictEqual((html.match(/class="tb-dot/g) || []).length, 3);
+  assert.ok(!html.includes('tb-card-notes'));
+  const todo = TaskBoard.cardHtml({ id: 'x', title: '', notes: 'ABC-7 idea\nmore', column: 'todo', closed: true }, null, true);
+  assert.match(todo, /tb-line-text">ABC-7 idea</);
+  assert.match(todo, /tb-badge--closed/);
+  assert.ok(!todo.includes('more'));
+  assert.ok(!todo.includes('tb-line-steps'));
+});

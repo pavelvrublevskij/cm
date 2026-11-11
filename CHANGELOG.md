@@ -3,6 +3,7 @@
 ### Features
 
 - **Task Board** — tickets for all projects on one board, one lane per project; drag from ToDo to Ready, delete from ToDo/Done only.
+- **Project workflows** — stages between Ready and Move to PR built from the project's skills and agents; Recommend picks them for you, and you're told when skills change.
 
 ## v1.9.1
 

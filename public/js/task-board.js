@@ -4,11 +4,13 @@
 
 const TaskBoard = {
   HIDDEN_KEY: 'claude-manager-task-board-hidden',
+  COMPACT_KEY: 'claude-manager-task-board-compact',
   COLUMN_TITLES: { todo: 'ToDo', ready: 'Ready', 'move-to-pr': 'Move to PR', done: 'Done' },
   DELETABLE: ['todo', 'done'],
   USER_MOVES: { todo: ['ready'], ready: ['todo'], 'move-to-pr': ['done'] },
-  board: { cards: [], projects: {} },
+  board: { cards: [], projects: {}, status: {} },
   _drag: null,
+  _wf: null,
 
   async load() {
     const el = document.getElementById('task-board-body');
@@ -25,7 +27,19 @@ const TaskBoard = {
 
   render() {
     const el = document.getElementById('task-board-body');
-    if (el) el.innerHTML = TaskBoard.html(TaskBoard.board, TaskBoard.hidden());
+    if (el) el.innerHTML = TaskBoard.html(TaskBoard.board, TaskBoard.hidden(), TaskBoard.compact());
+    const btn = document.getElementById('task-board-compact-btn');
+    if (btn) btn.classList.toggle('btn-active', TaskBoard.compact());
+  },
+
+  compact() {
+    try { return localStorage.getItem(TaskBoard.COMPACT_KEY) === '1'; }
+    catch (_) { return false; }
+  },
+
+  toggleCompact() {
+    try { localStorage.setItem(TaskBoard.COMPACT_KEY, TaskBoard.compact() ? '0' : '1'); } catch (_) {}
+    TaskBoard.render();
   },
 
   hidden() {
@@ -45,13 +59,17 @@ const TaskBoard = {
     return Object.keys(board.projects || {}).sort((a, b) => decodeName(a).localeCompare(decodeName(b)));
   },
 
-  /** A lane's columns: fixed ones around its workflow stages, or a placeholder while it has none. */
-  laneColumns(board, key) {
+  /**
+   * A lane's columns: fixed ones around its workflow stages, or a placeholder while it has none.
+   * Compact mode folds the stages into one "In progress" column.
+   */
+  laneColumns(board, key, compact) {
     const lane = (board.projects || {})[key];
     const stages = (lane && lane.stages) || [];
-    const middle = stages.length
-      ? stages.map(s => ({ id: s.id, title: s.title || s.id, stage: true }))
-      : [{ id: '', title: 'Workflow', placeholder: true }];
+    let middle;
+    if (!stages.length) middle = [{ id: '', title: 'Workflow', placeholder: true }];
+    else if (compact) middle = [{ id: '', title: 'In progress', inProgress: true }];
+    else middle = stages.map(s => ({ id: s.id, title: s.title || s.id, stage: true }));
     const fixed = id => ({ id, title: TaskBoard.COLUMN_TITLES[id] });
     return [fixed('todo'), fixed('ready')].concat(middle, [fixed('move-to-pr'), fixed('done')]);
   },
@@ -60,10 +78,25 @@ const TaskBoard = {
     return card.column === column || (TaskBoard.USER_MOVES[card.column] || []).includes(column);
   },
 
-  /** Title, or the first line of the description when there is no title. */
-  cardHtml(card) {
+  /** Compact card: one line with the heading, and the current stage as dots (its name on hover). */
+  lineCardHtml(card, heading, stages) {
+    const at = stages ? stages.findIndex(s => s.id === card.column) : -1;
+    const dots = at === -1 ? '' : `<span class="tb-line-steps" title="${escapeAttr(`${stages[at].title} (${at + 1}/${stages.length})`)}">${
+      stages.map((s, i) => `<span class="tb-dot${i < at ? ' tb-step--done' : i === at ? ' tb-step--current' : ''}"></span>`).join('')
+    }</span>`;
+    return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}" title="${escapeAttr(heading)}"
+        ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openEditor('${escapeAttr(card.id)}')">
+        <span class="tb-line-text">${escapeHtml(heading)}</span>
+        ${card.closed ? '<span class="tb-badge tb-badge--closed">closed</span>' : ''}
+        ${dots}
+      </div>`;
+  },
+
+  /** Title, or the first line of the description when there is no title. Compact: a one-line card with stage dots. */
+  cardHtml(card, stages, compact) {
     const lines = (card.notes || '').trim().split('\n');
     const heading = card.title || lines[0];
+    if (compact) return TaskBoard.lineCardHtml(card, heading, stages);
     const notes = card.title ? lines[0] : lines[1];
     return `<div class="tb-card${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}"
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openEditor('${escapeAttr(card.id)}')">
@@ -73,13 +106,20 @@ const TaskBoard = {
       </div>`;
   },
 
-  laneHtml(board, key) {
-    const columns = TaskBoard.laneColumns(board, key);
+  laneHtml(board, key, compact) {
+    const columns = TaskBoard.laneColumns(board, key, compact);
     const cards = (board.cards || []).filter(c => c.project === key);
     const lane = board.projects[key];
+    const stages = lane.stages || [];
+    const status = (board.status || {})[key] || {};
+    const k = escapeAttr(key);
+    const flags = (status.missing && status.missing.length ? '<span class="tb-flag tb-flag--error" title="A stage uses a skill or agent this project no longer has">Missing skill</span>' : '')
+      + (status.skillsChanged ? '<span class="tb-flag" title="Skills or agents changed since the workflow was saved">Skills changed</span>' : '');
     const head = `<div class="tb-lane-head">
         <span class="tb-lane-name">${escapeHtml(decodeName(key))}</span>
         <span class="git-count-badge">${cards.length}</span>
+        <button class="btn btn-sm tb-workflow-btn" onclick="TaskBoard.openWorkflow('${k}')">Workflow${stages.length ? ' · ' + stages.length : ''}</button>
+        ${flags}
         <label class="tb-parallel" title="Run this project's tickets in parallel, each in its own git worktree">
           <input type="checkbox"${lane.parallel ? ' checked' : ''} onchange="TaskBoard.setParallel('${escapeAttr(key)}', this.checked)"> Parallel
         </label>
@@ -88,16 +128,19 @@ const TaskBoard = {
     const cols = columns.map(col => {
       if (col.placeholder) {
         return `<div class="tb-col tb-col--placeholder"><div class="tb-col-head">${escapeHtml(col.title)}</div>
-            <div class="tb-col-empty">No workflow yet</div></div>`;
+            <div class="tb-col-empty">No workflow yet</div>
+            <button class="btn btn-sm tb-add" onclick="TaskBoard.openWorkflow('${k}')">Set up</button></div>`;
       }
-      const list = cards.filter(c => c.column === col.id);
+      const list = col.inProgress
+        ? cards.filter(c => stages.some(s => s.id === c.column))
+        : cards.filter(c => c.column === col.id);
       const add = col.id === 'todo'
         ? `<button class="btn btn-sm tb-add" onclick="TaskBoard.openEditor(null, '${escapeAttr(key)}')">+ Ticket</button>`
         : '';
       return `<div class="tb-col${col.stage ? ' tb-col--stage' : ''}" data-lane="${escapeAttr(key)}" data-column="${escapeAttr(col.id)}"
           ondragover="TaskBoard.onDragOver(event)" ondragleave="TaskBoard.onDragLeave(event)" ondrop="TaskBoard.onDrop(event)">
           <div class="tb-col-head">${escapeHtml(col.title)} <span class="tb-col-count">${list.length}</span></div>
-          <div class="tb-col-cards">${list.map(TaskBoard.cardHtml).join('')}</div>
+          <div class="tb-col-cards">${list.map(c => TaskBoard.cardHtml(c, col.inProgress ? stages : null, compact)).join('')}</div>
           ${add}
         </div>`;
     }).join('');
@@ -105,11 +148,11 @@ const TaskBoard = {
   },
 
   /** The whole board: lane filter chips, then each visible lane. Pure, for tests. */
-  html(board, hidden) {
+  html(board, hidden, compact) {
     const keys = TaskBoard.laneKeys(board);
     if (!keys.length) return '<div class="empty-state"><p>No tickets yet. Add a project lane or a new ticket to start.</p></div>';
     const chips = keys.map(k => `<button class="tb-chip${hidden.includes(k) ? '' : ' active'}" onclick="TaskBoard.toggleLaneVisible('${escapeAttr(k)}')">${escapeHtml(decodeName(k))}</button>`).join('');
-    const lanes = keys.filter(k => !hidden.includes(k)).map(k => TaskBoard.laneHtml(board, k)).join('');
+    const lanes = keys.filter(k => !hidden.includes(k)).map(k => TaskBoard.laneHtml(board, k, compact)).join('');
     return `<div class="tb-chips">${chips}</div>${lanes || '<div class="empty-state"><p>All lanes are hidden.</p></div>'}`;
   },
 
@@ -186,6 +229,176 @@ const TaskBoard = {
       toast(e.message, 'error');
       TaskBoard.render();
     }
+  },
+
+  // --- Workflow editor ---
+
+  async openWorkflow(slug) {
+    let data;
+    try {
+      data = await api('/api/task-board/lanes/' + encodeURIComponent(slug) + '/workflow');
+    } catch (e) {
+      toast(e.message, 'error');
+      return;
+    }
+    TaskBoard._wf = Object.assign({ slug, diff: false }, data, { stages: data.stages.map(s => Object.assign({}, s)) });
+    openModal({
+      title: 'Workflow — ' + decodeName(slug),
+      width: 820,
+      body: '<div id="tb-wf"></div>',
+      buttons: [{ label: 'Save', primary: true, onClick: () => TaskBoard.saveWorkflow() }],
+      onClose: () => { TaskBoard._wf = null; }
+    });
+    TaskBoard.renderWorkflow();
+  },
+
+  renderWorkflow() {
+    const el = document.getElementById('tb-wf');
+    if (el && TaskBoard._wf) el.innerHTML = TaskBoard.workflowHtml(TaskBoard._wf);
+  },
+
+  stageLabel(s) {
+    return s.type === 'prompt' ? 'prompt: ' + s.prompt.split('\n')[0] : s.type + ': ' + s.ref;
+  },
+
+  refOptions(available, stage) {
+    const list = available.filter(a => a.kind === stage.type)
+      .map(a => [a.name, a.name + ' · ' + a.source]);
+    if (stage.ref && !list.some(([v]) => v === stage.ref)) list.unshift([stage.ref, stage.ref + ' (missing)']);
+    return list;
+  },
+
+  stageRowHtml(wf, s, i) {
+    const missing = (wf.missing || []).includes(s.id);
+    const ref = s.type === 'prompt'
+      ? ''
+      : `<select class="tb-wf-ref${missing ? ' tb-wf-ref--missing' : ''}" onchange="TaskBoard.wfSet(${i}, 'ref', this.value)">${
+          TaskBoard.refOptions(wf.available, s).map(([v, label]) => `<option value="${escapeAttr(v)}"${v === s.ref ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')
+        }</select>`;
+    const types = [['skill', 'Skill'], ['agent', 'Agent'], ['prompt', 'Prompt']]
+      .map(([v, label]) => `<option value="${v}"${v === s.type ? ' selected' : ''}>${label}</option>`).join('');
+    const last = wf.stages.length - 1;
+    return `<div class="tb-wf-row">
+        <span class="tb-wf-num">${i + 1}</span>
+        <div class="tb-wf-fields">
+          <div class="tb-wf-line">
+            <input type="text" class="tb-wf-title" value="${escapeAttr(s.title)}" placeholder="Stage name" oninput="TaskBoard.wfSet(${i}, 'title', this.value, true)">
+            <select class="tb-wf-type" onchange="TaskBoard.wfSet(${i}, 'type', this.value)">${types}</select>
+            ${ref}
+          </div>
+          <textarea rows="2" placeholder="${s.type === 'prompt' ? 'What Claude should do in this stage' : 'Extra instructions (optional)'}" oninput="TaskBoard.wfSet(${i}, 'prompt', this.value, true)">${escapeHtml(s.prompt)}</textarea>
+        </div>
+        <div class="tb-wf-actions">
+          <button class="btn btn-sm" onclick="TaskBoard.wfMove(${i}, -1)"${i === 0 ? ' disabled' : ''} title="Move up">&uarr;</button>
+          <button class="btn btn-sm" onclick="TaskBoard.wfMove(${i}, 1)"${i === last ? ' disabled' : ''} title="Move down">&darr;</button>
+          <button class="btn btn-sm" onclick="TaskBoard.wfRemove(${i})" title="Remove stage">&times;</button>
+        </div>
+      </div>`;
+  },
+
+  diffHtml(wf) {
+    const list = stages => stages.length
+      ? stages.map((s, i) => `<li><strong>${i + 1}. ${escapeHtml(s.title)}</strong> <span class="tb-wf-dim">${escapeHtml(TaskBoard.stageLabel(s))}</span></li>`).join('')
+      : '<li class="tb-wf-dim">No stages</li>';
+    return `<div class="tb-wf-diff">
+        <div><h4>Current</h4><ol>${list(wf.stages)}</ol></div>
+        <div><h4>Recommended</h4><ol>${list(wf.recommended)}</ol></div>
+      </div>
+      <div class="tb-wf-diff-actions">
+        <button class="btn btn-sm btn-primary" onclick="TaskBoard.wfApplyRecommended()">Use recommended</button>
+        <button class="btn btn-sm" onclick="TaskBoard.wfKeepCurrent()">Keep current</button>
+      </div>`;
+  },
+
+  /** The editor body: skill-change banner or diff, the stage rows, add/recommend. Pure, for tests. */
+  workflowHtml(wf) {
+    let top = '';
+    if (wf.diff) top = TaskBoard.diffHtml(wf);
+    else if (wf.skillsChanged) {
+      top = `<div class="tb-wf-banner">Skills or agents in this project changed since the workflow was saved.
+          <button class="btn btn-sm" onclick="TaskBoard.wfShowDiff()">Compare with recommended</button></div>`;
+    }
+    const rows = wf.stages.length
+      ? wf.stages.map((s, i) => TaskBoard.stageRowHtml(wf, s, i)).join('')
+      : '<div class="tb-col-empty">No stages yet — use Recommend, or add a stage.</div>';
+    return `${top}
+      <div class="tb-wf-hint">After Ready the stages run in this order, each one starting by itself when the previous one is done. Then the ticket waits in Move to PR.</div>
+      <div class="tb-wf-rows">${rows}</div>
+      <div class="tb-wf-footer">
+        <button class="btn btn-sm" onclick="TaskBoard.wfAdd()"${wf.stages.length >= 10 ? ' disabled' : ''}>+ Add stage</button>
+        <button class="btn btn-sm" onclick="TaskBoard.wfRecommend()" title="Pick stages from this project's skills by name and description — no AI">Recommend</button>
+      </div>`;
+  },
+
+  /** Update one field; typing (quiet) keeps focus, so it does not re-render. */
+  wfSet(i, field, value, quiet) {
+    const s = TaskBoard._wf.stages[i];
+    s[field] = value;
+    if (field === 'type') {
+      const first = TaskBoard._wf.available.find(a => a.kind === value);
+      s.ref = value === 'prompt' ? '' : (first ? first.name : '');
+    }
+    if (!quiet) TaskBoard.renderWorkflow();
+  },
+
+  wfMove(i, delta) {
+    const stages = TaskBoard._wf.stages;
+    const [s] = stages.splice(i, 1);
+    stages.splice(i + delta, 0, s);
+    TaskBoard.renderWorkflow();
+  },
+
+  wfRemove(i) {
+    TaskBoard._wf.stages.splice(i, 1);
+    TaskBoard.renderWorkflow();
+  },
+
+  wfAdd() {
+    TaskBoard._wf.stages.push({ title: '', type: 'prompt', ref: '', prompt: '' });
+    TaskBoard.renderWorkflow();
+  },
+
+  wfRecommend() {
+    TaskBoard._wf.stages = TaskBoard._wf.recommended.map(s => Object.assign({}, s));
+    TaskBoard.renderWorkflow();
+    toast('Recommended stages loaded — review them and Save');
+  },
+
+  wfShowDiff() {
+    TaskBoard._wf.diff = true;
+    TaskBoard.renderWorkflow();
+  },
+
+  wfApplyRecommended() {
+    TaskBoard._wf.diff = false;
+    TaskBoard._wf.skillsChanged = false;
+    TaskBoard.wfRecommend();
+  },
+
+  async wfKeepCurrent() {
+    const wf = TaskBoard._wf;
+    try {
+      await api('/api/task-board/lanes/' + encodeURIComponent(wf.slug) + '/workflow/dismiss', { method: 'POST' });
+    } catch (e) {
+      toast(e.message, 'error');
+      return;
+    }
+    wf.diff = false;
+    wf.skillsChanged = false;
+    TaskBoard.renderWorkflow();
+    TaskBoard.load();
+  },
+
+  async saveWorkflow() {
+    const wf = TaskBoard._wf;
+    try {
+      await api('/api/task-board/lanes/' + encodeURIComponent(wf.slug) + '/workflow', { method: 'PUT', body: { stages: wf.stages } });
+    } catch (e) {
+      toast(e.message, 'error');
+      return false;
+    }
+    toast('Workflow saved');
+    TaskBoard.load();
   },
 
   openAddLane() {

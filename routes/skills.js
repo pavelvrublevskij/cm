@@ -7,28 +7,9 @@ const { readFrontmatterFile, writeFrontmatter } = require('../lib/frontmatter');
 const { SKILLS_DIR } = require('../lib/paths');
 const { readUsage, recordUsage } = require('../lib/skill-usage');
 const { listCommands, commandFile } = require('../lib/project-commands');
+const { listSkills } = require('../lib/skill-list');
 
 const router = express.Router();
-
-function listSkills(dir) {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir, { withFileTypes: true })
-    .filter(d => d.isDirectory())
-    .map(d => {
-      try {
-        const skillFile = path.join(dir, d.name, 'SKILL.md');
-        if (!fs.existsSync(skillFile)) return null;
-        const { frontmatter, content } = readFrontmatterFile(skillFile);
-        return {
-          name: d.name,
-          title: frontmatter.name || d.name,
-          description: String(frontmatter.description || ''),
-          frontmatter,
-          content
-        };
-      } catch (_) { return null; }
-    }).filter(Boolean);
-}
 
 router.get('/global', wrapRoute((req, res) => {
   res.json(listSkills(SKILLS_DIR));

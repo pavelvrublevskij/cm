@@ -8,9 +8,10 @@ function send(res, result) {
   res.json(result);
 }
 
-/** GET /api/task-board — all cards and project lanes */
+/** GET /api/task-board — all cards, project lanes, and per-lane workflow status */
 router.get('/', wrapRoute((req, res) => {
-  res.json(board.readBoard());
+  const data = board.readBoard();
+  res.json({ ...data, status: board.laneStatus(data) });
 }));
 
 /** POST /api/task-board/cards — new card in ToDo */
@@ -18,7 +19,7 @@ router.post('/cards', wrapRoute((req, res) => {
   send(res, board.createCard(req.body || {}));
 }));
 
-/** PUT /api/task-board/cards/:id — edit ticket number, title, notes */
+/** PUT /api/task-board/cards/:id — edit title and description */
 router.put('/cards/:id', wrapRoute((req, res) => {
   send(res, board.updateCard(req.params.id, req.body || {}));
 }));
@@ -42,6 +43,21 @@ router.put('/lanes/:slug', wrapRoute((req, res) => {
 /** DELETE /api/task-board/lanes/:slug — only an empty lane */
 router.delete('/lanes/:slug', wrapRoute((req, res) => {
   send(res, board.removeLane(req.params.slug));
+}));
+
+/** GET /api/task-board/lanes/:slug/workflow — stages, available skills/agents, recommended flow */
+router.get('/lanes/:slug/workflow', wrapRoute((req, res) => {
+  send(res, board.getWorkflow(req.params.slug));
+}));
+
+/** PUT /api/task-board/lanes/:slug/workflow — { stages } */
+router.put('/lanes/:slug/workflow', wrapRoute((req, res) => {
+  send(res, board.saveWorkflow(req.params.slug, (req.body || {}).stages));
+}));
+
+/** POST /api/task-board/lanes/:slug/workflow/dismiss — keep the stages after a skill change */
+router.post('/lanes/:slug/workflow/dismiss', wrapRoute((req, res) => {
+  send(res, board.dismissSkillsChange(req.params.slug));
 }));
 
 module.exports = router;

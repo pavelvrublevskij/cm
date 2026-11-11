@@ -81,7 +81,7 @@ const Tour = {
     {
       element: '.nav-item[data-view="task-board"]',
       title: 'Task Board',
-      text: 'Collect tickets for all your projects on one board, one lane per project. Write a description (ticket number, task) and an optional title; drag tickets from ToDo to Ready. ToDo, Ready, Move to PR and Done are fixed; tickets can be deleted from ToDo and Done, their sessions always stay in history.',
+      text: 'Tickets for all your projects on one board. Set up each project\'s workflow from its skills, then drag a ticket to Ready to start it.',
       position: 'right'
     },
     {
@@ -104,6 +104,15 @@ const Tour = {
       position: 'center'
     },
   ],
+
+  /**
+   * Comparable number for a version's major.minor: 2.0.0 → 2000, above every value stored before
+   * major versions counted (plain minors such as 9).
+   */
+  versionKey(version) {
+    const [major, minor] = String(version || '0.0.0').split('.').map(n => parseInt(n, 10));
+    return major * 1000 + minor;
+  },
 
   shouldShow(minor) {
     if (!Number.isFinite(minor)) return false;

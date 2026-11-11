@@ -110,3 +110,13 @@ test('reset clears the stored version', () => {
   assert.equal(store.has(KEY), false);
   assert.equal(Tour.shouldShow(5), true);
 });
+
+test('versionKey orders major.minor and outranks values stored as plain minors', () => {
+  assert.equal(Tour.versionKey('2.0.0'), 2000);
+  assert.equal(Tour.versionKey('1.9.1'), 1009);
+  assert.ok(Tour.versionKey('2.1.0') > Tour.versionKey('2.0.5'));
+  store.set(KEY, '9');
+  assert.equal(Tour.shouldShow(Tour.versionKey('2.0.0')), true);
+  Tour.start(Tour.versionKey('2.0.0'));
+  assert.equal(Tour.shouldShow(Tour.versionKey('2.0.1')), false);
+});

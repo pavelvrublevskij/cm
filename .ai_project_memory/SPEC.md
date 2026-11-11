@@ -90,7 +90,7 @@ Written only through `writeDataJson()` / `safeDataWrite()`, which refuse any pat
 | `artifact-index.json` | Session artifact index |
 | `archived-sessions.json`, `session-colors.json` | Session archive and colors |
 | `skill-usage.json` | Skill usage counts |
-| `task-board.json` | Task board: cards (title, notes = description, project, column, closed, sessionId) and project lanes (`parallel`, later `stages`) |
+| `task-board.json` | Task board: cards (title, notes = description, project, column, closed, sessionId) and project lanes (`parallel`, `stages` = [{ id, title, type skill|agent|prompt, ref, prompt }], `skillsSnapshot`) |
 
 **Settings shared by several launch paths or by server and scripts belong in `app-config.json`**, never in script-local files.
 
@@ -104,7 +104,7 @@ Hash routing (`#view/slug/sessionId[/readonly]`) — the URL survives refresh.
 | Projects | Project list → project tabs: sessions, memory, CLAUDE.md, MCP, settings, agents, skills, output styles, git, artifacts |
 | Sessions | History, rename, color (cards, active bar, session header line), archive, search, conversation with tool-use views, subagents, activity, Files/Scratchpad tabs, in-page terminal, new/resume session, active sessions bar, branch-mismatch warning |
 | Usage | Token/cost stats, charts, period/project breakdowns, marks, hints, AI efficiency insights |
-| Task Board | Tickets across projects: one swimlane per project (project required; optional title + description/ticket number, not both empty; the description becomes the first prompt of the ticket's session); fixed columns ToDo, Ready, Move to PR, Done with the project's workflow stages between Ready and Move to PR; by hand only ToDo ↔ Ready and Move to PR → Done; delete only from ToDo/Done (sessions stay); per-lane Parallel checkbox; lane filter chips |
+| Task Board | Tickets across projects: one swimlane per project (project required; optional title + description/ticket number, not both empty; the description becomes the first prompt of the ticket's session); fixed columns ToDo, Ready, Move to PR, Done with the project's workflow stages between Ready and Move to PR; by hand only ToDo ↔ Ready and Move to PR → Done; delete only from ToDo/Done (sessions stay); per-lane Parallel checkbox; lane filter chips; Compact mode (stages folded into In progress; one-line cards with stage dots). Workflow editor per lane: ordered stages (skill, agent or prompt) from the project's skills/agents, global ones and user-scope or this-project plugin skills; Recommend = free name/description matching (Plan, Implement, Test, Review); lane flags "Skills changed" (compare with recommended or keep current) and "Missing skill"; a stage holding tickets cannot be removed |
 | Health | Checks for broken settings, failing MCP servers, weak skills, oversized CLAUDE.md, stale memories |
 | Settings | Tree editor + raw JSON for `settings.json` |
 | Global CLAUDE.md | Markdown editor with preview |

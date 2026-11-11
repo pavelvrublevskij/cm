@@ -108,6 +108,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between">
             <h2>Task Board</h2>
             <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" id="task-board-compact-btn" onclick="TaskBoard.toggleCompact()" title="Fold workflow stages into one In progress column">Compact</button>
               <button class="btn btn-sm" id="task-board-add-lane-btn" onclick="TaskBoard.openAddLane()">Add project lane</button>
               <button class="btn btn-sm btn-primary" id="task-board-new-btn" onclick="TaskBoard.openEditor(null)">New ticket</button>
             </div>
