@@ -278,6 +278,79 @@ test('after the last stage the ticket goes to Done, claude ends, the next ticket
   assert.match(fs.readFileSync(path.join(dir, SID + '.jsonl'), 'utf-8'), /"customTitle":"Fix login"/);
 });
 
+test('parseMarker reads the condition number of a done line', () => {
+  assert.strictEqual(runner.parseMarker('CM-STAGE: done #2').branch, 2);
+  assert.strictEqual(runner.parseMarker('**CM-STAGE: done #1**').branch, 1);
+  assert.strictEqual(runner.parseMarker('CM-STAGE: done').branch, undefined);
+  assert.strictEqual(runner.parseMarker('CM-STAGE: needs_input #2 which').branch, undefined);
+});
+
+test('stageMessage lists the conditions with their done lines and the otherwise line', () => {
+  const stages = [{ title: 'Triage', type: 'prompt', prompt: 'Look at it', branches: [{ when: 'it is a bug', to: 'done' }, { when: 'docs only', to: 'done' }] }];
+  const msg = runner.stageMessage({}, stages, 0);
+  assert.match(msg, /- if it is a bug: "CM-STAGE: done #1"\n- if docs only: "CM-STAGE: done #2"\n- otherwise: "CM-STAGE: done"/);
+  assert.ok(!msg.includes('end your reply with the line "CM-STAGE: done"'));
+});
+
+/** Triage → Feature → Bugfix, where Triage jumps to Bugfix for a bug and Bugfix can loop back to itself. */
+async function setBranchingStages() {
+  await request(app).put('/api/task-board/lanes/' + SLUG).send({});
+  const res = await request(app).put(`/api/task-board/lanes/${SLUG}/workflow`).send({ stages: [
+    { id: 's-triage00', title: 'Triage', type: 'prompt', prompt: 'Triage', branches: [{ when: 'it is a bug', to: 's-bugfix00' }, { when: 'nothing to do', to: 'done' }] },
+    { id: 's-feature0', title: 'Feature', type: 'prompt', prompt: 'Build it' },
+    { id: 's-bugfix00', title: 'Bugfix', type: 'prompt', prompt: 'Fix it', branches: [{ when: 'tests still fail', to: 's-bugfix00' }] }
+  ] });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+}
+
+async function startTicket() {
+  const card = await addTicket({ notes: 'x' });
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  await hook(0, 'SessionStart', { sessionId: SID });
+  return card;
+}
+
+test('a condition jumps to its target stage and the card shows it', async () => {
+  await setBranchingStages();
+  const card = await startTicket();
+  await hook(0, 'Stop', { lastAssistantMessage: 'A bug.\nCM-STAGE: done #1' });
+  const c = await cardOf(card.id);
+  assert.strictEqual(c.column, 's-bugfix00');
+  assert.deepStrictEqual(c.branch, { from: 'Triage', when: 'it is a bug' });
+  await wait(250);
+  assert.match(pasted(spawned[0].entry)[1], /^\[Task Board · stage 3\/3: Bugfix\]/);
+});
+
+test('without a condition number the ticket goes to the next stage', async () => {
+  await setBranchingStages();
+  const card = await startTicket();
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  const c = await cardOf(card.id);
+  assert.strictEqual(c.column, 's-feature0');
+  assert.strictEqual(c.branch, null);
+});
+
+test('a condition can send the ticket straight to Done', async () => {
+  await setBranchingStages();
+  const card = await startTicket();
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done #2' });
+  assert.strictEqual((await cardOf(card.id)).column, 'done');
+  assert.ok(spawned[0].entry.terminated);
+});
+
+test('a stage that loops stops at the visit limit and waits for the user', async () => {
+  await setBranchingStages();
+  const card = await startTicket();
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done #1' });
+  for (let i = 1; i < runner.MAX_STAGE_VISITS; i++) await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done #1' });
+  assert.strictEqual((await cardOf(card.id)).visits['s-bugfix00'], runner.MAX_STAGE_VISITS);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done #1' });
+  const c = await cardOf(card.id);
+  assert.strictEqual(c.column, 's-bugfix00');
+  assert.strictEqual(c.run.status, 'needs_input');
+  assert.match(c.run.message, /Loop limit: stage "Bugfix" already ran 3 times/);
+});
+
 test('a session that ends on its own sends the ticket back to ToDo, closed', async () => {
   await setStages(['Plan']);
   const card = await addTicket({ notes: 'x' });

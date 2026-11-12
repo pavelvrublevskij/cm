@@ -4,6 +4,7 @@
 
 - **Task Board** — tickets for all projects on one board, one lane per project; drag from ToDo to Ready, delete from ToDo/Done only, with a trash icon on the card.
 - **Project workflows** — stages between Ready and Done built from the project's skills and agents; Recommend picks them for you, and you're told when skills change.
+- **Workflow conditions** — a stage can jump to another stage or to Done when a condition holds ("if it's a bug, go to Bugfix"); loops stop after 3 runs of a stage.
 - **Tickets run by themselves** — moving a ticket to Ready starts a background Claude session that works through the stages; click it to open the live terminal, it waits for you when it needs input. A sidebar count and toasts tell you when tickets need your input and when all are done.
 - **Parallel lanes** — a project with Parallel checked runs up to 3 tickets at once (CM Settings), each in its own git worktree from your current branch; when done it merges in the latest of your branch, resolves conflicts and lands as one local commit. Move it back to ToDo to fix it on the same branch; deleting it from Done removes the worktree.
 - **Favorite projects** — star a project to pin it on top of the sidebar and All Projects; the rest fold into "Other projects".

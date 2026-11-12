@@ -102,6 +102,23 @@ test('validateStages checks titles, types and references, and keeps valid ids', 
   assert.match(stages[2].id, /^s-[0-9a-f]{8}$/);
 });
 
+test('validateStages checks conditions: text, count and a target that is a stage or Done', () => {
+  const stage = (id, branches) => ({ id, title: 'A', type: 'prompt', prompt: 'x', branches });
+  const err = branches => wf.validateStages([stage('s-aaaaaaaa', branches), stage('s-bbbbbbbb')], []).error;
+  assert.match(err('x'), /stage 1: conditions must be a list/);
+  assert.match(err([{ when: ' ', to: 'done' }]), /condition 1: text is required/);
+  assert.match(err([{ when: 'x'.repeat(201), to: 'done' }]), /too long/);
+  assert.match(err([{ when: 'bug', to: 's-cccccccc' }]), /unknown target stage/);
+  assert.match(err(new Array(5).fill({ when: 'a', to: 'done' })), /at most 4 conditions/);
+  const { stages } = wf.validateStages([
+    stage('s-aaaaaaaa', [{ when: ' a bug ', to: 's-bbbbbbbb' }, { when: 'nothing', to: 'done' }]),
+    stage('s-bbbbbbbb', [{ when: 'retry', to: 's-aaaaaaaa' }])
+  ], []);
+  assert.deepStrictEqual(stages[0].branches, [{ when: 'a bug', to: 's-bbbbbbbb' }, { when: 'nothing', to: 'done' }]);
+  assert.deepStrictEqual(stages[1].branches, [{ when: 'retry', to: 's-aaaaaaaa' }]);
+  assert.deepStrictEqual(wf.validateStages([{ title: 'A', type: 'prompt', prompt: 'x' }], []).stages[0].branches, []);
+});
+
 test('missingRefs lists stages whose skill or agent is gone', () => {
   const stages = [{ id: 's1', type: 'skill', ref: 'gone' }, { id: 's2', type: 'prompt', ref: '' }, { id: 's3', type: 'agent', ref: 'tester' }];
   assert.deepStrictEqual(wf.missingRefs(stages, [A('agent', 'tester', '')]), ['s1']);
