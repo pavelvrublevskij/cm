@@ -253,7 +253,7 @@ test('the Stop result is read from the transcript when the hook does not carry i
   assert.strictEqual(runner.lastAssistantText(path.join(HOME, 'outside.jsonl')), '');
 });
 
-test('after the last stage the ticket goes to Done, claude ends, the next ticket starts', async () => {
+test('after the last stage the ticket runs the tests in Finalize, then goes to Done, claude ends, the next ticket starts', async () => {
   await setStages(['Plan']);
   const first = await addTicket({ title: 'Fix login', notes: 'ABC-1' });
   const second = await addTicket({ notes: 'ABC-2' });
@@ -266,6 +266,15 @@ test('after the last stage the ticket goes to Done, claude ends, the next ticket
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, SID + '.jsonl'), JSON.stringify({ type: 'user', message: { content: 'ABC-1' } }) + '\n');
   await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  const f = await cardOf(first.id);
+  assert.deepStrictEqual([f.column, f.run.message], ['finalize', 'Run the tests']);
+  const finalize = pasted(spawned[0].entry)[1];
+  assert.match(finalize, /^\[Task Board · Finalize\]/);
+  assert.match(finalize, /Run the project's tests/);
+  assert.ok(!/git merge/.test(finalize), 'no merge outside a worktree');
+  assert.strictEqual(spawned.length, 1, 'Finalize still holds the lane');
+  assert.deepStrictEqual((await request(app).get('/api/task-board/session/' + SID)).body.stage, { finalize: true, title: 'Finalize' });
   await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
 
   const c = await cardOf(first.id);
@@ -334,6 +343,8 @@ test('a condition can send the ticket straight to Done', async () => {
   await setBranchingStages();
   const card = await startTicket();
   await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done #2' });
+  assert.strictEqual((await cardOf(card.id)).column, 'finalize', 'Done always goes through Finalize');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
   assert.strictEqual((await cardOf(card.id)).column, 'done');
   assert.ok(spawned[0].entry.terminated);
 });
@@ -517,7 +528,7 @@ test('a Parallel git lane runs up to the limit at once, each ticket in a worktre
     assert.strictEqual(s.projectPath, wtDir(card));
     assert.deepStrictEqual(s.opts.args, ['--settings', runner.HOOKS_FILE]);
     const c = await cardOf(card.id);
-    assert.deepStrictEqual([c.worktree, c.baseBranch], ['cm-' + card.id.slice(0, 8), 'feature-x']);
+    assert.deepStrictEqual([c.worktree, c.gitBranch, c.baseBranch], ['cm-' + card.id.slice(0, 8), 'worktree-cm-' + card.id.slice(0, 8), 'feature-x']);
     assert.ok(fs.existsSync(path.join(wtDir(card), 'feature.txt')), 'branched from feature-x, not main');
   }
   assert.strictEqual((await cardOf(cards[2].id)).column, 'ready');
@@ -537,9 +548,10 @@ test('finishing a worktree ticket: claude commits and merges its base in, CM squ
   await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
   await until(() => pasted(spawned[0].entry).length === 2);
   const finishing = pasted(spawned[0].entry)[1];
-  assert.match(finishing, /^\[Task Board · finishing\]/);
+  assert.match(finishing, /^\[Task Board · Finalize\]/);
   assert.match(finishing, /git merge feature-x/);
-  assert.strictEqual((await cardOf(card.id)).column, (await board()).projects[GIT_SLUG].stages[0].id);
+  assert.match(finishing, /Run the project's tests/);
+  assert.strictEqual((await cardOf(card.id)).column, 'finalize');
 
   // The base branch moved meanwhile: claude is sent to merge it in again before anything lands.
   fs.writeFileSync(path.join(GIT_ROOT, 'later.txt'), 'later\n');

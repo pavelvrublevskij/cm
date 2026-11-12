@@ -191,3 +191,12 @@ test('a ticket is edited only in ToDo', async () => {
   assert.match(res.body.error, /only in ToDo/);
   assert.strictEqual((await request(app).get('/api/task-board')).body.cards[0].title, 'Locked');
 });
+
+test('a ticket in Finalize counts as in progress and cannot be moved by hand', async () => {
+  const lib = require('../lib/task-board');
+  const card = await addCard({ title: 'Wrapping up', project: SLUG });
+  lib.mutateCard(card.id, c => { c.column = 'finalize'; c.run = { status: 'needs_input', message: 'tests fail' }; });
+  const res = (await request(app).get('/api/task-board/attention')).body;
+  assert.deepStrictEqual([res.waiting.length, res.active, res.inProgress], [1, 1, 1]);
+  assert.strictEqual((await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'done' })).status, 400);
+});

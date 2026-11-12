@@ -6878,6 +6878,13 @@ body.git-split-dragging {
   color: var(--warning);
   overflow-wrap: anywhere;
 }
+.tb-card-git {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
 .tb-card-branch {
   margin-top: 4px;
   font-size: 11px;

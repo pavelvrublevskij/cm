@@ -30,9 +30,9 @@ test('an empty board says how to start', () => {
 
 test('every lane has the fixed columns around its workflow', () => {
   const ids = Array.from(TaskBoard.laneColumns(BOARD, 'C--work-zeta'), c => c.id);
-  assert.deepStrictEqual(ids, ['todo', 'ready', '', 'done']);
+  assert.deepStrictEqual(ids, ['todo', 'ready', '', 'finalize', 'done']);
   const staged = { projects: { p: { stages: [{ id: 'plan', title: 'Plan' }, { id: 'impl', title: 'Implement' }] } } };
-  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(staged, 'p'), c => c.id), ['todo', 'ready', 'plan', 'impl', 'done']);
+  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(staged, 'p'), c => c.id), ['todo', 'ready', 'plan', 'impl', 'finalize', 'done']);
 });
 
 test('only ToDo ↔ Ready and Done → ToDo are manual moves', () => {
@@ -91,7 +91,7 @@ const STAGED = {
 };
 
 test('compact mode folds the stages into one In progress column', () => {
-  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(STAGED, 'p', true), c => c.title), ['ToDo', 'Ready', 'In progress', 'Done']);
+  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(STAGED, 'p', true), c => c.title), ['ToDo', 'Ready', 'In progress', 'Finalize', 'Done']);
   assert.match(TaskBoard.html(STAGED, [], true), /In progress <span class="tb-col-count">1</);
 });
 
@@ -307,4 +307,19 @@ test('a ticket that took a condition shows it on its card', () => {
   const card = { id: 'r', title: 'T', notes: '', project: 'p', column: 's-b', closed: false, run: { status: 'running' }, branch: { from: 'Triage', when: 'a <bug>' } };
   assert.match(TaskBoard.cardHtml(card, null, false), /tb-card-branch" title="Condition taken after Triage">If a &lt;bug&gt;</);
   assert.ok(!TaskBoard.cardHtml(Object.assign({}, card, { column: 'done' }), null, false).includes('tb-card-branch'));
+});
+
+test('a ticket with a worktree shows its branch on the card, in compact mode on hover, and in the session banner', () => {
+  const card = { id: 'g', title: 'Fix login', notes: '', project: 'p', column: 'done', worktree: 'cm-ab12', gitBranch: 'worktree-cm-ab12' };
+  assert.match(TaskBoard.cardHtml(card, null, false), /class="tb-card-git" title="Worktree branch">&#5833; worktree-cm-ab12</);
+  assert.match(TaskBoard.cardHtml(card, null, true), /title="Fix login\nBranch: worktree-cm-ab12"/);
+  assert.match(TaskBoard.sessionInfoHtml(card, null), /on branch <code>worktree-cm-ab12<\/code>/);
+  assert.strictEqual(TaskBoard.gitBranchOf({ worktree: 'cm-old' }), 'worktree-cm-old', 'tickets from before gitBranch was stored');
+  assert.ok(!TaskBoard.cardHtml({ id: 'n', title: 'x', notes: '', column: 'todo' }, null, false).includes('tb-card-git'));
+});
+
+test('a ticket in Finalize is still in the workflow and says so in the session banner', () => {
+  assert.ok(TaskBoard.inWorkflow({ column: 'finalize' }));
+  assert.ok(!TaskBoard.canMove({ column: 'finalize' }, 'done'));
+  assert.match(TaskBoard.sessionInfoHtml({ title: 'T', notes: '', column: 'finalize' }, { finalize: true, title: 'Finalize' }), /<strong>T<\/strong> · Finalize\./);
 });
