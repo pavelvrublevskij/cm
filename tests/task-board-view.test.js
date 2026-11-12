@@ -95,6 +95,17 @@ test('compact mode folds the stages into one In progress column', () => {
   assert.match(TaskBoard.html(STAGED, [], true), /In progress <span class="tb-col-count">1</);
 });
 
+test('compact is the default until it is switched off', () => {
+  const store = {};
+  context.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } };
+  assert.strictEqual(TaskBoard.compact(), true);
+  store[TaskBoard.COMPACT_KEY] = '0';
+  assert.strictEqual(TaskBoard.compact(), false);
+  store[TaskBoard.COMPACT_KEY] = '1';
+  assert.strictEqual(TaskBoard.compact(), true);
+  delete context.localStorage;
+});
+
 test('full mode shows one column per stage and no step bar', () => {
   const html = TaskBoard.html(STAGED, [], false);
   assert.match(html, /data-column="s-b"/);

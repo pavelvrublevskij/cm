@@ -161,8 +161,8 @@ const TaskBoard = {
   },
 
   compact() {
-    try { return localStorage.getItem(TaskBoard.COMPACT_KEY) === '1'; }
-    catch (_) { return false; }
+    try { return localStorage.getItem(TaskBoard.COMPACT_KEY) !== '0'; }
+    catch (_) { return true; }
   },
 
   toggleCompact() {
