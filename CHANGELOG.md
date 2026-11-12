@@ -7,6 +7,10 @@
 - **Tickets run by themselves** — moving a ticket to Ready starts a background Claude session that works through the stages; click it to open the live terminal, it waits for you when it needs input. A sidebar count and a toast tell you when tickets need your input.
 - **Easier to spot the open session** — its pill in the active sessions bar and its sidebar row get a full accent border.
 
+### Fixes
+
+- **Terminal Skills filter** — Up/Down move through the matches and Enter types the highlighted one.
+
 ## v1.9.1
 
 ### Features

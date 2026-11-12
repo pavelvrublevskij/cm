@@ -11,6 +11,7 @@ const TerminalSkills = {
   _skills: [],
   _slug: null,
   _filter: '',
+  _active: 0,
   _outsideHandler: null,
 
   isOpen() { return TerminalSkills._open; },
@@ -30,6 +31,7 @@ const TerminalSkills = {
     TerminalSkills._open = true;
     TerminalSkills._slug = state.slug;
     TerminalSkills._filter = '';
+    TerminalSkills._active = 0;
     pop.style.display = 'block';
     pop.innerHTML = '<div class="terminal-skills-empty">Loading skills...</div>';
     TerminalSkills._bindOutside();
@@ -59,6 +61,7 @@ const TerminalSkills = {
 
   setFilter(value) {
     TerminalSkills._filter = (value || '').trim().toLowerCase();
+    TerminalSkills._active = 0;
     TerminalSkills.renderLists();
   },
 
@@ -82,12 +85,36 @@ const TerminalSkills = {
     return list.slice().sort((a, b) => a.name.localeCompare(b.name));
   },
 
+  /** Rows in display order — most used first, then all — as the arrow keys walk them. */
+  rows() {
+    const list = TerminalSkills.matching();
+    return TerminalSkills.mostUsed(list).concat(TerminalSkills.alphabetical(list));
+  },
+
+  onKey(ev) {
+    const rows = TerminalSkills.rows();
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (!rows.length) return;
+      const step = ev.key === 'ArrowDown' ? 1 : -1;
+      TerminalSkills._active = Math.max(0, Math.min(rows.length - 1, TerminalSkills._active + step));
+      TerminalSkills.renderLists();
+      const row = document.querySelector('.terminal-skills-item.active');
+      if (row) row.scrollIntoView({ block: 'nearest' });
+    } else if (ev.key === 'Enter') {
+      ev.preventDefault();
+      const item = rows[TerminalSkills._active];
+      if (item) TerminalSkills.use(item.name);
+    }
+  },
+
   render() {
     const pop = document.getElementById('terminal-skills-popover');
     if (!pop) return;
     pop.innerHTML = `
       <input type="text" class="terminal-skills-filter" id="terminal-skills-filter"
-             placeholder="Filter skills and commands..." oninput="TerminalSkills.setFilter(this.value)">
+             placeholder="Filter skills and commands..." oninput="TerminalSkills.setFilter(this.value)"
+             onkeydown="TerminalSkills.onKey(event)">
       <div class="terminal-skills-body" id="terminal-skills-body"></div>`;
     TerminalSkills.renderLists();
   },
@@ -108,15 +135,16 @@ const TerminalSkills = {
     }
 
     const top = TerminalSkills.mostUsed(list);
+    const active = TerminalSkills._active;
     const topHtml = top.length
-      ? `<div class="terminal-skills-section">Most used</div>${top.map(TerminalSkills._rowHtml).join('')}`
+      ? `<div class="terminal-skills-section">Most used</div>${top.map((s, i) => TerminalSkills._rowHtml(s, i === active)).join('')}`
       : '';
     body.innerHTML = topHtml
       + `<div class="terminal-skills-section">All</div>`
-      + TerminalSkills.alphabetical(list).map(TerminalSkills._rowHtml).join('');
+      + TerminalSkills.alphabetical(list).map((s, i) => TerminalSkills._rowHtml(s, top.length + i === active)).join('');
   },
 
-  _rowHtml(item) {
+  _rowHtml(item, active) {
     const count = item.usageCount || 0;
     const badge = count ? `<span class="terminal-skills-count">${count}&times;</span>` : '';
     const kind = item.kind === 'command'
@@ -124,7 +152,7 @@ const TerminalSkills = {
       : '<span class="terminal-skills-kind">skill</span>';
     const desc = item.description
       ? `<span class="terminal-skills-desc">${escapeHtml(item.description)}</span>` : '';
-    return `<button class="terminal-skills-item" onclick="TerminalSkills.useFrom(this)"
+    return `<button class="terminal-skills-item${active ? ' active' : ''}" onclick="TerminalSkills.useFrom(this)"
         data-skill="${escapeAttr(item.name)}" title="Type /${escapeAttr(item.name)} into the terminal">
         <span class="terminal-skills-name">/${escapeHtml(item.name)}</span>${kind}${badge}${desc}
       </button>`;

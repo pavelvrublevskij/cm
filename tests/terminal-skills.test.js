@@ -34,6 +34,7 @@ function el(id) {
 const context = vm.createContext({
   document: {
     getElementById: id => el(id),
+    querySelector: () => null,
     addEventListener: () => { harness.listeners.added++; },
     removeEventListener: () => { harness.listeners.removed++; },
   },
@@ -218,4 +219,58 @@ test('close() clears the popover and drops its document listeners', async () => 
   assert.strictEqual(el('terminal-skills-popover').style.display, 'none');
   assert.strictEqual(el('terminal-skills-popover').innerHTML, '');
   assert.strictEqual(harness.listeners.removed, added, 'listeners left bound');
+});
+
+function key(k) {
+  const ev = { key: k, prevented: false, preventDefault() { this.prevented = true; } };
+  TS.onKey(ev);
+  return ev;
+}
+
+function activeRow() {
+  const m = body().match(/terminal-skills-item active"[\s\S]*?data-skill="([^"]+)"/);
+  return m && m[1];
+}
+
+test('the first match is highlighted on open and after the filter changes', async () => {
+  await TS.open();
+  assert.strictEqual(activeRow(), 'beta', 'first row (most used) not highlighted');
+
+  key('ArrowDown');
+  TS.setFilter('alpha');
+  assert.strictEqual(activeRow(), 'alpha', 'highlight not reset to the first match');
+});
+
+test('arrow keys walk the rows in display order and stop at both ends', async () => {
+  await TS.open();
+  // Rows: most used beta, alpha; then all alpha, beta, zeta.
+  const down = key('ArrowDown');
+  assert.strictEqual(down.prevented, true, 'arrow should not move the input caret');
+  assert.strictEqual(activeRow(), 'alpha');
+
+  key('ArrowDown'); key('ArrowDown'); key('ArrowDown'); key('ArrowDown');
+  assert.strictEqual(activeRow(), 'zeta', 'should stop on the last row');
+
+  for (let i = 0; i < 10; i++) key('ArrowUp');
+  assert.strictEqual(activeRow(), 'beta', 'should stop on the first row');
+});
+
+test('Enter types the highlighted skill', async () => {
+  await TS.open();
+  TS.setFilter('eta');
+  // Rows: most used beta; then all beta, zeta.
+  key('ArrowDown'); key('ArrowDown');
+  key('Enter');
+
+  assert.strictEqual(harness.sent.length, 1);
+  assert.strictEqual(harness.sent[0].d, '/zeta ');
+  assert.strictEqual(TS.isOpen(), false);
+});
+
+test('Enter does nothing when nothing matches', async () => {
+  await TS.open();
+  TS.setFilter('nothing-matches-this');
+  key('ArrowDown');
+  key('Enter');
+  assert.strictEqual(harness.sent.length, 0);
 });

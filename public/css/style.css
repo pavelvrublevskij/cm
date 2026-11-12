@@ -748,7 +748,8 @@ body {
   cursor: pointer;
   font-family: inherit;
 }
-.terminal-skills-item:hover { background: var(--bg-tertiary); }
+.terminal-skills-item:hover,
+.terminal-skills-item.active { background: var(--bg-tertiary); }
 .terminal-skills-name { color: var(--accent); font-family: var(--font-mono); font-size: 12px; }
 .terminal-skills-kind {
   margin-left: 6px;
