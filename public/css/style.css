@@ -1300,6 +1300,52 @@ input[type="radio"] + label {
   font-weight: 500;
 }
 
+/* --- Favorite projects --- */
+
+.fav-star {
+  cursor: pointer;
+  color: var(--text-muted);
+  margin-right: 6px;
+  visibility: hidden;
+}
+
+.fav-star--on {
+  color: var(--accent);
+  visibility: visible;
+}
+
+.nav-item:hover .fav-star,
+.project-card:hover .fav-star,
+.project-group-member:hover .fav-star {
+  visibility: visible;
+}
+
+.fav-star:hover {
+  color: var(--accent);
+}
+
+.project-list .nav-item .fav-star {
+  margin: 0 0 0 auto;
+}
+
+.app.sidebar-collapsed .fav-star {
+  display: none;
+}
+
+.project-section-title {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.project-section-title--toggle {
+  cursor: pointer;
+}
+
 /* Indentation itself is set inline per row, from the member's depth in the group's folder tree. */
 .nav-item--sub {
   padding-left: 28px;

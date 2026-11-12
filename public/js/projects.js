@@ -16,6 +16,7 @@ const ProjectNav = {
 const Projects = {
   data: [],
   _expanded: new Set(),
+  _othersOpen: false,
 
   async load() {
     showLoading('projects-grid');
@@ -28,11 +29,11 @@ const Projects = {
     }
   },
 
-  /** Split Projects.data into auto-detected clusters (with summed stats) and singletons. */
-  _grouped() {
+  /** Split `list` (default Projects.data) into auto-detected clusters (with summed stats) and singletons. */
+  _grouped(list = Projects.data) {
     const byId = {};
     const ungrouped = [];
-    for (const p of Projects.data) {
+    for (const p of list) {
       if (!p.groupId) { ungrouped.push(p); continue; }
       if (!byId[p.groupId]) byId[p.groupId] = { groupId: p.groupId, label: p.groupLabel, members: [] };
       byId[p.groupId].members.push(p);
@@ -50,10 +51,71 @@ const Projects = {
     return { groups, ungrouped };
   },
 
+  /** Starred projects, and the rest. */
+  _split() {
+    return {
+      favorites: Projects.data.filter(p => p.favorite),
+      others: Projects.data.filter(p => !p.favorite)
+    };
+  },
+
+  _gridHtml(list) {
+    const { groups, ungrouped } = Projects._grouped(list);
+    return groups.map(Projects._groupCardHtml).join('') + ungrouped.map(p => Projects._cardHtml(p)).join('');
+  },
+
   renderGrid() {
     const grid = document.getElementById('projects-grid');
-    const { groups, ungrouped } = Projects._grouped();
-    grid.innerHTML = groups.map(Projects._groupCardHtml).join('') + ungrouped.map(Projects._cardHtml).join('');
+    const { favorites, others } = Projects._split();
+    if (!favorites.length) {
+      grid.innerHTML = Projects._gridHtml(Projects.data);
+      return;
+    }
+    const open = Projects._othersOpen;
+    grid.innerHTML = `
+      <div class="project-section-title">&#9733; Favorites</div>
+      ${favorites.map(p => Projects._cardHtml(p, { favoriteLabel: true })).join('')}
+      ${others.length ? `
+        <div class="project-section-title project-section-title--toggle" onclick="Projects.toggleOthers()">
+          <span class="project-group-caret">${open ? '&#9660;' : '&#9654;'}</span> Other projects
+          <span class="badge">${others.length}</span>
+        </div>
+        ${open ? Projects._gridHtml(others) : ''}
+      ` : ''}
+    `;
+  },
+
+  toggleOthers() {
+    Projects._othersOpen = !Projects._othersOpen;
+    Projects.renderGrid();
+    Projects.renderNav();
+  },
+
+  _starHtml(p) {
+    const title = p.favorite ? 'Remove from favorites' : 'Add to favorites';
+    return `<span class="fav-star${p.favorite ? ' fav-star--on' : ''}" onclick="event.stopPropagation(); Projects.toggleFavorite('${p.slug}')" title="${title}">${p.favorite ? '&#9733;' : '&#9734;'}</span>`;
+  },
+
+  /** Name a favorite is listed under: its group's label plus its folder when it belongs to a group. */
+  _favoriteLabel(p) {
+    return p.groupId ? `${p.groupLabel} / ${Projects._memberLabel(p)}` : decodeName(p.slug);
+  },
+
+  async toggleFavorite(slug) {
+    const p = Projects.data.find(x => x.slug === slug);
+    if (!p) return;
+    const favorite = !p.favorite;
+    p.favorite = favorite;
+    Projects.renderGrid();
+    Projects.renderNav();
+    try {
+      await api(`/api/projects/${slug}/favorite`, { method: 'PUT', body: { favorite } });
+    } catch (e) {
+      p.favorite = !favorite;
+      Projects.renderGrid();
+      Projects.renderNav();
+      toast('Could not update favorite: ' + e.message, 'error');
+    }
   },
 
   /** The stats strip shared by a plain project card and a group card — a group just sums its
@@ -73,10 +135,10 @@ const Projects = {
     return `<span class="${cls} clickable-path" onclick="event.stopPropagation(); Projects.openFolder('${p.slug}')" title="Open folder in file explorer">${escapeHtml(p.path)}</span>`;
   },
 
-  _cardHtml(p) {
+  _cardHtml(p, { favoriteLabel } = {}) {
     return `
       <div class="card project-card" onclick="App.navigate('project-detail', { slug: '${p.slug}' })">
-        <div class="project-name">${decodeName(p.slug)}</div>
+        <div class="project-name">${Projects._starHtml(p)}${favoriteLabel ? escapeHtml(Projects._favoriteLabel(p)) : decodeName(p.slug)}</div>
         ${Projects._pathHtml(p, 'project-path')}
         ${Projects._statsHtml(p)}
       </div>
@@ -125,7 +187,7 @@ const Projects = {
     const expanded = Projects._expanded.has(g.groupId);
     const memberRows = Projects._treeRows(Projects._tree(g.members)).map(({ project: m, depth }) => `
       <div class="project-group-member" style="padding-left:${depth * TREE_INDENT_STEP}px" onclick="event.stopPropagation(); App.navigate('project-detail', { slug: '${m.slug}' })">
-        <span class="project-group-member-name">${m.groupPrimary ? '&#9733; ' : ''}${escapeHtml(Projects._memberLabel(m))}</span>
+        <span class="project-group-member-name">${Projects._starHtml(m)}${m.groupPrimary ? '&#9733; ' : ''}${escapeHtml(Projects._memberLabel(m))}</span>
         ${Projects._pathHtml(m, 'project-group-member-path')}
       </div>
     `).join('');
@@ -160,6 +222,7 @@ const Projects = {
         <span class="icon">&#128193;</span>
         <span class="nav-label">${escapeHtml(label)}</span>
         <span class="badge badge-active nav-active-badge" data-slug="${p.slug}" style="display:none"></span>
+        ${Projects._starHtml(p)}
       </div>
     `;
   },
@@ -181,12 +244,32 @@ const Projects = {
     `;
   },
 
+  _navListHtml(list) {
+    const { groups, ungrouped } = Projects._grouped(list);
+    return groups.map(Projects._navGroupHtml).join('')
+      + ungrouped.map(p => Projects._navItemHtml(p, { label: decodeName(p.slug), title: decodeName(p.slug) })).join('');
+  },
+
   renderNav() {
     const list = document.getElementById('project-nav-list');
-    const { groups, ungrouped } = Projects._grouped();
+    const { favorites, others } = Projects._split();
 
-    list.innerHTML = groups.map(Projects._navGroupHtml).join('')
-      + ungrouped.map(p => Projects._navItemHtml(p, { label: decodeName(p.slug), title: decodeName(p.slug) })).join('');
+    if (!favorites.length) {
+      list.innerHTML = Projects._navListHtml(Projects.data);
+    } else {
+      const open = Projects._othersOpen;
+      list.innerHTML = favorites.map(p => {
+        const label = Projects._favoriteLabel(p);
+        return Projects._navItemHtml(p, { label, title: label });
+      }).join('') + (others.length ? `
+        <div class="nav-item nav-item--group-header nav-item--others" onclick="Projects.toggleOthers()" title="Other projects — ${others.length}">
+          <span class="icon project-group-caret">${open ? '&#9660;' : '&#9654;'}</span>
+          <span class="nav-label">Other projects</span>
+          <span class="nav-group-count">${others.length}</span>
+        </div>
+        ${open ? Projects._navListHtml(others) : ''}
+      ` : '');
+    }
     const countEl = document.getElementById('project-nav-count');
     if (countEl) countEl.textContent = Projects.data.length;
     if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();

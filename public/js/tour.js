@@ -98,6 +98,12 @@ const Tour = {
       view: 'projects'
     },
     {
+      element: '#project-nav-list',
+      title: 'Favorite Projects',
+      text: 'Click the star next to a project to pin it on top. The rest fold into "Other projects".',
+      position: 'right'
+    },
+    {
       element: null,
       title: 'Skills in the Terminal',
       text: 'Inside a session, the Skills button next to the terminal restart and close controls lists the skills and slash commands the project itself provides, with your most-used pinned on top. Click one to type it into the running claude, then add arguments yourself.',
