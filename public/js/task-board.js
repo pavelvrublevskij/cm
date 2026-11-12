@@ -235,12 +235,15 @@ const TaskBoard = {
     const notes = card.title ? lines[0] : lines[1];
     const badge = TaskBoard.badgeHtml(card);
     const message = card.run && card.run.message && TaskBoard.inWorkflow(card) ? card.run.message : '';
+    const branch = card.branch && TaskBoard.inWorkflow(card)
+      ? `<div class="tb-card-branch" title="Condition taken after ${escapeAttr(card.branch.from)}">If ${escapeHtml(card.branch.when)}</div>` : '';
     return `<div class="tb-card${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}"
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         ${TaskBoard.deleteIconHtml(card)}
         ${badge ? `<div class="tb-card-head">${badge}</div>` : ''}
         ${heading ? `<div class="tb-card-title">${escapeHtml(heading)}</div>` : ''}
         ${notes ? `<div class="tb-card-notes">${escapeHtml(notes)}</div>` : ''}
+        ${branch}
         ${message ? `<div class="tb-card-run">${escapeHtml(message)}</div>` : ''}
       </div>`;
   },
@@ -480,6 +483,7 @@ const TaskBoard = {
             ${ref}
           </div>
           <textarea rows="2" placeholder="${s.type === 'prompt' ? 'What Claude should do in this stage' : 'Extra instructions (optional)'}" oninput="TaskBoard.wfSet(${i}, 'prompt', this.value, true)">${escapeHtml(s.prompt)}</textarea>
+          ${TaskBoard.branchesHtml(wf, s, i)}
         </div>
         <div class="tb-wf-actions">
           <button class="btn btn-sm" onclick="TaskBoard.wfMove(${i}, -1)"${i === 0 ? ' disabled' : ''} title="Move up">&uarr;</button>
@@ -487,6 +491,29 @@ const TaskBoard = {
           <button class="btn btn-sm" onclick="TaskBoard.wfRemove(${i})" title="Remove stage">&times;</button>
         </div>
       </div>`;
+  },
+
+  /**
+   * A stage's conditions: "If <text> go to <stage | Done>", checked in order by Claude when the
+   * stage is finished. Without a matching condition the ticket goes on to the next stage.
+   */
+  branchesHtml(wf, s, i) {
+    const branches = s.branches || [];
+    const targets = wf.stages.map((t, n) => [t.id, `${n + 1}. ${t.title || 'Untitled'}`]).concat([['done', 'Done']]);
+    const rows = branches.map((b, j) => `<div class="tb-wf-branch">
+        <span class="tb-wf-dim">If</span>
+        <input type="text" value="${escapeAttr(b.when)}" placeholder="condition, e.g. the ticket is a bug" oninput="TaskBoard.wfSetBranch(${i}, ${j}, 'when', this.value, true)">
+        <span class="tb-wf-dim">go to</span>
+        <select onchange="TaskBoard.wfSetBranch(${i}, ${j}, 'to', this.value)">${
+          targets.map(([v, label]) => `<option value="${escapeAttr(v)}"${v === b.to ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')
+        }</select>
+        <button class="btn btn-sm" onclick="TaskBoard.wfRemoveBranch(${i}, ${j})" title="Remove condition">&times;</button>
+      </div>`).join('');
+    const add = branches.length < 4
+      ? `<button class="btn btn-sm tb-wf-branch-add" onclick="TaskBoard.wfAddBranch(${i})" title="Jump to another stage when a condition holds">+ Condition</button>`
+      : '';
+    const otherwise = branches.length ? `<div class="tb-wf-dim tb-wf-branch-else">Otherwise: ${i === wf.stages.length - 1 ? 'Done' : 'next stage'}</div>` : '';
+    return `<div class="tb-wf-branches">${rows}${otherwise}${add}</div>`;
   },
 
   diffHtml(wf) {
@@ -515,7 +542,7 @@ const TaskBoard = {
       ? wf.stages.map((s, i) => TaskBoard.stageRowHtml(wf, s, i)).join('')
       : '<div class="tb-col-empty">No stages yet — use Recommend, or add a stage.</div>';
     return `${top}
-      <div class="tb-wf-hint">After Ready the stages run in this order, each one starting by itself when the previous one is done. Then the ticket goes to Done.</div>
+      <div class="tb-wf-hint">After Ready the stages run in this order, each one starting by itself when the previous one is done. Then the ticket goes to Done. A condition lets Claude jump to another stage instead; one ticket runs the same stage at most 3 times.</div>
       <div class="tb-wf-rows">${rows}</div>
       <div class="tb-wf-footer">
         <button class="btn btn-sm" onclick="TaskBoard.wfAdd()"${wf.stages.length >= 10 ? ' disabled' : ''}>+ Add stage</button>
@@ -541,18 +568,41 @@ const TaskBoard = {
     TaskBoard.renderWorkflow();
   },
 
+  /** Conditions jumping to a removed stage go with it. */
   wfRemove(i) {
-    TaskBoard._wf.stages.splice(i, 1);
+    const [gone] = TaskBoard._wf.stages.splice(i, 1);
+    for (const s of TaskBoard._wf.stages) s.branches = (s.branches || []).filter(b => b.to !== gone.id);
     TaskBoard.renderWorkflow();
   },
 
+  /** A new stage gets its id here, so conditions can point at it before the workflow is saved. */
+  newStageId() {
+    return 's-' + (Math.random().toString(36).slice(2) + '00000000').slice(0, 8);
+  },
+
   wfAdd() {
-    TaskBoard._wf.stages.push({ title: '', type: 'prompt', ref: '', prompt: '' });
+    TaskBoard._wf.stages.push({ id: TaskBoard.newStageId(), title: '', type: 'prompt', ref: '', prompt: '', branches: [] });
+    TaskBoard.renderWorkflow();
+  },
+
+  wfAddBranch(i) {
+    const s = TaskBoard._wf.stages[i];
+    s.branches = (s.branches || []).concat([{ when: '', to: 'done' }]);
+    TaskBoard.renderWorkflow();
+  },
+
+  wfSetBranch(i, j, field, value, quiet) {
+    TaskBoard._wf.stages[i].branches[j][field] = value;
+    if (!quiet) TaskBoard.renderWorkflow();
+  },
+
+  wfRemoveBranch(i, j) {
+    TaskBoard._wf.stages[i].branches.splice(j, 1);
     TaskBoard.renderWorkflow();
   },
 
   wfRecommend() {
-    TaskBoard._wf.stages = TaskBoard._wf.recommended.map(s => Object.assign({}, s));
+    TaskBoard._wf.stages = TaskBoard._wf.recommended.map(s => Object.assign({ id: TaskBoard.newStageId(), branches: [] }, s));
     TaskBoard.renderWorkflow();
     toast('Recommended stages loaded — review them and Save');
   },

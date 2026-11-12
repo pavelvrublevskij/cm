@@ -229,3 +229,45 @@ test('the session banner names the ticket and its stage', () => {
   assert.match(html, /<strong>Fix &lt;login&gt;<\/strong> · stage 2\/3: Build\./);
   assert.match(TaskBoard.sessionInfoHtml({ title: '', notes: 'first line\nmore', column: 's1' }, null), /<strong>first line<\/strong>\./);
 });
+
+test('the workflow editor shows a stage\'s conditions with stage and Done targets', () => {
+  const wf = {
+    slug: 'p', available: [], missing: [], diff: false,
+    stages: [
+      { id: 's-a', title: 'Triage', type: 'prompt', prompt: 'x', branches: [{ when: 'a <bug>', to: 's-b' }] },
+      { id: 's-b', title: 'Fix', type: 'prompt', prompt: 'y', branches: [] }
+    ]
+  };
+  const html = TaskBoard.workflowHtml(wf);
+  assert.strictEqual((html.match(/class="tb-wf-branch"/g) || []).length, 1);
+  assert.match(html, /value="a &lt;bug&gt;"/);
+  assert.match(html, /<option value="s-b" selected>2\. Fix<\/option>/);
+  assert.match(html, /<option value="done">Done<\/option>/);
+  assert.match(html, /Otherwise: next stage/);
+  assert.strictEqual((html.match(/\+ Condition/g) || []).length, 2);
+  wf.stages[0].branches = new Array(4).fill({ when: 'a', to: 'done' });
+  assert.strictEqual((TaskBoard.workflowHtml(wf).match(/\+ Condition/g) || []).length, 1, 'at most 4 conditions');
+});
+
+test('removing a stage drops the conditions that jump to it; new stages get an id', () => {
+  const render = TaskBoard.renderWorkflow;
+  TaskBoard.renderWorkflow = () => {};
+  TaskBoard._wf = { stages: [
+    { id: 's-a', title: 'A', branches: [{ when: 'x', to: 's-b' }, { when: 'y', to: 'done' }] },
+    { id: 's-b', title: 'B', branches: [] }
+  ] };
+  TaskBoard.wfRemove(1);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(TaskBoard._wf.stages[0].branches)), [{ when: 'y', to: 'done' }]);
+  TaskBoard.wfAdd();
+  assert.match(TaskBoard._wf.stages[1].id, /^s-[a-z0-9]{8}$/);
+  TaskBoard.wfAddBranch(1);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(TaskBoard._wf.stages[1].branches)), [{ when: '', to: 'done' }]);
+  TaskBoard._wf = null;
+  TaskBoard.renderWorkflow = render;
+});
+
+test('a ticket that took a condition shows it on its card', () => {
+  const card = { id: 'r', title: 'T', notes: '', project: 'p', column: 's-b', closed: false, run: { status: 'running' }, branch: { from: 'Triage', when: 'a <bug>' } };
+  assert.match(TaskBoard.cardHtml(card, null, false), /tb-card-branch" title="Condition taken after Triage">If a &lt;bug&gt;</);
+  assert.ok(!TaskBoard.cardHtml(Object.assign({}, card, { column: 'done' }), null, false).includes('tb-card-branch'));
+});

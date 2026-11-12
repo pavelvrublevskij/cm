@@ -6717,6 +6717,30 @@ body.git-split-dragging {
   gap: 8px;
   margin-top: 12px;
 }
+.tb-wf-branches {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.tb-wf-branch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  font-size: 12px;
+}
+.tb-wf-branch input {
+  flex: 1;
+  min-width: 0;
+}
+.tb-wf-branch select {
+  flex: 0 1 180px;
+  min-width: 0;
+}
+.tb-wf-branch-else {
+  font-size: 12px;
+}
 .tb-wf-diff {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -6801,5 +6825,11 @@ body.git-split-dragging {
   margin-top: 4px;
   font-size: 11px;
   color: var(--warning);
+  overflow-wrap: anywhere;
+}
+.tb-card-branch {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--accent);
   overflow-wrap: anywhere;
 }
