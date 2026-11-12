@@ -66,9 +66,16 @@ router.post('/hook', wrapRoute((req, res) => {
   res.json(result);
 }));
 
-/** DELETE /api/task-board/cards/:id — only from ToDo or Done; the card's session stays in history */
-router.delete('/cards/:id', wrapRoute((req, res) => {
-  send(res, board.deleteCard(req.params.id));
+/**
+ * DELETE /api/task-board/cards/:id — only from ToDo or Done; the card's session stays in history.
+ * Deleting a Done ticket also removes its worktree and branch: { ok, warning } when they had to stay.
+ */
+router.delete('/cards/:id', wrapRoute(async (req, res) => {
+  const result = board.deleteCard(req.params.id);
+  if (result.error || result.notFound) return send(res, result);
+  const { card } = result;
+  const warning = card.column === 'done' && card.worktree ? await runner.removeWorktree(card) : '';
+  res.json({ ok: true, warning });
 }));
 
 /** PUT /api/task-board/lanes/:slug — add a project lane or change its settings ({ parallel }) */

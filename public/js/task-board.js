@@ -7,7 +7,7 @@ const TaskBoard = {
   COMPACT_KEY: 'claude-manager-task-board-compact',
   COLUMN_TITLES: { todo: 'ToDo', ready: 'Ready', done: 'Done' },
   DELETABLE: ['todo', 'done'],
-  USER_MOVES: { todo: ['ready'], ready: ['todo'] },
+  USER_MOVES: { todo: ['ready'], ready: ['todo'], done: ['todo'] },
   RUN_LABELS: { starting: 'starting', running: 'running', needs_input: 'needs input', conflict: 'conflict' },
   board: { cards: [], projects: {}, status: {} },
   attention: [],
@@ -400,18 +400,28 @@ const TaskBoard = {
   confirmDelete(id) {
     openModal({
       title: 'Delete ticket?',
-      body: '<p>The ticket is removed from the board. Its session, if any, stays in the session history.</p>',
+      body: TaskBoard.deleteMessageHtml(TaskBoard.findCard(id) || {}),
       buttons: [{ label: 'Delete', danger: true, onClick: async () => {
+        let res;
         try {
-          await api('/api/task-board/cards/' + encodeURIComponent(id), { method: 'DELETE' });
+          res = await api('/api/task-board/cards/' + encodeURIComponent(id), { method: 'DELETE' });
         } catch (e) {
           toast(e.message, 'error');
           return;
         }
+        if (res.warning) toast(res.warning, 'warning');
         await TaskBoard.load();
       } }]
     });
     return true;
+  },
+
+  /** A Done ticket with a worktree takes its worktree and branch with it; the session always stays. */
+  deleteMessageHtml(card) {
+    const worktree = card.column === 'done' && card.worktree
+      ? ` Its worktree <code>.claude/worktrees/${escapeHtml(card.worktree)}</code> and branch <code>worktree-${escapeHtml(card.worktree)}</code> are removed too.`
+      : '';
+    return `<p>The ticket is removed from the board.${worktree} Its session, if any, stays in the session history.</p>`;
   },
 
   async setParallel(slug, parallel) {

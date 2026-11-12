@@ -35,13 +35,14 @@ test('every lane has the fixed columns around its workflow', () => {
   assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(staged, 'p'), c => c.id), ['todo', 'ready', 'plan', 'impl', 'done']);
 });
 
-test('only ToDo ↔ Ready are manual moves', () => {
+test('only ToDo ↔ Ready and Done → ToDo are manual moves', () => {
   assert.ok(TaskBoard.canMove({ column: 'todo' }, 'ready'));
   assert.ok(TaskBoard.canMove({ column: 'ready' }, 'todo'));
   assert.ok(!TaskBoard.canMove({ column: 's-b' }, 'done'));
   assert.ok(TaskBoard.canMove({ column: 'done' }, 'done'));
   assert.ok(!TaskBoard.canMove({ column: 'todo' }, 'done'));
-  assert.ok(!TaskBoard.canMove({ column: 'done' }, 'todo'));
+  assert.ok(TaskBoard.canMove({ column: 'done' }, 'todo'));
+  assert.ok(!TaskBoard.canMove({ column: 'done' }, 'ready'));
   assert.ok(!TaskBoard.canMove({ column: 'ready' }, 'done'));
 });
 
@@ -228,4 +229,10 @@ test('the session banner names the ticket and its stage', () => {
   const html = TaskBoard.sessionInfoHtml({ title: 'Fix <login>', notes: '', column: 's1', run: { status: 'running' } }, { index: 1, total: 3, title: 'Build' });
   assert.match(html, /<strong>Fix &lt;login&gt;<\/strong> · stage 2\/3: Build\./);
   assert.match(TaskBoard.sessionInfoHtml({ title: '', notes: 'first line\nmore', column: 's1' }, null), /<strong>first line<\/strong>\./);
+});
+
+test('deleting a Done ticket with a worktree says the worktree and branch go too', () => {
+  assert.match(TaskBoard.deleteMessageHtml({ column: 'done', worktree: 'cm-ab12' }), /<code>\.claude\/worktrees\/cm-ab12<\/code> and branch <code>worktree-cm-ab12<\/code> are removed too/);
+  assert.ok(!TaskBoard.deleteMessageHtml({ column: 'todo', worktree: 'cm-ab12' }).includes('worktree'));
+  assert.ok(!TaskBoard.deleteMessageHtml({ column: 'done' }).includes('worktree'));
 });
