@@ -355,3 +355,114 @@ test('opening a running ticket reveals its session', async () => {
   assert.deepStrictEqual(revealed, [[SLUG, SID]]);
   assert.strictEqual((await request(app).post('/api/task-board/cards/nope/reveal')).status, 404);
 });
+
+// ── Parallel lanes ──────────────────────────────────────────────────────────
+
+const GIT_ROOT = path.join(HOME, 'gitproj');
+const GIT_SLUG = buildSlug(GIT_ROOT);
+
+async function parallelLane(slug, titles) {
+  await request(app).put('/api/task-board/lanes/' + slug).send({ parallel: true });
+  const res = await request(app).put(`/api/task-board/lanes/${slug}/workflow`)
+    .send({ stages: titles.map(t => ({ title: t, type: 'prompt', prompt: 'Do ' + t })) });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+}
+
+async function readyTickets(slug, count) {
+  const cards = [];
+  for (let i = 0; i < count; i++) {
+    const card = (await request(app).post('/api/task-board/cards').send({ project: slug, notes: 'ticket ' + i })).body.card;
+    await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+    cards.push(card);
+  }
+  return cards;
+}
+
+function resetMaxParallel() {
+  const config = JSON.parse(fs.existsSync(paths.APP_CONFIG_FILE) ? fs.readFileSync(paths.APP_CONFIG_FILE, 'utf-8') : '{}');
+  delete config.boardMaxParallel;
+  fs.writeFileSync(paths.APP_CONFIG_FILE, JSON.stringify(config));
+}
+
+test('the parallel limit is a CM setting: 3 by default, 1 to 10', async () => {
+  resetMaxParallel();
+  assert.deepStrictEqual((await request(app).get('/api/task-board/settings')).body, { maxParallel: 3 });
+  for (const bad of [0, 11, 2.5, 'x']) {
+    assert.strictEqual((await request(app).put('/api/task-board/settings').send({ maxParallel: bad })).status, 400);
+  }
+  assert.deepStrictEqual((await request(app).put('/api/task-board/settings').send({ maxParallel: 5 })).body, { maxParallel: 5 });
+  assert.strictEqual((await request(app).get('/api/task-board/settings')).body.maxParallel, 5);
+  resetMaxParallel();
+});
+
+test('a Parallel git lane runs up to the limit at once, each ticket in its own worktree', async () => {
+  fs.mkdirSync(path.join(GIT_ROOT, '.git'), { recursive: true });
+  await request(app).put('/api/task-board/settings').send({ maxParallel: 2 });
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const cards = await readyTickets(GIT_SLUG, 3);
+  assert.strictEqual(spawned.length, 2);
+  for (const [i, s] of spawned.entries()) {
+    assert.deepStrictEqual(s.opts.args, ['--settings', runner.HOOKS_FILE, '--worktree', 'cm-' + cards[i].id.slice(0, 8)]);
+    assert.strictEqual((await cardOf(cards[i].id)).worktree, 'cm-' + cards[i].id.slice(0, 8));
+  }
+  assert.strictEqual((await cardOf(cards[2].id)).column, 'ready');
+
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  assert.strictEqual((await cardOf(cards[0].id)).column, 'done');
+  assert.strictEqual(spawned.length, 3, 'a finished ticket frees its place');
+  assert.strictEqual(spawned[2].opts.env.CM_BOARD_CARD, cards[2].id);
+  resetMaxParallel();
+});
+
+test('a Parallel lane without git runs tickets at once in the project folder', async () => {
+  await parallelLane(SLUG, ['Plan']);
+  await readyTickets(SLUG, 2);
+  assert.strictEqual(spawned.length, 2);
+  for (const s of spawned) {
+    assert.strictEqual(s.projectPath, PROJECT_ROOT);
+    assert.deepStrictEqual(s.opts.args, ['--settings', runner.HOOKS_FILE]);
+  }
+});
+
+test('turning Parallel on starts waiting tickets right away', async () => {
+  await setStages(['Plan']);
+  await readyTickets(SLUG, 2);
+  assert.strictEqual(spawned.length, 1);
+  await request(app).put('/api/task-board/lanes/' + SLUG).send({ parallel: true });
+  assert.strictEqual(spawned.length, 2);
+});
+
+test('a worktree session is tracked under the worktree slug its transcript lives in', async () => {
+  const wtSlug = SLUG + '--claude-worktrees-cm-abc';
+  await setStages(['Plan']);
+  const [card] = await readyTickets(SLUG, 1);
+  await hook(0, 'SessionStart', { sessionId: SID, transcriptPath: path.join(paths.PROJECTS_DIR, wtSlug, SID + '.jsonl') });
+  assert.strictEqual(spawned[0].entry.slug, wtSlug);
+  assert.strictEqual((await cardOf(card.id)).sessionSlug, wtSlug);
+  await request(app).post(`/api/task-board/cards/${card.id}/reveal`);
+  assert.deepStrictEqual(revealed, [[wtSlug, SID]]);
+  assert.strictEqual(runner.sessionSlugOf(path.join(HOME, 'elsewhere', 'x.jsonl')), '');
+  assert.strictEqual(runner.sessionSlugOf(''), '');
+});
+
+test('a running ticket\'s session tells its stage, and hide keeps it running out of sight', async () => {
+  runner._reset();
+  const hidden = [];
+  runner.init({
+    spawn: (projectPath, slug, opts) => { const e = fakeEntry(); e.term.owner = e; spawned.push({ opts, entry: e }); return e; },
+    bind: () => {}, reveal: () => {}, hide: (slug, id) => hidden.push([slug, id]),
+    url: 'http://127.0.0.1:1', idleMs: 1, maxWaitMs: 10, enterDelayMs: 1, submitCheckMs: 1000, readyDelayMs: 0
+  });
+  await setStages(['Plan', 'Build']);
+  const [card] = await readyTickets(SLUG, 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  const info = (await request(app).get('/api/task-board/session/' + SID)).body;
+  assert.strictEqual(info.card.id, card.id);
+  assert.deepStrictEqual(info.stage, { index: 0, total: 2, title: 'Plan' });
+  assert.strictEqual((await request(app).post(`/api/task-board/cards/${card.id}/hide`)).status, 200);
+  assert.deepStrictEqual(hidden, [[SLUG, SID]]);
+  assert.ok(!spawned[0].entry.terminated);
+  assert.strictEqual((await request(app).post('/api/task-board/cards/nope/hide')).status, 404);
+  assert.deepStrictEqual((await request(app).get('/api/task-board/session/unknown-session')).body, { card: null, stage: null });
+});

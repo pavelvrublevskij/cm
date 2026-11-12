@@ -320,6 +320,7 @@ if (require.main === module) {
       spawn: terminalServer.spawnBackground,
       bind: terminalServer.bindSessionId,
       reveal: terminalServer.reveal,
+      hide: terminalServer.hide,
       url: `http://${HOST}:${PORT}`
     });
 

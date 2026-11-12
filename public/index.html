@@ -653,6 +653,7 @@
         <div class="view-header" id="session-detail-header">
           <div class="session-branch-warning" id="session-branch-warning" style="display:none"></div>
           <div class="session-branch-warning" id="session-archived-warning" style="display:none"></div>
+          <div class="session-board-info" id="session-board-info" style="display:none"></div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
             <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
               <button class="btn btn-sm" onclick="Sessions.goBack()">&#8592; Back</button>
@@ -820,6 +821,15 @@
                 <span style="color:var(--text-muted)">seconds</span>
                 <button class="btn btn-sm" onclick="ManagerSettings.saveRefreshRate()">Save</button>
                 <button class="btn btn-sm" onclick="ManagerSettings.resetRefreshRate()">Reset Default (5s)</button>
+              </div>
+
+              <h3 style="margin-top:24px">Task Board</h3>
+              <div class="subtitle" style="margin:0 0 12px">How many tickets a project with Parallel checked runs at once. Other projects run one ticket at a time.</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="number" id="board-max-parallel" min="1" max="10" step="1" style="width:120px">
+                <span style="color:var(--text-muted)">tickets per project</span>
+                <button class="btn btn-sm" onclick="ManagerSettings.saveMaxParallel()">Save</button>
+                <button class="btn btn-sm" onclick="ManagerSettings.saveMaxParallel(3)">Reset Default (3)</button>
               </div>
             </section>
 

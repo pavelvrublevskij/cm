@@ -2035,6 +2035,15 @@ mark.search-highlight {
   padding: 1px 4px;
   border-radius: 3px;
 }
+.session-board-info {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: rgba(56, 139, 253, 0.1);
+  border-left: 3px solid var(--accent);
+  color: var(--text-primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
 .branch-warn-icon {
   font-size: 14px;
   vertical-align: -1px;

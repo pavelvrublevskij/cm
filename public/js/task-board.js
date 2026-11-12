@@ -11,6 +11,7 @@ const TaskBoard = {
   RUN_LABELS: { starting: 'starting', running: 'running', needs_input: 'needs input', conflict: 'conflict' },
   board: { cards: [], projects: {}, status: {} },
   attention: [],
+  _progress: null,
   _drag: null,
   _wf: null,
   _poll: null,
@@ -25,10 +26,13 @@ const TaskBoard = {
   },
 
   async refreshAttention() {
-    let list;
-    try { list = await api('/api/task-board/attention'); } catch (_) { return; }
+    let data;
+    try { data = await api('/api/task-board/attention'); } catch (_) { return; }
+    const list = data.waiting;
     const known = new Set(TaskBoard.attention.map(a => a.id));
     const fresh = list.some(a => !known.has(a.id));
+    if (TaskBoard.allDone(TaskBoard._progress, data)) toast('Task Board: all tickets are done');
+    TaskBoard._progress = { active: data.active, done: data.done };
     TaskBoard.attention = list;
     const badge = document.getElementById('nav-task-board-attention');
     if (badge) {
@@ -38,6 +42,11 @@ const TaskBoard = {
     ActiveSessionsBar._render();
     ActiveSessionsBar._renderSidebar();
     if (fresh && App.currentView !== 'task-board') toast(TaskBoard.attentionMessage(list.length), 'warning');
+  },
+
+  /** The last running or waiting ticket just finished, and it (or another) reached Done. */
+  allDone(before, now) {
+    return !!before && before.active > 0 && now.active === 0 && now.done > before.done;
   },
 
   attentionMessage(count) {
@@ -123,7 +132,25 @@ const TaskBoard = {
   async openSession(card) {
     try { await api('/api/task-board/cards/' + encodeURIComponent(card.id) + '/reveal', { method: 'POST' }); }
     catch (e) { toast(e.message, 'error'); }
-    location.hash = '#session-detail/' + card.project + '/' + card.sessionId;
+    location.hash = '#session-detail/' + (card.sessionSlug || card.project) + '/' + card.sessionId;
+    ActiveSessionsBar.poll();
+  },
+
+  /** In session-detail: a banner naming the ticket and stage when the open session runs a Task Board ticket. */
+  async renderSessionInfo(sessionId) {
+    const el = document.getElementById('session-board-info');
+    if (!el) return;
+    let info = { card: null };
+    try { info = await api('/api/task-board/session/' + encodeURIComponent(sessionId)); } catch (_) { /* no banner */ }
+    if (Sessions.detailState.sessionId !== sessionId) return;
+    el.innerHTML = info.card ? TaskBoard.sessionInfoHtml(info.card, info.stage) : '';
+    el.style.display = info.card ? '' : 'none';
+  },
+
+  sessionInfoHtml(card, stage) {
+    const name = card.title || (card.notes || '').trim().split('\n')[0];
+    const where = stage ? ` · stage ${stage.index + 1}/${stage.total}: ${escapeHtml(stage.title)}` : '';
+    return `&#9638; This session runs the Task Board ticket <strong>${escapeHtml(name)}</strong>${where}. ${TaskBoard.badgeHtml(card)}`;
   },
 
   render() {
@@ -232,7 +259,7 @@ const TaskBoard = {
         <span class="git-count-badge">${cards.length}</span>
         <button class="btn btn-sm tb-workflow-btn" onclick="TaskBoard.openWorkflow('${k}')">Workflow${stages.length ? ' · ' + stages.length : ''}</button>
         ${flags}
-        <label class="tb-parallel" title="Run this project's tickets in parallel, each in its own git worktree">
+        <label class="tb-parallel" title="Run several of this project's tickets at once (limit in CM Settings); in a git project each gets its own worktree, otherwise they share the project folder">
           <input type="checkbox"${lane.parallel ? ' checked' : ''} onchange="TaskBoard.setParallel('${escapeAttr(key)}', this.checked)"> Parallel
         </label>
         ${!cards.length ? `<button class="btn btn-sm tb-lane-remove" onclick="TaskBoard.removeLane('${escapeAttr(key)}')" title="Remove lane">&times;</button>` : ''}
@@ -348,19 +375,24 @@ const TaskBoard = {
       let answered = false;
       openModal({
         title: 'Close Task Board session?',
-        body: `<p>This session runs the ticket <strong>${escapeHtml(name)}</strong>. Closing it stops the workflow and moves the ticket back to ToDo, marked closed.</p>`,
-        cancelLabel: 'Continue',
-        buttons: [{ label: 'Close', danger: true, onClick: async () => {
-          answered = true;
-          try { await api('/api/task-board/cards/' + encodeURIComponent(card.id) + '/stop', { method: 'POST' }); }
-          catch (e) { toast(e.message, 'error'); }
-          resolve(true);
-        } }],
-        onClose: () => {
-          if (answered) return;
-          resolve(false);
-          App.navigate('task-board');
-        }
+        body: `<p>This session runs the ticket <strong>${escapeHtml(name)}</strong>. Hide it to let the ticket keep running in the background, or close it to stop the workflow and move the ticket back to ToDo, marked closed.</p>`,
+        buttons: [
+          { label: 'Close', danger: true, onClick: async () => {
+            answered = true;
+            try { await api('/api/task-board/cards/' + encodeURIComponent(card.id) + '/stop', { method: 'POST' }); }
+            catch (e) { toast(e.message, 'error'); }
+            resolve(true);
+          } },
+          { label: 'Hide and keep running', primary: true, onClick: async () => {
+            answered = true;
+            try { await api('/api/task-board/cards/' + encodeURIComponent(card.id) + '/hide', { method: 'POST' }); }
+            catch (e) { toast(e.message, 'error'); }
+            ActiveSessionsBar._removeFromBar(s => s.sessionId === sessionId);
+            resolve(false);
+            App.navigate('task-board');
+          } }
+        ],
+        onClose: () => { if (!answered) resolve(false); }
       });
     });
   },

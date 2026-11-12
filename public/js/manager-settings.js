@@ -22,6 +22,7 @@ const ManagerSettings = {
       ManagerSettings.renderHistory();
       ManagerSettings.renderTable();
       ManagerSettings.loadRefreshRate();
+      ManagerSettings.loadMaxParallel();
       ManagerSettings.loadAutosave();
       ManagerSettings.loadDefaultReadOnly();
       ManagerSettings.loadAutostart();
@@ -286,6 +287,25 @@ const ManagerSettings = {
     if (typeof Sessions !== 'undefined') Sessions.setRefreshIntervalMs(Sessions.REFRESH_INTERVAL_DEFAULT_MS);
     input.value = String(Math.round((typeof Sessions !== 'undefined' ? Sessions.REFRESH_INTERVAL_DEFAULT_MS : 5000) / 1000));
     toast('Refresh rate reset to default');
+  },
+
+  async loadMaxParallel() {
+    const input = document.getElementById('board-max-parallel');
+    if (!input) return;
+    try { input.value = String((await api('/api/task-board/settings')).maxParallel); }
+    catch (e) { toast('Failed to load Task Board settings: ' + e.message, 'error'); }
+  },
+
+  async saveMaxParallel(value) {
+    const input = document.getElementById('board-max-parallel');
+    if (!input) return;
+    try {
+      const res = await api('/api/task-board/settings', { method: 'PUT', body: { maxParallel: Number(value !== undefined ? value : input.value) } });
+      input.value = String(res.maxParallel);
+      toast('Task Board setting saved');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
   },
 
   loadDefaultReadOnly() {

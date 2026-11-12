@@ -13,7 +13,7 @@ const SID = '99999999-8888-7777-6666-555555555555';
 
 /** A hidden background entry still waiting for its session id, as spawnBackground leaves it. */
 function hiddenEntry() {
-  const entry = terminalServer._injectFakeEntry(SLUG, 'pending-placeholder', { hidden: true });
+  const entry = terminalServer._injectFakeEntry(SLUG, 'pending-placeholder', { hidden: true, background: true });
   entry.sessionId = '';
   return entry;
 }
@@ -39,4 +39,15 @@ test('reveal lists it like any running session', () => {
   assert.ok(terminalServer.getActiveTerminals().some(t => t.sessionId === SID));
   assert.strictEqual(listed(), true);
   assert.strictEqual(terminalServer.reveal(SLUG, SID), false, 'already visible');
+});
+
+test('hide puts a revealed background session back out of the lists; a normal session is never hidden', () => {
+  terminalServer.bindSessionId(hiddenEntry(), SID);
+  terminalServer.reveal(SLUG, SID);
+  assert.strictEqual(terminalServer.hide(SLUG, SID), true);
+  assert.strictEqual(terminalServer.hasActiveTerminal(SLUG, SID), false);
+  assert.strictEqual(listed(), false);
+  assert.strictEqual(terminalServer.hide(SLUG, SID), false, 'already hidden');
+  terminalServer._injectFakeEntry(SLUG, '12121212-3434-5656-7878-909090909090');
+  assert.strictEqual(terminalServer.hide(SLUG, '12121212-3434-5656-7878-909090909090'), false);
 });

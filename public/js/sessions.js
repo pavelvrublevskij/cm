@@ -1008,6 +1008,7 @@ const Sessions = {
     Sessions.renderDetailBranches(merged);
     if (merged.lastGitBranch) Sessions.detailState.lastGitBranch = merged.lastGitBranch;
     Sessions.updateBranchWarning(Sessions.detailState.lastGitBranch || merged.lastGitBranch);
+    if (typeof TaskBoard !== 'undefined') TaskBoard.renderSessionInfo(Sessions.detailState.sessionId);
 
     if (stats && typeof stats.archived !== 'undefined' && stats.archived) {
       Sessions._setDetailArchivedUI(stats.active);

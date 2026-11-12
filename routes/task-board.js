@@ -15,7 +15,7 @@ router.get('/', wrapRoute((req, res) => {
   res.json({ ...data, status: board.laneStatus(data), readyDelayMs: runner.readyDelayMs() });
 }));
 
-/** GET /api/task-board/attention — tickets waiting for the user (needs input or conflict) */
+/** GET /api/task-board/attention — { waiting: tickets that need the user, active: tickets in Ready or a stage, done } */
 router.get('/attention', wrapRoute((req, res) => {
   res.json(board.attention(board.readBoard()));
 }));
@@ -48,9 +48,15 @@ router.post('/cards/:id/reveal', wrapRoute((req, res) => {
   send(res, runner.reveal(req.params.id));
 }));
 
-/** GET /api/task-board/session/:sessionId — the running ticket this session belongs to, if any */
+/** POST /api/task-board/cards/:id/hide — hide the opened session again; the ticket keeps running */
+router.post('/cards/:id/hide', wrapRoute((req, res) => {
+  send(res, runner.hide(req.params.id));
+}));
+
+/** GET /api/task-board/session/:sessionId — the running ticket this session belongs to and its stage, if any */
 router.get('/session/:sessionId', wrapRoute((req, res) => {
-  res.json({ card: runner.cardForSession(req.params.sessionId) });
+  const card = runner.cardForSession(req.params.sessionId);
+  res.json({ card, stage: card ? runner.stageOf(card) : null });
 }));
 
 /** POST /api/task-board/hook — events from scripts/board-hook.js, authenticated by the run's token */
@@ -67,7 +73,21 @@ router.delete('/cards/:id', wrapRoute((req, res) => {
 
 /** PUT /api/task-board/lanes/:slug — add a project lane or change its settings ({ parallel }) */
 router.put('/lanes/:slug', wrapRoute((req, res) => {
-  send(res, board.setLane(req.params.slug, req.body || {}));
+  const result = board.setLane(req.params.slug, req.body || {});
+  send(res, result);
+  if (!result.error && !result.notFound) runner.schedule();
+}));
+
+/** GET /api/task-board/settings — { maxParallel }: tickets a Parallel lane runs at once */
+router.get('/settings', wrapRoute((req, res) => {
+  res.json({ maxParallel: board.maxParallel() });
+}));
+
+/** PUT /api/task-board/settings — { maxParallel } */
+router.put('/settings', wrapRoute((req, res) => {
+  const result = board.setMaxParallel((req.body || {}).maxParallel);
+  send(res, result);
+  if (!result.error) runner.schedule();
 }));
 
 /** DELETE /api/task-board/lanes/:slug — only an empty lane */

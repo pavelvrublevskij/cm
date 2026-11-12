@@ -215,3 +215,17 @@ test('attention: the toast counts waiting tickets and a waiting session gets its
   assert.strictEqual(TaskBoard.attentionBadgeHtml('s2'), '');
   TaskBoard.attention = [];
 });
+
+test('all done: only when the last running ticket finishes into Done', () => {
+  assert.ok(TaskBoard.allDone({ active: 2, done: 1 }, { active: 0, done: 3 }));
+  assert.ok(!TaskBoard.allDone(null, { active: 0, done: 3 }), 'not on the first check');
+  assert.ok(!TaskBoard.allDone({ active: 1, done: 1 }, { active: 0, done: 1 }), 'stopped, not done');
+  assert.ok(!TaskBoard.allDone({ active: 2, done: 1 }, { active: 1, done: 2 }), 'one still running');
+  assert.ok(!TaskBoard.allDone({ active: 0, done: 1 }, { active: 0, done: 2 }));
+});
+
+test('the session banner names the ticket and its stage', () => {
+  const html = TaskBoard.sessionInfoHtml({ title: 'Fix <login>', notes: '', column: 's1', run: { status: 'running' } }, { index: 1, total: 3, title: 'Build' });
+  assert.match(html, /<strong>Fix &lt;login&gt;<\/strong> · stage 2\/3: Build\./);
+  assert.match(TaskBoard.sessionInfoHtml({ title: '', notes: 'first line\nmore', column: 's1' }, null), /<strong>first line<\/strong>\./);
+});
