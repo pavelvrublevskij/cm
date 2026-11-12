@@ -32,6 +32,7 @@ beforeEach(() => {
     decodeName: s => s,
     treeIndent: d => d * 14,
     TREE_INDENT_STEP: 14,
+    TREE_INDENT_ROOT: 20,
     api: async () => ({ ok: true }),
     toast: () => {}
   });
@@ -110,4 +111,67 @@ test('a starred group member is listed with its group label', () => {
     project('wt', { groupId: 'g', groupLabel: 'repo', groupRelPath: 'wt' })
   ]);
   assert.ok(els['project-nav-list'].innerHTML.includes('repo / main'));
+});
+
+function nested() {
+  return [
+    project('main', { groupId: 'g', groupLabel: 'repo', groupPrimary: true }),
+    project('svc', { groupId: 'g', groupLabel: 'repo', groupParentSlug: 'main', groupRelPath: 'svc' }),
+    project('deep', { groupId: 'g', groupLabel: 'repo', groupParentSlug: 'svc', groupRelPath: 'deep' }),
+    project('other')
+  ];
+}
+
+test('starring a parent lists its nested projects under it in Favorites, not under Other projects', () => {
+  const data = nested();
+  data[0].favorite = true;
+  render(data);
+  const nav = els['project-nav-list'].innerHTML;
+  const navFav = nav.slice(0, nav.indexOf('Other projects'));
+  assert.ok(navFav.indexOf('data-slug="main"') < navFav.indexOf('data-slug="svc"'));
+  assert.ok(navFav.indexOf('data-slug="svc"') < navFav.indexOf('data-slug="deep"'));
+  assert.ok(navFav.includes('--tree-indent:34px'), 'child is nested one level under the favorite');
+  assert.ok(navFav.includes('--tree-indent:48px'), 'grandchild is nested one level deeper');
+  assert.ok(!nav.includes('data-slug="other"'), 'unrelated project stays folded');
+  const grid = els['projects-grid'].innerHTML;
+  const gridFav = grid.slice(0, grid.indexOf('Other projects'));
+  assert.ok(gridFav.includes("slug: 'svc'") && gridFav.includes("slug: 'deep'"));
+  assert.ok(grid.includes('<span class="badge">1</span>'), 'only the unrelated project is left in Other projects');
+});
+
+test('nested projects keep their own unfilled star under a starred parent', () => {
+  const data = nested();
+  data[0].favorite = true;
+  render(data);
+  const nav = els['project-nav-list'].innerHTML;
+  assert.strictEqual((nav.match(/fav-star--on/g) || []).length, 1);
+});
+
+test('unstarring the parent moves its nested projects back to Other projects', async () => {
+  const data = nested();
+  data[0].favorite = true;
+  data[3].favorite = true;
+  render(data);
+  await context.Projects.toggleFavorite('main');
+  const nav = els['project-nav-list'].innerHTML;
+  assert.ok(!nav.includes('data-slug="svc"') && !nav.includes('data-slug="deep"'));
+});
+
+test('starring only a child lists that child and its own nested projects, not its parent', () => {
+  const data = nested();
+  data[1].favorite = true;
+  render(data);
+  const nav = els['project-nav-list'].innerHTML;
+  assert.ok(nav.includes('repo / svc'));
+  assert.ok(nav.includes('data-slug="deep"'));
+  assert.ok(!nav.includes('data-slug="main"'));
+});
+
+test('a starred child under a starred parent is listed once, nested under the parent', () => {
+  const data = nested();
+  data[0].favorite = true;
+  data[1].favorite = true;
+  render(data);
+  const nav = els['project-nav-list'].innerHTML;
+  assert.strictEqual((nav.match(/data-slug="svc"/g) || []).length, 2, 'one row plus its active badge');
 });

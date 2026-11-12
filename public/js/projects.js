@@ -51,12 +51,36 @@ const Projects = {
     return { groups, ungrouped };
   },
 
-  /** Starred projects, and the rest. */
+  /** Projects above `p` in its group's tree, nearest first. */
+  _ancestors(p) {
+    const out = [];
+    const bySlug = slug => Projects.data.find(x => x.slug === slug);
+    for (let a = bySlug(p.groupParentSlug); a; a = bySlug(a.groupParentSlug)) out.push(a);
+    return out;
+  },
+
+  /** Starred, or nested under a starred project. */
+  _inFavorites(p) {
+    return p.favorite || Projects._ancestors(p).some(a => a.favorite);
+  },
+
+  /** Favorites (starred projects plus everything nested under them), and the rest. */
   _split() {
     return {
-      favorites: Projects.data.filter(p => p.favorite),
-      others: Projects.data.filter(p => !p.favorite)
+      favorites: Projects.data.filter(Projects._inFavorites),
+      others: Projects.data.filter(p => !Projects._inFavorites(p))
     };
+  },
+
+  /** Each starred project not already nested under another starred one, with the tree rows of
+   *  the projects nested under it. */
+  _favoriteEntries() {
+    return Projects.data
+      .filter(p => p.favorite && !Projects._ancestors(p).some(a => a.favorite))
+      .map(p => ({
+        project: p,
+        children: Projects._treeRows(Projects._tree(Projects.data.filter(m => Projects._ancestors(m).includes(p))))
+      }));
   },
 
   _gridHtml(list) {
@@ -74,7 +98,7 @@ const Projects = {
     const open = Projects._othersOpen;
     grid.innerHTML = `
       <div class="project-section-title">&#9733; Favorites</div>
-      ${favorites.map(p => Projects._cardHtml(p, { favoriteLabel: true })).join('')}
+      ${Projects._favoriteEntries().map(({ project, children }) => Projects._cardHtml(project, { favoriteLabel: true, children })).join('')}
       ${others.length ? `
         <div class="project-section-title project-section-title--toggle" onclick="Projects.toggleOthers()">
           <span class="project-group-caret">${open ? '&#9660;' : '&#9654;'}</span> Other projects
@@ -135,12 +159,13 @@ const Projects = {
     return `<span class="${cls} clickable-path" onclick="event.stopPropagation(); Projects.openFolder('${p.slug}')" title="Open folder in file explorer">${escapeHtml(p.path)}</span>`;
   },
 
-  _cardHtml(p, { favoriteLabel } = {}) {
+  _cardHtml(p, { favoriteLabel, children = [] } = {}) {
     return `
       <div class="card project-card" onclick="App.navigate('project-detail', { slug: '${p.slug}' })">
         <div class="project-name">${Projects._starHtml(p)}${favoriteLabel ? escapeHtml(Projects._favoriteLabel(p)) : decodeName(p.slug)}</div>
         ${Projects._pathHtml(p, 'project-path')}
         ${Projects._statsHtml(p)}
+        ${children.length ? `<div class="project-group-members">${children.map(Projects._memberRowHtml).join('')}</div>` : ''}
       </div>
     `;
   },
@@ -183,14 +208,18 @@ const Projects = {
     return out;
   },
 
-  _groupCardHtml(g) {
-    const expanded = Projects._expanded.has(g.groupId);
-    const memberRows = Projects._treeRows(Projects._tree(g.members)).map(({ project: m, depth }) => `
+  _memberRowHtml({ project: m, depth }) {
+    return `
       <div class="project-group-member" style="padding-left:${depth * TREE_INDENT_STEP}px" onclick="event.stopPropagation(); App.navigate('project-detail', { slug: '${m.slug}' })">
         <span class="project-group-member-name">${Projects._starHtml(m)}${m.groupPrimary ? '&#9733; ' : ''}${escapeHtml(Projects._memberLabel(m))}</span>
         ${Projects._pathHtml(m, 'project-group-member-path')}
       </div>
-    `).join('');
+    `;
+  },
+
+  _groupCardHtml(g) {
+    const expanded = Projects._expanded.has(g.groupId);
+    const memberRows = Projects._treeRows(Projects._tree(g.members)).map(Projects._memberRowHtml).join('');
 
     return `
       <div class="card project-card project-card--group">
@@ -213,10 +242,11 @@ const Projects = {
   },
 
   /** One project row in the sidebar. `depth` is its level in a group's tree; omit it for an
-   *  ungrouped project, which sits at the list's own base indent. */
-  _navItemHtml(p, { label, title, depth }) {
-    const indent = depth === undefined ? '' : ` style="--tree-indent:${treeIndent(depth)}px"`;
-    const cls = depth === undefined ? 'nav-item' : 'nav-item nav-item--sub';
+   *  ungrouped project, which sits at the list's own base indent. `px` overrides the indent the
+   *  depth would give. */
+  _navItemHtml(p, { label, title, depth, px = depth === undefined ? undefined : treeIndent(depth) }) {
+    const indent = px === undefined ? '' : ` style="--tree-indent:${px}px"`;
+    const cls = px === undefined ? 'nav-item' : 'nav-item nav-item--sub';
     return `
       <div class="${cls}" data-slug="${p.slug}"${indent} onclick="App.navigate('project-detail', { slug: '${p.slug}' })" title="${escapeAttr(title)}">
         <span class="icon">&#128193;</span>
@@ -258,9 +288,12 @@ const Projects = {
       list.innerHTML = Projects._navListHtml(Projects.data);
     } else {
       const open = Projects._othersOpen;
-      list.innerHTML = favorites.map(p => {
+      list.innerHTML = Projects._favoriteEntries().map(({ project: p, children }) => {
         const label = Projects._favoriteLabel(p);
-        return Projects._navItemHtml(p, { label, title: label });
+        return Projects._navItemHtml(p, { label, title: label })
+          + children.map(({ project: c, depth }) => Projects._navItemHtml(c, {
+            label: Projects._memberLabel(c), title: c.path, px: TREE_INDENT_ROOT + (depth + 1) * TREE_INDENT_STEP
+          })).join('');
       }).join('') + (others.length ? `
         <div class="nav-item nav-item--group-header nav-item--others" onclick="Projects.toggleOthers()" title="Other projects — ${others.length}">
           <span class="icon project-group-caret">${open ? '&#9660;' : '&#9654;'}</span>
