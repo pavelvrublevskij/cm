@@ -5875,6 +5875,35 @@ body.git-split-dragging {
   box-shadow: inset 3px 0 0 var(--session-color);
 }
 
+/* Open session: full accent ring, declared after --colored so it wins over the session color */
+.asb-group:has(.asb-pill--current) {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.asb-pill.asb-pill--current {
+  border-left: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.asb-pill.asb-pill--current.asb-pill--colored {
+  box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 3px var(--session-color);
+}
+
+.asb-pill--current .asb-session {
+  font-weight: 700;
+}
+
+.project-active-sub.active {
+  box-shadow: inset 0 0 0 1px var(--accent), inset 3px 0 0 var(--accent);
+  font-weight: 600;
+}
+
+.project-active-sub--colored.active {
+  background: color-mix(in srgb, var(--session-color) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent), inset 3px 0 0 var(--session-color);
+  color: var(--accent);
+}
+
 .session-color-panel { padding: 6px; }
 .session-color-swatches {
   display: grid;
