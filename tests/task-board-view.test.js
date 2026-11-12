@@ -247,3 +247,22 @@ test('deleting a Done ticket with a worktree says the worktree and branch go too
   assert.ok(!TaskBoard.deleteMessageHtml({ column: 'todo', worktree: 'cm-ab12' }).includes('worktree'));
   assert.ok(!TaskBoard.deleteMessageHtml({ column: 'done' }).includes('worktree'));
 });
+
+test('the sidebar shows how many tickets are in workflow progress, hidden at zero', async () => {
+  const badges = { 'nav-task-board-attention': { style: {} }, 'nav-task-board-progress': { style: {} } };
+  const progress = badges['nav-task-board-progress'];
+  Object.assign(context, {
+    document: { getElementById: id => badges[id] },
+    ActiveSessionsBar: { _render() {}, _renderSidebar() {} },
+    App: { currentView: 'task-board' },
+    toast() {}
+  });
+  context.api = async () => ({ waiting: [], active: 3, inProgress: 2, done: 0 });
+  await TaskBoard.refreshAttention();
+  assert.strictEqual(progress.textContent, 2);
+  assert.strictEqual(progress.style.display, '');
+  context.api = async () => ({ waiting: [], active: 0, inProgress: 0, done: 0 });
+  await TaskBoard.refreshAttention();
+  assert.strictEqual(progress.style.display, 'none');
+  TaskBoard._progress = null;
+});

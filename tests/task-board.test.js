@@ -169,6 +169,7 @@ test('attention lists only open tickets in a stage that need input or hit a conf
   const blocked = await put('block', stage, 'conflict');
   await put('busy', stage, 'running');
   await put('stopped', stage, 'needs_input', true);
+  await put('queued', 'ready', 'waiting');
   const res = await request(app).get('/api/task-board/attention');
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(res.body, {
@@ -176,7 +177,8 @@ test('attention lists only open tickets in a stage that need input or hit a conf
       { id: asking.id, project: SLUG, sessionId: 'sid-ask', status: 'needs_input', message: 'why ask' },
       { id: blocked.id, project: SLUG, sessionId: 'sid-block', status: 'conflict', message: 'why block' }
     ],
-    active: 3,
+    active: 4,
+    inProgress: 3,
     done: 0
   });
 });

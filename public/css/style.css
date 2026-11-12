@@ -131,6 +131,11 @@ body {
   color: #fff;
 }
 
+.app.sidebar-collapsed .nav-item .badge.badge-active#nav-task-board-progress {
+  top: auto;
+  bottom: 4px;
+}
+
 .app.sidebar-collapsed .nav-section-title {
   height: 1px;
   padding: 0;

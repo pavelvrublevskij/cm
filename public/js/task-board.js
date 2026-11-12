@@ -39,6 +39,11 @@ const TaskBoard = {
       badge.textContent = list.length;
       badge.style.display = list.length ? '' : 'none';
     }
+    const progress = document.getElementById('nav-task-board-progress');
+    if (progress) {
+      progress.textContent = data.inProgress;
+      progress.style.display = data.inProgress ? '' : 'none';
+    }
     ActiveSessionsBar._render();
     ActiveSessionsBar._renderSidebar();
     if (fresh && App.currentView !== 'task-board') toast(TaskBoard.attentionMessage(list.length), 'warning');

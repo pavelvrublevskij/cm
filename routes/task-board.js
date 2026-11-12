@@ -15,7 +15,7 @@ router.get('/', wrapRoute((req, res) => {
   res.json({ ...data, status: board.laneStatus(data), readyDelayMs: runner.readyDelayMs() });
 }));
 
-/** GET /api/task-board/attention — { waiting: tickets that need the user, active: tickets in Ready or a stage, done } */
+/** GET /api/task-board/attention — { waiting: tickets that need the user, active: tickets in Ready or a stage, inProgress: tickets in a stage, done } */
 router.get('/attention', wrapRoute((req, res) => {
   res.json(board.attention(board.readBoard()));
 }));
