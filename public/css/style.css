@@ -6997,6 +6997,9 @@ body.git-split-dragging {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
+.tb-lane-git {
+  margin-top: 0;
+}
 .tb-card-branch {
   margin-top: 4px;
   font-size: 11px;

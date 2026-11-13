@@ -37,7 +37,7 @@ test('a ticket cannot go to Ready before its project has a workflow', async () =
 test('GET /api/task-board starts empty', async () => {
   const res = await request(app).get('/api/task-board');
   assert.strictEqual(res.status, 200);
-  assert.deepStrictEqual(res.body, { cards: [], projects: {}, status: {}, readyDelayMs: 30000 });
+  assert.deepStrictEqual(res.body, { cards: [], projects: {}, status: {}, projectBranches: {}, readyDelayMs: 30000 });
 });
 
 test('a new card lands in ToDo and adds its project lane', async () => {

@@ -146,8 +146,8 @@ test('a ticket waits its delay in Ready before it starts, and can be taken back 
   const waiting = await cardOf(kept.id);
   assert.strictEqual(waiting.column, 'ready');
   assert.ok(waiting.readyAt);
-  assert.strictEqual((await board()).readyDelayMs, 300);
   assert.strictEqual(spawned.length, 0);
+  assert.strictEqual((await board()).readyDelayMs, 300);
   await wait(500);
   assert.strictEqual(spawned.length, 1);
   assert.strictEqual(spawned[0].opts.env.CM_BOARD_CARD, kept.id);
@@ -553,6 +553,22 @@ test('a Parallel git lane runs up to the limit at once, each ticket in a worktre
   }
   assert.strictEqual((await cardOf(cards[2].id)).column, 'ready');
   resetMaxParallel();
+});
+
+test('the board lists the current git branch of each lane, empty without git', async () => {
+  makeRepo();
+  await request(app).put('/api/task-board/lanes/' + GIT_SLUG).send({});
+  fs.mkdirSync(PROJECT_ROOT, { recursive: true });
+  await request(app).put('/api/task-board/lanes/' + SLUG).send({});
+  // The test HOME sits inside this repo: keep git from finding it above the plain project.
+  process.env.GIT_CEILING_DIRECTORIES = HOME;
+  try {
+    const { projectBranches } = await board();
+    assert.strictEqual(projectBranches[GIT_SLUG], 'feature-x');
+    assert.strictEqual(projectBranches[SLUG], '');
+  } finally {
+    delete process.env.GIT_CEILING_DIRECTORIES;
+  }
 });
 
 test('finishing a worktree ticket: claude commits and merges its base in, CM squashes it into the base and cleans up', async () => {

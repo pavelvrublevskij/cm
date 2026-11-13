@@ -2,6 +2,8 @@ const router = require('express').Router();
 const { wrapRoute } = require('../lib/file-helpers');
 const board = require('../lib/task-board');
 const runner = require('../lib/task-board-runner');
+const { headInfo } = require('../lib/git');
+const { decodeSlug } = require('../lib/slug');
 
 function send(res, result) {
   if (result.notFound) return res.status(404).json({ error: 'Not found' });
@@ -9,10 +11,22 @@ function send(res, result) {
   res.json(result);
 }
 
-/** GET /api/task-board — all cards, project lanes, and per-lane workflow status */
-router.get('/', wrapRoute((req, res) => {
+/** Each lane's current git branch ('' without git or on a detached HEAD): where worktree tickets merge back. */
+async function projectBranches(data) {
+  const slugs = Object.keys(data.projects || {});
+  const branches = await Promise.all(slugs.map(async slug => {
+    const projectPath = decodeSlug(slug);
+    if (!projectPath) return '';
+    const { branch, detached } = await headInfo(projectPath);
+    return detached ? '' : (branch || '');
+  }));
+  return Object.fromEntries(slugs.map((slug, i) => [slug, branches[i]]));
+}
+
+/** GET /api/task-board — all cards, project lanes, per-lane workflow status and current git branch */
+router.get('/', wrapRoute(async (req, res) => {
   const data = board.readBoard();
-  res.json({ ...data, status: board.laneStatus(data), readyDelayMs: runner.readyDelayMs() });
+  res.json({ ...data, status: board.laneStatus(data), projectBranches: await projectBranches(data), readyDelayMs: runner.readyDelayMs() });
 }));
 
 /** GET /api/task-board/attention — { waiting: tickets that need the user, active: tickets in Ready or a stage, inProgress: tickets in a stage, done } */

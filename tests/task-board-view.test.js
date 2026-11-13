@@ -433,3 +433,10 @@ test('a ticket in Finalize is still in the workflow and says so in the session b
   assert.ok(!TaskBoard.canMove({ column: 'finalize' }, 'done'));
   assert.match(TaskBoard.sessionInfoHtml({ title: 'T', notes: '', column: 'finalize' }, { finalize: true, title: 'Finalize' }), /<strong>T<\/strong> · Finalize\./);
 });
+
+test('a lane shows the project branch only when git gives one', () => {
+  const withBranch = Object.assign({}, BOARD, { projectBranches: { 'C--work-zeta': 'feature/<x>', 'C--work-alpha': '' } });
+  assert.match(TaskBoard.laneHtml(withBranch, 'C--work-zeta'), /class="tb-card-git tb-lane-git"[^>]*>&#5833; feature\/&lt;x&gt;</);
+  assert.doesNotMatch(TaskBoard.laneHtml(withBranch, 'C--work-alpha'), /tb-lane-git/);
+  assert.doesNotMatch(TaskBoard.laneHtml(BOARD, 'C--work-zeta'), /tb-lane-git/);
+});

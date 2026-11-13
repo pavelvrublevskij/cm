@@ -274,8 +274,10 @@ const TaskBoard = {
     const k = escapeAttr(key);
     const flags = (status.missing && status.missing.length ? '<span class="tb-flag tb-flag--error" title="A stage uses a skill or agent this project no longer has">Missing skill</span>' : '')
       + (status.skillsChanged ? '<span class="tb-flag" title="Skills or agents changed since the workflow was saved">Skills changed</span>' : '');
+    const projectBranch = (board.projectBranches || {})[key];
     const head = `<div class="tb-lane-head">
         <span class="tb-lane-name">${escapeHtml(decodeName(key))}</span>
+        ${projectBranch ? `<span class="tb-card-git tb-lane-git" title="Project branch: worktree tickets merge into it at Finalize">&#5833; ${escapeHtml(projectBranch)}</span>` : ''}
         <span class="git-count-badge">${cards.length}</span>
         <button class="btn btn-sm tb-workflow-btn" onclick="TaskBoard.openWorkflow('${k}')">Workflow${stages.length ? ' · ' + stages.length : ''}</button>
         ${flags}
