@@ -131,6 +131,11 @@ body {
   color: #fff;
 }
 
+.app.sidebar-collapsed .nav-item .badge.badge-active#nav-task-board-progress {
+  top: auto;
+  bottom: 4px;
+}
+
 .app.sidebar-collapsed .nav-section-title {
   height: 1px;
   padding: 0;
@@ -1293,6 +1298,64 @@ input[type="radio"] + label {
 
 .nav-item--group-header {
   font-weight: 500;
+}
+
+/* --- Favorite projects --- */
+
+.fav-star {
+  cursor: pointer;
+  color: var(--text-muted);
+  margin-right: 6px;
+  visibility: hidden;
+}
+
+.fav-star--on {
+  color: var(--accent);
+  visibility: visible;
+}
+
+.nav-item:hover .fav-star,
+.project-card:hover .fav-star,
+.project-group-member:hover .fav-star {
+  visibility: visible;
+}
+
+.fav-star:hover {
+  color: var(--accent);
+}
+
+.nav-item .icon {
+  position: relative;
+}
+
+.fav-folder-star {
+  position: absolute;
+  right: -2px;
+  top: -4px;
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.project-list .nav-item .fav-star {
+  margin: 0 0 0 auto;
+}
+
+.app.sidebar-collapsed .fav-star {
+  display: none;
+}
+
+.project-section-title {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.project-section-title--toggle {
+  cursor: pointer;
 }
 
 /* Indentation itself is set inline per row, from the member's depth in the group's folder tree. */
@@ -2873,6 +2936,10 @@ mark.search-highlight {
   font-weight: 500;
   animation: slideIn 0.2s ease-out;
   max-width: 360px;
+}
+
+.toast--clickable {
+  cursor: pointer;
 }
 
 .toast-success {
@@ -6897,6 +6964,13 @@ body.git-split-dragging {
   margin-top: 4px;
   font-size: 11px;
   color: var(--warning);
+  overflow-wrap: anywhere;
+}
+.tb-card-git {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 .tb-card-branch {

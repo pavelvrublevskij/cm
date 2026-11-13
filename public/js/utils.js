@@ -27,14 +27,18 @@ async function api(url, opts = {}) {
   return data;
 }
 
-/** Show a toast notification. */
-function toast(message, type = 'success') {
+/** Show a toast notification; `onClick` makes it clickable (a click runs it and closes the toast). */
+function toast(message, type = 'success', { duration = 3000, onClick } = {}) {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
   el.textContent = message;
+  if (onClick) {
+    el.classList.add('toast--clickable');
+    el.addEventListener('click', () => { el.remove(); onClick(); });
+  }
   container.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
+  setTimeout(() => el.remove(), duration);
 }
 
 function stripAnsi(text) {

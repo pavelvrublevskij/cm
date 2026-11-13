@@ -8,6 +8,7 @@ const { PROJECTS_DIR } = require('../lib/paths');
 const { computeGroups } = require('../lib/project-grouping');
 const { listProjectDirs } = require('../lib/project-list');
 const { getProjectArtifacts } = require('../lib/artifact-index');
+const { readFavorites, setFavorite } = require('../lib/project-favorites');
 
 const router = express.Router();
 
@@ -44,6 +45,7 @@ function openFolder(folderPath) {
 }
 
 router.get('/', wrapRoute((req, res) => {
+  const favorites = new Set(readFavorites());
   const projects = listProjectDirs().map(({ slug, path: projectPath }) => {
     const stateDir = path.join(PROJECTS_DIR, slug);
     const memoryDir = path.join(stateDir, 'memory');
@@ -57,7 +59,8 @@ router.get('/', wrapRoute((req, res) => {
       skillsCount: countEntries(path.join(projectPath, '.claude', 'skills'), isDirectory),
       outputStylesCount: countEntries(path.join(projectPath, '.claude', 'output-styles'), isMarkdown),
       hasClaudeMd: fs.existsSync(path.join(projectPath, 'CLAUDE.md')),
-      hasAiMemory: fs.existsSync(path.join(projectPath, '.ai_project_memory'))
+      hasAiMemory: fs.existsSync(path.join(projectPath, '.ai_project_memory')),
+      favorite: favorites.has(slug)
     };
   });
 
@@ -87,6 +90,12 @@ router.get('/:slug/artifacts', wrapRoute((req, res) => {
     });
 
   res.json({ total: artifacts.length, groups: result });
+}));
+
+router.put('/:slug/favorite', wrapRoute((req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  setFavorite(req.params.slug, !!(req.body && req.body.favorite));
+  res.json({ ok: true, favorite: !!(req.body && req.body.favorite) });
 }));
 
 router.post('/:slug/open-folder', wrapRoute((req, res) => {

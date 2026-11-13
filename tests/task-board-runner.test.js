@@ -50,7 +50,8 @@ function startDriver(readyDelayMs = 0) {
     maxWaitMs: 10,
     enterDelayMs: 1,
     submitCheckMs: 1000,
-    readyDelayMs
+    readyDelayMs,
+    cleanupDelayMs: 1
   });
 }
 
@@ -252,7 +253,7 @@ test('the Stop result is read from the transcript when the hook does not carry i
   assert.strictEqual(runner.lastAssistantText(path.join(HOME, 'outside.jsonl')), '');
 });
 
-test('after the last stage the ticket goes to Done, claude ends, the next ticket starts', async () => {
+test('after the last stage the ticket runs the tests in Finalize, then goes to Done, claude ends, the next ticket starts', async () => {
   await setStages(['Plan']);
   const first = await addTicket({ title: 'Fix login', notes: 'ABC-1' });
   const second = await addTicket({ notes: 'ABC-2' });
@@ -265,6 +266,15 @@ test('after the last stage the ticket goes to Done, claude ends, the next ticket
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, SID + '.jsonl'), JSON.stringify({ type: 'user', message: { content: 'ABC-1' } }) + '\n');
   await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  const f = await cardOf(first.id);
+  assert.deepStrictEqual([f.column, f.run.message], ['finalize', 'Run the tests']);
+  const finalize = pasted(spawned[0].entry)[1];
+  assert.match(finalize, /^\[Task Board · Finalize\]/);
+  assert.match(finalize, /Run the project's tests/);
+  assert.ok(!/git merge/.test(finalize), 'no merge outside a worktree');
+  assert.strictEqual(spawned.length, 1, 'Finalize still holds the lane');
+  assert.deepStrictEqual((await request(app).get('/api/task-board/session/' + SID)).body.stage, { finalize: true, title: 'Finalize' });
   await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
 
   const c = await cardOf(first.id);
@@ -333,6 +343,8 @@ test('a condition can send the ticket straight to Done', async () => {
   await setBranchingStages();
   const card = await startTicket();
   await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done #2' });
+  assert.strictEqual((await cardOf(card.id)).column, 'finalize', 'Done always goes through Finalize');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
   assert.strictEqual((await cardOf(card.id)).column, 'done');
   assert.ok(spawned[0].entry.terminated);
 });
@@ -367,7 +379,7 @@ test('the default arrow decides the next stage, and the board orders stages alon
   await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
   assert.strictEqual((await cardOf(card.id)).column, 's-build000');
   await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
-  assert.strictEqual((await cardOf(card.id)).column, 'done');
+  assert.strictEqual((await cardOf(card.id)).column, 'finalize', 'the last default arrow leads through Finalize');
 });
 
 test('a session that ends on its own sends the ticket back to ToDo, closed', async () => {
@@ -488,24 +500,146 @@ test('the parallel limit is a CM setting: 3 by default, 1 to 10', async () => {
   resetMaxParallel();
 });
 
-test('a Parallel git lane runs up to the limit at once, each ticket in its own worktree', async () => {
-  fs.mkdirSync(path.join(GIT_ROOT, '.git'), { recursive: true });
+const { execFileSync } = require('node:child_process');
+const sh = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
+
+/** A real repo checked out on "feature-x" (not the default branch), so worktrees must start from it. */
+function makeRepo() {
+  fs.rmSync(GIT_ROOT, { recursive: true, force: true });
+  fs.mkdirSync(GIT_ROOT, { recursive: true });
+  sh(['init', '-q', '-b', 'main'], GIT_ROOT);
+  sh(['config', 'user.email', 'cm@test.local'], GIT_ROOT);
+  sh(['config', 'user.name', 'CM Test'], GIT_ROOT);
+  fs.writeFileSync(path.join(GIT_ROOT, 'base.txt'), 'base\n');
+  sh(['add', '.'], GIT_ROOT);
+  sh(['commit', '-q', '-m', 'init'], GIT_ROOT);
+  sh(['checkout', '-q', '-b', 'feature-x'], GIT_ROOT);
+  fs.writeFileSync(path.join(GIT_ROOT, 'feature.txt'), 'feature\n');
+  sh(['add', '.'], GIT_ROOT);
+  sh(['commit', '-q', '-m', 'feature work'], GIT_ROOT);
+}
+
+async function until(check, ms = 5000) {
+  const end = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > end) throw new Error('timed out');
+    await wait(20);
+  }
+}
+
+const spawnOf = card => spawned.findIndex(s => s.opts.env.CM_BOARD_CARD === card.id);
+const wtDir = card => path.join(GIT_ROOT, '.claude', 'worktrees', 'cm-' + card.id.slice(0, 8));
+
+/** claude's side of a ticket in its worktree: some committed work. */
+function workIn(card, file) {
+  fs.writeFileSync(path.join(wtDir(card), file), 'ticket\n');
+  sh(['add', file], wtDir(card));
+  sh(['commit', '-q', '-m', 'ticket work'], wtDir(card));
+}
+
+test('a Parallel git lane runs up to the limit at once, each ticket in a worktree from the current branch', async () => {
+  makeRepo();
   await request(app).put('/api/task-board/settings').send({ maxParallel: 2 });
   await parallelLane(GIT_SLUG, ['Plan']);
   const cards = await readyTickets(GIT_SLUG, 3);
-  assert.strictEqual(spawned.length, 2);
-  for (const [i, s] of spawned.entries()) {
-    assert.deepStrictEqual(s.opts.args, ['--settings', runner.HOOKS_FILE, '--worktree', 'cm-' + cards[i].id.slice(0, 8)]);
-    assert.strictEqual((await cardOf(cards[i].id)).worktree, 'cm-' + cards[i].id.slice(0, 8));
+  await until(() => spawned.length === 2);
+  for (const card of cards.slice(0, 2)) {
+    const s = spawned[spawnOf(card)];
+    assert.strictEqual(s.projectPath, wtDir(card));
+    assert.deepStrictEqual(s.opts.args, ['--settings', runner.HOOKS_FILE]);
+    const c = await cardOf(card.id);
+    assert.deepStrictEqual([c.worktree, c.gitBranch, c.baseBranch], ['cm-' + card.id.slice(0, 8), 'worktree-cm-' + card.id.slice(0, 8), 'feature-x']);
+    assert.ok(fs.existsSync(path.join(wtDir(card), 'feature.txt')), 'branched from feature-x, not main');
   }
   assert.strictEqual((await cardOf(cards[2].id)).column, 'ready');
-
-  await hook(0, 'SessionStart', { sessionId: SID });
-  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
-  assert.strictEqual((await cardOf(cards[0].id)).column, 'done');
-  assert.strictEqual(spawned.length, 3, 'a finished ticket frees its place');
-  assert.strictEqual(spawned[2].opts.env.CM_BOARD_CARD, cards[2].id);
   resetMaxParallel();
+});
+
+test('finishing a worktree ticket: claude commits and merges its base in, CM squashes it into the base and cleans up', async () => {
+  runner._reset();
+  startDriver();
+  makeRepo();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  workIn(card, 'ticket.txt');
+
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(() => pasted(spawned[0].entry).length === 2);
+  const finishing = pasted(spawned[0].entry)[1];
+  assert.match(finishing, /^\[Task Board · Finalize\]/);
+  assert.match(finishing, /git merge feature-x/);
+  assert.match(finishing, /Run the project's tests/);
+  assert.strictEqual((await cardOf(card.id)).column, 'finalize');
+
+  // The base branch moved meanwhile: claude is sent to merge it in again before anything lands.
+  fs.writeFileSync(path.join(GIT_ROOT, 'later.txt'), 'later\n');
+  sh(['add', 'later.txt'], GIT_ROOT);
+  sh(['commit', '-q', '-m', 'later on feature-x'], GIT_ROOT);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(() => pasted(spawned[0].entry).length === 3);
+  assert.match((await cardOf(card.id)).run.message, /feature-x has new changes/);
+
+  sh(['merge', '-q', '--no-edit', 'feature-x'], wtDir(card));
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(card.id)).column === 'done');
+  const done = await cardOf(card.id);
+  assert.strictEqual(done.run.message, 'Merged into feature-x');
+  assert.strictEqual(sh(['log', '-1', '--format=%s'], GIT_ROOT), 'ticket 0');
+  assert.strictEqual(sh(['rev-list', '--count', 'HEAD'], GIT_ROOT), '4', 'one squashed commit on top');
+  assert.ok(fs.existsSync(path.join(GIT_ROOT, 'ticket.txt')));
+  assert.ok(spawned[0].entry.terminated);
+  assert.ok(fs.existsSync(wtDir(card)), 'kept for a failed manual test');
+
+  const del = await request(app).delete('/api/task-board/cards/' + card.id);
+  assert.deepStrictEqual(del.body, { ok: true, warning: '' });
+  assert.ok(!fs.existsSync(wtDir(card)));
+  assert.strictEqual(sh(['branch', '--list', 'worktree-cm-*'], GIT_ROOT), '');
+});
+
+test('a Done ticket moved back to ToDo reruns in the same worktree and lands only the fix', async () => {
+  makeRepo();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  workIn(card, 'ticket.txt');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(card.id)).column === 'done');
+
+  assert.strictEqual((await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'todo' })).status, 200);
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  await until(() => spawned.length === 2);
+  assert.strictEqual(spawned[1].projectPath, wtDir(card));
+  await hook(1, 'SessionStart', { sessionId: '22222222-3333-4444-5555-666666666666' });
+  sh(['merge', '-q', '--no-edit', 'feature-x'], wtDir(card));
+  workIn(card, 'fix.txt');
+  await hook(1, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await hook(1, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(card.id)).column === 'done');
+  assert.strictEqual(sh(['rev-list', '--count', 'HEAD'], GIT_ROOT), '4', 'two squashed commits on top');
+  assert.strictEqual(sh(['show', '--name-only', '--format=', 'HEAD'], GIT_ROOT), 'fix.txt', 'only the fix lands');
+});
+
+test('a worktree ticket waits for the user when the project folder left its base branch', async () => {
+  makeRepo();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  workIn(card, 'ticket.txt');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  sh(['checkout', '-q', 'main'], GIT_ROOT);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(card.id)).run.status === 'needs_input');
+  assert.match((await cardOf(card.id)).run.message, /on "main": switch it back to "feature-x"/);
+  assert.ok(!fs.existsSync(path.join(GIT_ROOT, 'ticket.txt')));
+
+  sh(['checkout', '-q', 'feature-x'], GIT_ROOT);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(card.id)).column === 'done');
 });
 
 test('a Parallel lane without git runs tickets at once in the project folder', async () => {

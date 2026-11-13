@@ -98,6 +98,28 @@ test('two unrelated plain directories are not grouped together', async () => {
   assert.strictEqual(res.body.find(p => p.slug === slugB).groupId, null);
 });
 
+test('GET /api/projects marks projects as not favorite by default', async () => {
+  const res = await request(app).get('/api/projects');
+  assert.strictEqual(res.body.find(p => p.slug === 'test-proj-alpha').favorite, false);
+});
+
+test('PUT /api/projects/:slug/favorite stars and unstars a project', async () => {
+  let res = await request(app).put('/api/projects/test-proj-alpha/favorite').send({ favorite: true });
+  assert.strictEqual(res.status, 200);
+  res = await request(app).get('/api/projects');
+  assert.strictEqual(res.body.find(p => p.slug === 'test-proj-alpha').favorite, true);
+
+  res = await request(app).put('/api/projects/test-proj-alpha/favorite').send({ favorite: false });
+  assert.strictEqual(res.status, 200);
+  res = await request(app).get('/api/projects');
+  assert.strictEqual(res.body.find(p => p.slug === 'test-proj-alpha').favorite, false);
+});
+
+test('PUT /api/projects/:slug/favorite rejects an unsafe slug', async () => {
+  const res = await request(app).put('/api/projects/..%2Fx/favorite').send({ favorite: true });
+  assert.strictEqual(res.status, 400);
+});
+
 after(() => {
   fs.rmSync(FIXTURE_ROOT, { recursive: true, force: true });
 });

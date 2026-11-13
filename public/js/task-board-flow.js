@@ -284,6 +284,7 @@ const TaskBoardFlow = {
         <p><strong>Click</strong> a stage to edit it, or an arrow to set its condition.</p>
         <p><strong>Drag</strong> a stage to move it. Drag from the <span class="tbf-dot"></span> on its right edge to another stage or Done to draw an arrow.</p>
         <p>The first arrow out of a stage is its default path; more arrows are conditions Claude checks when the stage is done. One ticket runs the same stage at most 3 times.</p>
+        <p>An arrow into Done goes through Finalize first: the tests run, and a worktree ticket commits and merges in its branch.</p>
       </div>`;
   },
 

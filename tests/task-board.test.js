@@ -166,17 +166,20 @@ test('attention lists only open tickets in a stage that need input or hit a conf
   await withWorkflow(SLUG);
   const stage = (await request(app).get('/api/task-board')).body.projects[SLUG].stages[0].id;
   const asking = await put('ask', stage, 'needs_input');
+  lib.mutateCard(asking.id, c => { c.sessionSlug = 'C--work-ask'; });
   const blocked = await put('block', stage, 'conflict');
   await put('busy', stage, 'running');
   await put('stopped', stage, 'needs_input', true);
+  await put('queued', 'ready', 'waiting');
   const res = await request(app).get('/api/task-board/attention');
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(res.body, {
     waiting: [
-      { id: asking.id, project: SLUG, sessionId: 'sid-ask', status: 'needs_input', message: 'why ask' },
-      { id: blocked.id, project: SLUG, sessionId: 'sid-block', status: 'conflict', message: 'why block' }
+      { id: asking.id, project: SLUG, sessionId: 'sid-ask', sessionSlug: 'C--work-ask', status: 'needs_input', message: 'why ask' },
+      { id: blocked.id, project: SLUG, sessionId: 'sid-block', sessionSlug: '', status: 'conflict', message: 'why block' }
     ],
-    active: 3,
+    active: 4,
+    inProgress: 3,
     done: 0
   });
 });
@@ -188,4 +191,13 @@ test('a ticket is edited only in ToDo', async () => {
   assert.strictEqual(res.status, 400);
   assert.match(res.body.error, /only in ToDo/);
   assert.strictEqual((await request(app).get('/api/task-board')).body.cards[0].title, 'Locked');
+});
+
+test('a ticket in Finalize counts as in progress and cannot be moved by hand', async () => {
+  const lib = require('../lib/task-board');
+  const card = await addCard({ title: 'Wrapping up', project: SLUG });
+  lib.mutateCard(card.id, c => { c.column = 'finalize'; c.run = { status: 'needs_input', message: 'tests fail' }; });
+  const res = (await request(app).get('/api/task-board/attention')).body;
+  assert.deepStrictEqual([res.waiting.length, res.active, res.inProgress], [1, 1, 1]);
+  assert.strictEqual((await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'done' })).status, 400);
 });

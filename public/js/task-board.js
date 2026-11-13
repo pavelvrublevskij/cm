@@ -5,10 +5,11 @@
 const TaskBoard = {
   HIDDEN_KEY: 'claude-manager-task-board-hidden',
   COMPACT_KEY: 'claude-manager-task-board-compact',
-  COLUMN_TITLES: { todo: 'ToDo', ready: 'Ready', done: 'Done' },
+  COLUMN_TITLES: { todo: 'ToDo', ready: 'Ready', finalize: 'Finalize', done: 'Done' },
   DELETABLE: ['todo', 'done'],
-  USER_MOVES: { todo: ['ready'], ready: ['todo'] },
+  USER_MOVES: { todo: ['ready'], ready: ['todo'], done: ['todo'] },
   RUN_LABELS: { starting: 'starting', running: 'running', needs_input: 'needs input', conflict: 'conflict' },
+  ATTENTION_TOAST_MS: 15000,
   board: { cards: [], projects: {}, status: {} },
   attention: [],
   _progress: null,
@@ -30,7 +31,7 @@ const TaskBoard = {
     try { data = await api('/api/task-board/attention'); } catch (_) { return; }
     const list = data.waiting;
     const known = new Set(TaskBoard.attention.map(a => a.id));
-    const fresh = list.some(a => !known.has(a.id));
+    const fresh = list.find(a => !known.has(a.id));
     if (TaskBoard.allDone(TaskBoard._progress, data)) toast('Task Board: all tickets are done');
     TaskBoard._progress = { active: data.active, done: data.done };
     TaskBoard.attention = list;
@@ -39,9 +40,19 @@ const TaskBoard = {
       badge.textContent = list.length;
       badge.style.display = list.length ? '' : 'none';
     }
+    const progress = document.getElementById('nav-task-board-progress');
+    if (progress) {
+      progress.textContent = data.inProgress;
+      progress.style.display = data.inProgress ? '' : 'none';
+    }
     ActiveSessionsBar._render();
     ActiveSessionsBar._renderSidebar();
-    if (fresh && App.currentView !== 'task-board') toast(TaskBoard.attentionMessage(list.length), 'warning');
+    if (fresh && App.currentView !== 'task-board') {
+      toast(TaskBoard.attentionMessage(list.length), 'warning', {
+        duration: TaskBoard.ATTENTION_TOAST_MS,
+        onClick: fresh.sessionId ? () => TaskBoard.openSession(fresh) : undefined
+      });
+    }
   },
 
   /** The last running or waiting ticket just finished, and it (or another) reached Done. */
@@ -94,9 +105,9 @@ const TaskBoard = {
     }, ms);
   },
 
-  /** Inside the workflow: past Ready, not yet Done. */
+  /** Inside the workflow: past Ready, not yet Done (its stages, then Finalize). */
   inWorkflow(card) {
-    return !TaskBoard.COLUMN_TITLES[card.column];
+    return card.column === 'finalize' || !TaskBoard.COLUMN_TITLES[card.column];
   },
 
   /**
@@ -149,8 +160,10 @@ const TaskBoard = {
 
   sessionInfoHtml(card, stage) {
     const name = card.title || (card.notes || '').trim().split('\n')[0];
-    const where = stage ? ` · stage ${stage.index + 1}/${stage.total}: ${escapeHtml(stage.title)}` : '';
-    return `&#9638; This session runs the Task Board ticket <strong>${escapeHtml(name)}</strong>${where}. ${TaskBoard.badgeHtml(card)}`;
+    const where = !stage ? '' : stage.finalize ? ' · Finalize' : ` · stage ${stage.index + 1}/${stage.total}: ${escapeHtml(stage.title)}`;
+    const gitBranch = TaskBoard.gitBranchOf(card);
+    const onBranch = gitBranch ? ` on branch <code>${escapeHtml(gitBranch)}</code>` : '';
+    return `&#9638; This session runs the Task Board ticket <strong>${escapeHtml(name)}</strong>${where}${onBranch}. ${TaskBoard.badgeHtml(card)}`;
   },
 
   render() {
@@ -161,8 +174,8 @@ const TaskBoard = {
   },
 
   compact() {
-    try { return localStorage.getItem(TaskBoard.COMPACT_KEY) === '1'; }
-    catch (_) { return false; }
+    try { return localStorage.getItem(TaskBoard.COMPACT_KEY) !== '0'; }
+    catch (_) { return true; }
   },
 
   toggleCompact() {
@@ -199,7 +212,7 @@ const TaskBoard = {
     else if (compact) middle = [{ id: '', title: 'In progress', inProgress: true }];
     else middle = stages.map(s => ({ id: s.id, title: s.title || s.id, stage: true }));
     const fixed = id => ({ id, title: TaskBoard.COLUMN_TITLES[id] });
-    return [fixed('todo'), fixed('ready')].concat(middle, [fixed('done')]);
+    return [fixed('todo'), fixed('ready')].concat(middle, [fixed('finalize'), fixed('done')]);
   },
 
   canMove(card, column) {
@@ -212,7 +225,9 @@ const TaskBoard = {
     const dots = at === -1 ? '' : `<span class="tb-line-steps" title="${escapeAttr(`${stages[at].title} (${at + 1}/${stages.length})`)}">${
       stages.map((s, i) => `<span class="tb-dot${i < at ? ' tb-step--done' : i === at ? ' tb-step--current' : ''}"></span>`).join('')
     }</span>`;
-    return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}" title="${escapeAttr(heading)}"
+    const gitBranch = TaskBoard.gitBranchOf(card);
+    const tip = heading + (gitBranch ? '\nBranch: ' + gitBranch : '');
+    return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}" title="${escapeAttr(tip)}"
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         <span class="tb-line-text">${escapeHtml(heading)}</span>
         ${TaskBoard.badgeHtml(card)}
@@ -237,12 +252,14 @@ const TaskBoard = {
     const message = card.run && card.run.message && TaskBoard.inWorkflow(card) ? card.run.message : '';
     const branch = card.branch && TaskBoard.inWorkflow(card)
       ? `<div class="tb-card-branch" title="Condition taken after ${escapeAttr(card.branch.from)}">If ${escapeHtml(card.branch.when)}</div>` : '';
+    const gitBranch = TaskBoard.gitBranchOf(card);
     return `<div class="tb-card${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}"
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         ${TaskBoard.deleteIconHtml(card)}
         ${badge ? `<div class="tb-card-head">${badge}</div>` : ''}
         ${heading ? `<div class="tb-card-title">${escapeHtml(heading)}</div>` : ''}
         ${notes ? `<div class="tb-card-notes">${escapeHtml(notes)}</div>` : ''}
+        ${gitBranch ? `<div class="tb-card-git" title="Worktree branch">&#5833; ${escapeHtml(gitBranch)}</div>` : ''}
         ${branch}
         ${message ? `<div class="tb-card-run">${escapeHtml(message)}</div>` : ''}
       </div>`;
@@ -317,6 +334,7 @@ const TaskBoard = {
     }
     const projectField = card
       ? formGroup('Project', `<div class="tb-editor-project">${escapeHtml(decodeName(card.project))}</div>`)
+        + (TaskBoard.gitBranchOf(card) ? formGroup('Branch', `<div class="tb-editor-project tb-card-git">${escapeHtml(TaskBoard.gitBranchOf(card))}</div>`) : '')
       : formGroup('Project', frontmatterSelectHtml('tb-project', options, lane || options[0][0]));
     const editable = !card || card.column === 'todo';
     const ro = editable ? '' : ' readonly';
@@ -403,18 +421,33 @@ const TaskBoard = {
   confirmDelete(id) {
     openModal({
       title: 'Delete ticket?',
-      body: '<p>The ticket is removed from the board. Its session, if any, stays in the session history.</p>',
+      body: TaskBoard.deleteMessageHtml(TaskBoard.findCard(id) || {}),
       buttons: [{ label: 'Delete', danger: true, onClick: async () => {
+        let res;
         try {
-          await api('/api/task-board/cards/' + encodeURIComponent(id), { method: 'DELETE' });
+          res = await api('/api/task-board/cards/' + encodeURIComponent(id), { method: 'DELETE' });
         } catch (e) {
           toast(e.message, 'error');
           return;
         }
+        if (res.warning) toast(res.warning, 'warning');
         await TaskBoard.load();
       } }]
     });
     return true;
+  },
+
+  /** The ticket's own branch once it has a worktree (named when the worktree was created). */
+  gitBranchOf(card) {
+    return card.gitBranch || (card.worktree ? 'worktree-' + card.worktree : '');
+  },
+
+  /** A Done ticket with a worktree takes its worktree and branch with it; the session always stays. */
+  deleteMessageHtml(card) {
+    const worktree = card.column === 'done' && card.worktree
+      ? ` Its worktree <code>.claude/worktrees/${escapeHtml(card.worktree)}</code> and branch <code>${escapeHtml(TaskBoard.gitBranchOf(card))}</code> are removed too.`
+      : '';
+    return `<p>The ticket is removed from the board.${worktree} Its session, if any, stays in the session history.</p>`;
   },
 
   async setParallel(slug, parallel) {

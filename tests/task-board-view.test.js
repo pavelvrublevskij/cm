@@ -32,18 +32,19 @@ test('an empty board says how to start', () => {
 
 test('every lane has the fixed columns around its workflow', () => {
   const ids = Array.from(TaskBoard.laneColumns(BOARD, 'C--work-zeta'), c => c.id);
-  assert.deepStrictEqual(ids, ['todo', 'ready', '', 'done']);
+  assert.deepStrictEqual(ids, ['todo', 'ready', '', 'finalize', 'done']);
   const staged = { projects: { p: { stages: [{ id: 'plan', title: 'Plan' }, { id: 'impl', title: 'Implement' }] } } };
-  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(staged, 'p'), c => c.id), ['todo', 'ready', 'plan', 'impl', 'done']);
+  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(staged, 'p'), c => c.id), ['todo', 'ready', 'plan', 'impl', 'finalize', 'done']);
 });
 
-test('only ToDo ↔ Ready are manual moves', () => {
+test('only ToDo ↔ Ready and Done → ToDo are manual moves', () => {
   assert.ok(TaskBoard.canMove({ column: 'todo' }, 'ready'));
   assert.ok(TaskBoard.canMove({ column: 'ready' }, 'todo'));
   assert.ok(!TaskBoard.canMove({ column: 's-b' }, 'done'));
   assert.ok(TaskBoard.canMove({ column: 'done' }, 'done'));
   assert.ok(!TaskBoard.canMove({ column: 'todo' }, 'done'));
-  assert.ok(!TaskBoard.canMove({ column: 'done' }, 'todo'));
+  assert.ok(TaskBoard.canMove({ column: 'done' }, 'todo'));
+  assert.ok(!TaskBoard.canMove({ column: 'done' }, 'ready'));
   assert.ok(!TaskBoard.canMove({ column: 'ready' }, 'done'));
 });
 
@@ -92,8 +93,19 @@ const STAGED = {
 };
 
 test('compact mode folds the stages into one In progress column', () => {
-  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(STAGED, 'p', true), c => c.title), ['ToDo', 'Ready', 'In progress', 'Done']);
+  assert.deepStrictEqual(Array.from(TaskBoard.laneColumns(STAGED, 'p', true), c => c.title), ['ToDo', 'Ready', 'In progress', 'Finalize', 'Done']);
   assert.match(TaskBoard.html(STAGED, [], true), /In progress <span class="tb-col-count">1</);
+});
+
+test('compact is the default until it is switched off', () => {
+  const store = {};
+  context.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } };
+  assert.strictEqual(TaskBoard.compact(), true);
+  store[TaskBoard.COMPACT_KEY] = '0';
+  assert.strictEqual(TaskBoard.compact(), false);
+  store[TaskBoard.COMPACT_KEY] = '1';
+  assert.strictEqual(TaskBoard.compact(), true);
+  delete context.localStorage;
 });
 
 test('full mode shows one column per stage and no step bar', () => {
@@ -348,8 +360,76 @@ test('Recommend loads a chain of stages ending in Done', () => {
   delete context.toast;
 });
 
+test('deleting a Done ticket with a worktree says the worktree and branch go too', () => {
+  assert.match(TaskBoard.deleteMessageHtml({ column: 'done', worktree: 'cm-ab12' }), /<code>\.claude\/worktrees\/cm-ab12<\/code> and branch <code>worktree-cm-ab12<\/code> are removed too/);
+  assert.ok(!TaskBoard.deleteMessageHtml({ column: 'todo', worktree: 'cm-ab12' }).includes('worktree'));
+  assert.ok(!TaskBoard.deleteMessageHtml({ column: 'done' }).includes('worktree'));
+});
+
+test('the sidebar shows how many tickets are in workflow progress, hidden at zero', async () => {
+  const badges = { 'nav-task-board-attention': { style: {} }, 'nav-task-board-progress': { style: {} } };
+  const progress = badges['nav-task-board-progress'];
+  Object.assign(context, {
+    document: { getElementById: id => badges[id] },
+    ActiveSessionsBar: { _render() {}, _renderSidebar() {} },
+    App: { currentView: 'task-board' },
+    toast() {}
+  });
+  context.api = async () => ({ waiting: [], active: 3, inProgress: 2, done: 0 });
+  await TaskBoard.refreshAttention();
+  assert.strictEqual(progress.textContent, 2);
+  assert.strictEqual(progress.style.display, '');
+  context.api = async () => ({ waiting: [], active: 0, inProgress: 0, done: 0 });
+  await TaskBoard.refreshAttention();
+  assert.strictEqual(progress.style.display, 'none');
+  TaskBoard._progress = null;
+});
+
+test('a newly waiting ticket raises a 15s toast that opens its session on click', async () => {
+  const toasts = [];
+  Object.assign(context, {
+    document: { getElementById: () => null },
+    ActiveSessionsBar: { _render() {}, _renderSidebar() {} },
+    App: { currentView: 'sessions' },
+    toast: (msg, type, opts) => toasts.push({ msg, type, opts })
+  });
+  const opened = [];
+  const openSession = TaskBoard.openSession;
+  TaskBoard.openSession = card => opened.push(card.id);
+  TaskBoard.attention = [{ id: 'a', sessionId: 's1' }];
+  const waiting = [{ id: 'a', sessionId: 's1' }, { id: 'b', sessionId: 's2', sessionSlug: 'C--work-b' }];
+  context.api = async () => ({ waiting, active: 2, inProgress: 2, done: 0 });
+  await TaskBoard.refreshAttention();
+  assert.strictEqual(toasts.length, 1);
+  assert.strictEqual(toasts[0].msg, 'Task Board: 2 tickets need your input');
+  assert.strictEqual(toasts[0].opts.duration, 15000);
+  toasts[0].opts.onClick();
+  assert.deepStrictEqual(opened, ['b']);
+  context.api = async () => ({ waiting: [...waiting, { id: 'c', sessionId: '' }], active: 3, inProgress: 3, done: 0 });
+  await TaskBoard.refreshAttention();
+  assert.strictEqual(toasts[1].opts.onClick, undefined, 'no session yet: nothing to open');
+  TaskBoard.openSession = openSession;
+  TaskBoard.attention = [];
+  TaskBoard._progress = null;
+});
+
 test('a ticket that took a condition shows it on its card', () => {
   const card = { id: 'r', title: 'T', notes: '', project: 'p', column: 's-b', closed: false, run: { status: 'running' }, branch: { from: 'Triage', when: 'a <bug>' } };
   assert.match(TaskBoard.cardHtml(card, null, false), /tb-card-branch" title="Condition taken after Triage">If a &lt;bug&gt;</);
   assert.ok(!TaskBoard.cardHtml(Object.assign({}, card, { column: 'done' }), null, false).includes('tb-card-branch'));
+});
+
+test('a ticket with a worktree shows its branch on the card, in compact mode on hover, and in the session banner', () => {
+  const card = { id: 'g', title: 'Fix login', notes: '', project: 'p', column: 'done', worktree: 'cm-ab12', gitBranch: 'worktree-cm-ab12' };
+  assert.match(TaskBoard.cardHtml(card, null, false), /class="tb-card-git" title="Worktree branch">&#5833; worktree-cm-ab12</);
+  assert.match(TaskBoard.cardHtml(card, null, true), /title="Fix login\nBranch: worktree-cm-ab12"/);
+  assert.match(TaskBoard.sessionInfoHtml(card, null), /on branch <code>worktree-cm-ab12<\/code>/);
+  assert.strictEqual(TaskBoard.gitBranchOf({ worktree: 'cm-old' }), 'worktree-cm-old', 'tickets from before gitBranch was stored');
+  assert.ok(!TaskBoard.cardHtml({ id: 'n', title: 'x', notes: '', column: 'todo' }, null, false).includes('tb-card-git'));
+});
+
+test('a ticket in Finalize is still in the workflow and says so in the session banner', () => {
+  assert.ok(TaskBoard.inWorkflow({ column: 'finalize' }));
+  assert.ok(!TaskBoard.canMove({ column: 'finalize' }, 'done'));
+  assert.match(TaskBoard.sessionInfoHtml({ title: 'T', notes: '', column: 'finalize' }, { finalize: true, title: 'Finalize' }), /<strong>T<\/strong> · Finalize\./);
 });

@@ -198,6 +198,12 @@ const Usage = {
     Usage.renderDropdownList(key);
   },
 
+  /** Starred on the Projects page, or nested under a starred project. */
+  isFavoriteProject(slug) {
+    const p = typeof Projects !== 'undefined' && (Projects.data || []).find(x => x.slug === slug);
+    return !!p && Projects._inFavorites(p);
+  },
+
   renderDropdownList(key) {
     const listEl = document.getElementById('filter-' + key + '-list');
     if (!listEl) return;
@@ -213,14 +219,15 @@ const Usage = {
         }));
     } else {
       items = Usage.allProjects
-        .map(p => ({ p, base: Usage.basename(p.name) }))
+        .map(p => ({ p, base: Usage.basename(p.name), fav: Usage.isFavoriteProject(p.slug) }))
         .filter(({ p, base }) => !term || base.toLowerCase().includes(term))
-        .sort((a, b) => a.base.localeCompare(b.base))
-        .map(({ p, base }) => ({
+        .sort((a, b) => (b.fav - a.fav) || a.base.localeCompare(b.base))
+        .map(({ p, base, fav }) => ({
           value: p.slug,
           extra: p.name,
           label: base,
           title: p.name,
+          fav,
           checked: Usage.currentProjects.has(p.slug)
         }));
     }
@@ -238,7 +245,7 @@ const Usage = {
       const titleAttr = it.title ? ` title="${escapeHtml(it.title)}"` : '';
       return `<label class="multi-select-option"${titleAttr}>
         <input type="checkbox" ${it.checked ? 'checked' : ''} onchange="${onchange}">
-        <span>${escapeHtml(it.label)}</span>
+        <span>${it.fav ? '<span class="fav-star--on">&#9733;</span> ' : ''}${escapeHtml(it.label)}</span>
       </label>`;
     }).join('');
   },
