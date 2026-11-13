@@ -81,7 +81,7 @@ const Tour = {
     {
       element: '.nav-item[data-view="task-board"]',
       title: 'Task Board',
-      text: 'Tickets for all your projects on one board. Set up each project\'s workflow from its skills, then drag a ticket to Ready to start it.',
+      text: 'Tickets for all your projects on one board. Draw each project\'s workflow from its skills, with arrows between the stages, then drag a ticket to Ready to start it.',
       position: 'right'
     },
     {

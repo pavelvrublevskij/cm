@@ -350,6 +350,26 @@ test('a stage that loops stops at the visit limit and waits for the user', async
   assert.match(c.run.message, /Loop limit: stage "Bugfix" already ran 3 times/);
 });
 
+test('the default arrow decides the next stage, and the board orders stages along it', async () => {
+  await request(app).put('/api/task-board/lanes/' + SLUG).send({});
+  const res = await request(app).put(`/api/task-board/lanes/${SLUG}/workflow`).send({ stages: [
+    { id: 's-plan0000', title: 'Plan', type: 'prompt', prompt: 'Plan', next: 's-review00' },
+    { id: 's-build000', title: 'Build', type: 'prompt', prompt: 'Build', next: 'done' },
+    { id: 's-review00', title: 'Review', type: 'prompt', prompt: 'Review', next: 's-build000' }
+  ] });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.deepStrictEqual((await board()).projects[SLUG].stages.map(s => s.title), ['Plan', 'Review', 'Build']);
+  const card = await startTicket();
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  assert.strictEqual((await cardOf(card.id)).column, 's-review00');
+  await wait(250);
+  assert.match(pasted(spawned[0].entry)[1], /^\[Task Board · stage 2\/3: Review\]/);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  assert.strictEqual((await cardOf(card.id)).column, 's-build000');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  assert.strictEqual((await cardOf(card.id)).column, 'done');
+});
+
 test('a session that ends on its own sends the ticket back to ToDo, closed', async () => {
   await setStages(['Plan']);
   const card = await addTicket({ notes: 'x' });

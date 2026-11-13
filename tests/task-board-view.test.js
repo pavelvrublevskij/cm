@@ -6,10 +6,12 @@ const vm = require('vm');
 
 const escapeHtml = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const decodeName = slug => slug.replace(/^[A-Za-z]--/, '').split('-').filter(Boolean).slice(-2).join('/');
-const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'task-board.js'), 'utf-8');
+const read = name => fs.readFileSync(path.join(__dirname, '..', 'public', 'js', name), 'utf-8');
 const context = vm.createContext({ escapeHtml, escapeAttr: escapeHtml, decodeName });
-vm.runInContext(src + '\nglobalThis._TaskBoard = TaskBoard;', context);
+vm.runInContext(read('task-board-flow.js') + '\n' + read('task-board.js') + '\nglobalThis._TaskBoard = TaskBoard; globalThis._Flow = TaskBoardFlow;', context);
 const TaskBoard = context._TaskBoard;
+const Flow = context._Flow;
+const plain = v => JSON.parse(JSON.stringify(v));
 
 const BOARD = {
   projects: { 'C--work-zeta': { parallel: true }, 'C--work-alpha': { parallel: false } },
@@ -126,16 +128,41 @@ const WF = {
   skillsChanged: true,
   diff: false
 };
+Flow.prepare(WF);
 
-test('the workflow editor lists stages with type, reference and missing marker', () => {
+test('the workflow editor draws Ready, the stages and Done, with arrows between them', () => {
   const html = TaskBoard.workflowHtml(WF);
-  assert.strictEqual((html.match(/class="tb-wf-row"/g) || []).length, 2);
-  assert.match(html, /value="Do &lt;it&gt;"/);
-  assert.match(html, /tb-wf-ref tb-wf-ref--missing/);
+  assert.match(html, /data-node="ready"/);
+  assert.match(html, /data-node="done"/);
+  assert.strictEqual((html.match(/tbf-node--stage/g) || []).length, 2);
+  assert.match(html, /Do &lt;it&gt;/);
+  assert.match(html, /tbf-node--stage tbf-node--missing" data-node="s-a"/);
+  assert.match(html, /data-edge="ready\|start"/);
+  assert.match(html, /data-edge="s-a\|next"/);
+  assert.match(html, /data-edge="s-b\|next"/);
+  assert.match(html, /Compare with recommended/);
+  assert.match(html, /Auto-layout/);
+});
+
+test('an older workflow gets default arrows along the list and a left-to-right layout', () => {
+  const wf = { stages: [{ id: 's-a', title: 'A' }, { id: 's-b', title: 'B' }] };
+  Flow.prepare(wf);
+  assert.deepStrictEqual(wf.stages.map(s => s.next), ['s-b', 'done']);
+  assert.ok(wf.stages[1].pos.x > wf.stages[0].pos.x);
+  assert.strictEqual(wf.stages[0].pos.y, wf.stages[1].pos.y);
+  const done = Flow.nodes(wf).find(n => n.id === 'done');
+  assert.ok(done.x > wf.stages[1].pos.x);
+});
+
+test('the stage panel shows type, reference with missing marker, and delete', () => {
+  const html = Flow.panelHtml(Object.assign({}, WF, { sel: { node: 's-a' } }));
+  assert.match(html, /value="Plan"/);
+  assert.match(html, /tb-wf-ref--missing/);
   assert.match(html, /gone-skill \(missing\)/);
   assert.match(html, /writing-plans · project/);
   assert.ok(!html.includes('tester · global'), 'agents are not offered for a skill stage');
-  assert.match(html, /Compare with recommended/);
+  assert.match(html, /Delete stage/);
+  assert.match(Flow.panelHtml(Object.assign({}, WF, { sel: null })), /Drag<\/strong> a stage to move it/);
 });
 
 test('the diff view shows current and recommended stages side by side', () => {
@@ -151,6 +178,7 @@ test('an empty workflow invites Recommend', () => {
   const html = TaskBoard.workflowHtml(Object.assign({}, WF, { stages: [], skillsChanged: false }));
   assert.match(html, /No stages yet/);
   assert.ok(!html.includes('Compare with recommended'));
+  assert.ok(!html.includes('data-edge'));
 });
 
 test('compact cards are one line: heading, closed badge and stage dots', () => {
@@ -230,40 +258,94 @@ test('the session banner names the ticket and its stage', () => {
   assert.match(TaskBoard.sessionInfoHtml({ title: '', notes: 'first line\nmore', column: 's1' }, null), /<strong>first line<\/strong>\./);
 });
 
-test('the workflow editor shows a stage\'s conditions with stage and Done targets', () => {
-  const wf = {
-    slug: 'p', available: [], missing: [], diff: false,
-    stages: [
-      { id: 's-a', title: 'Triage', type: 'prompt', prompt: 'x', branches: [{ when: 'a <bug>', to: 's-b' }] },
-      { id: 's-b', title: 'Fix', type: 'prompt', prompt: 'y', branches: [] }
-    ]
-  };
-  const html = TaskBoard.workflowHtml(wf);
-  assert.strictEqual((html.match(/class="tb-wf-branch"/g) || []).length, 1);
-  assert.match(html, /value="a &lt;bug&gt;"/);
-  assert.match(html, /<option value="s-b" selected>2\. Fix<\/option>/);
-  assert.match(html, /<option value="done">Done<\/option>/);
-  assert.match(html, /Otherwise: next stage/);
-  assert.strictEqual((html.match(/\+ Condition/g) || []).length, 2);
-  wf.stages[0].branches = new Array(4).fill({ when: 'a', to: 'done' });
-  assert.strictEqual((TaskBoard.workflowHtml(wf).match(/\+ Condition/g) || []).length, 1, 'at most 4 conditions');
+function flowWf() {
+  const wf = { available: [], missing: [], stages: [
+    { id: 's-a', title: 'Triage', type: 'prompt', prompt: 'x', next: 's-b', branches: [{ when: 'a <bug>', to: 'done' }] },
+    { id: 's-b', title: 'Fix', type: 'prompt', prompt: 'y', next: 'done', branches: [] }
+  ] };
+  Flow.prepare(wf);
+  return wf;
+}
+
+test('a condition arrow carries its text; the default arrow then says otherwise', () => {
+  const wf = flowWf();
+  const html = Flow.svgHtml(wf, null);
+  assert.match(html, /data-edge="s-a\|0"/);
+  assert.match(html, /tbf-edge tbf-edge--branch/);
+  assert.match(html, /a &lt;bug&gt;<title>/);
+  assert.match(html, /tbf-label tbf-label--dim[^>]*>otherwise/);
+  wf.sel = { edge: 's-a|0' };
+  const panel = Flow.panelHtml(wf);
+  assert.match(panel, /value="a &lt;bug&gt;"/);
+  assert.match(panel, /<option value="done" selected>Done<\/option>/);
+  assert.match(panel, /Make default/);
 });
 
-test('removing a stage drops the conditions that jump to it; new stages get an id', () => {
+test('drawing arrows: Ready picks the first stage, a stage without a default gets it, then conditions', () => {
+  const wf = flowWf();
+  assert.strictEqual(Flow.connect(wf, 'ready', 's-b'), true);
+  assert.deepStrictEqual(wf.stages.map(s => s.id), ['s-b', 's-a']);
+  assert.strictEqual(Flow.connect(wf, 'ready', 'done'), false);
+  assert.strictEqual(Flow.connect(wf, 's-a', 'ready'), false);
+  const c = Flow.newStage(wf, 's-c');
+  assert.strictEqual(c.next, '');
+  assert.match(Flow.svgHtml(wf, null), /tbf-node--open" data-node="s-c"/);
+  Flow.connect(wf, 's-c', 's-a');
+  assert.strictEqual(c.next, 's-a');
+  Flow.connect(wf, 's-c', 'done');
+  assert.deepStrictEqual(plain(c.branches), [{ when: '', to: 'done' }]);
+  assert.deepStrictEqual(plain(wf.sel), { edge: 's-c|0' });
+  for (let i = 0; i < 3; i++) Flow.connect(wf, 's-c', 's-c');
+  assert.strictEqual(Flow.connect(wf, 's-c', 's-b'), 'limit');
+});
+
+test('make default swaps a condition with the default arrow; arrows into a deleted stage go with it', () => {
+  const wf = flowWf();
+  Flow.makeDefault(wf, 's-a|0');
+  assert.strictEqual(wf.stages[0].next, 'done');
+  assert.deepStrictEqual(plain(wf.stages[0].branches), [{ when: 'a <bug>', to: 's-b' }]);
+  Flow.removeStage(wf, 's-b');
+  assert.deepStrictEqual(plain(wf.stages[0].branches), []);
+  Flow.removeEdge(wf, 's-a|next');
+  assert.strictEqual(wf.stages[0].next, '');
+  assert.match(Flow.svgHtml(wf, null), /tbf-node--stage tbf-node--open/);
+  Flow.removeEdge(wf, 'ready|start');
+  assert.strictEqual(Flow.edges(wf)[0].kind, 'start', 'Ready always has its arrow');
+});
+
+test('an arrow can be pointed elsewhere: the Ready arrow, a default arrow and a condition', () => {
+  const wf = flowWf();
+  Flow.setTarget(wf, 'ready|start', 's-b');
+  assert.strictEqual(wf.stages[0].id, 's-b');
+  Flow.setTarget(wf, 's-a|next', 'done');
+  assert.strictEqual(Flow.stageById(wf, 's-a').next, 'done');
+  Flow.setTarget(wf, 's-a|0', 's-a');
+  assert.strictEqual(Flow.stageById(wf, 's-a').branches[0].to, 's-a');
+  wf.sel = { edge: 's-a|next' };
+  assert.match(Flow.panelHtml(wf), /Default path from <strong>Triage<\/strong>/);
+});
+
+test('arrows bend apart between the same boxes, and loops go over the top', () => {
+  const a = { x: 0, y: 100 };
+  const b = { x: 300, y: 100 };
+  assert.notStrictEqual(Flow.edgePath(a, b, 0).ly, Flow.edgePath(a, b, 1).ly);
+  assert.ok(Flow.edgePath(a, a, 0).ly < a.y);
+  assert.ok(Flow.edgePath(b, a, 0).ly < a.y, 'a backward arrow goes over the top');
+});
+
+test('Recommend loads a chain of stages ending in Done', () => {
   const render = TaskBoard.renderWorkflow;
   TaskBoard.renderWorkflow = () => {};
-  TaskBoard._wf = { stages: [
-    { id: 's-a', title: 'A', branches: [{ when: 'x', to: 's-b' }, { when: 'y', to: 'done' }] },
-    { id: 's-b', title: 'B', branches: [] }
-  ] };
-  TaskBoard.wfRemove(1);
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(TaskBoard._wf.stages[0].branches)), [{ when: 'y', to: 'done' }]);
-  TaskBoard.wfAdd();
-  assert.match(TaskBoard._wf.stages[1].id, /^s-[a-z0-9]{8}$/);
-  TaskBoard.wfAddBranch(1);
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(TaskBoard._wf.stages[1].branches)), [{ when: '', to: 'done' }]);
+  context.toast = () => {};
+  TaskBoard._wf = { stages: [], recommended: [{ title: 'Plan', type: 'prompt', ref: '', prompt: 'p' }, { title: 'Build', type: 'prompt', ref: '', prompt: 'b' }] };
+  TaskBoard.wfRecommend();
+  const [s1, s2] = TaskBoard._wf.stages;
+  assert.match(s1.id, /^s-[a-z0-9]{8}$/);
+  assert.strictEqual(s1.next, s2.id);
+  assert.strictEqual(s2.next, 'done');
   TaskBoard._wf = null;
   TaskBoard.renderWorkflow = render;
+  delete context.toast;
 });
 
 test('a ticket that took a condition shows it on its card', () => {

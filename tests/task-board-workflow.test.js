@@ -119,6 +119,25 @@ test('validateStages checks conditions: text, count and a target that is a stage
   assert.deepStrictEqual(wf.validateStages([{ title: 'A', type: 'prompt', prompt: 'x' }], []).stages[0].branches, []);
 });
 
+test('validateStages: default arrows, positions, and board order along the default arrows', () => {
+  const stage = (id, next, extra) => Object.assign({ id, title: id, type: 'prompt', prompt: 'x', next }, extra);
+  const old = wf.validateStages([stage('s-aaaaaaaa'), stage('s-bbbbbbbb')], []).stages;
+  assert.deepStrictEqual(old.map(s => s.next), ['s-bbbbbbbb', 'done'], 'without arrows: the list order');
+  const { stages } = wf.validateStages([
+    stage('s-aaaaaaaa', 's-cccccccc', { pos: { x: 10.4, y: -5 }, branches: [{ when: 'bug', to: 's-bbbbbbbb' }] }),
+    stage('s-bbbbbbbb', 'done'),
+    stage('s-cccccccc', 'done', { pos: { x: 'a', y: 1 } })
+  ], []);
+  assert.deepStrictEqual(stages.map(s => s.id), ['s-aaaaaaaa', 's-cccccccc', 's-bbbbbbbb']);
+  assert.deepStrictEqual(stages[0].pos, { x: 10, y: 0 });
+  assert.strictEqual(stages[1].pos, undefined);
+  const err = list => wf.validateStages(list, []).error;
+  assert.match(err([stage('s-aaaaaaaa', '')]), /stage "s-aaaaaaaa": draw its default arrow/);
+  assert.match(err([stage('s-aaaaaaaa', 's-zzzzzzzz')]), /stage "s-aaaaaaaa": draw its default arrow/);
+  assert.match(err([stage('s-aaaaaaaa', 'done'), stage('s-bbbbbbbb', 'done')]), /stage "s-bbbbbbbb" cannot be reached from Ready/);
+  assert.match(err([stage('s-aaaaaaaa', 's-aaaaaaaa')]), /no arrow leads to Done/);
+});
+
 test('missingRefs lists stages whose skill or agent is gone', () => {
   const stages = [{ id: 's1', type: 'skill', ref: 'gone' }, { id: 's2', type: 'prompt', ref: '' }, { id: 's3', type: 'agent', ref: 'tester' }];
   assert.deepStrictEqual(wf.missingRefs(stages, [A('agent', 'tester', '')]), ['s1']);

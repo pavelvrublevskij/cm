@@ -6645,11 +6645,6 @@ body.git-split-dragging {
 .tb-step--current {
   background: var(--accent);
 }
-.tb-wf-hint {
-  margin-bottom: 12px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
 .tb-wf-banner {
   display: flex;
   align-items: center;
@@ -6662,84 +6657,161 @@ body.git-split-dragging {
   border: 1px solid var(--info-border);
   border-radius: var(--radius-sm);
 }
-.tb-wf-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.tb-wf-row {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 10px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.tb-wf-num {
-  min-width: 18px;
-  padding-top: 7px;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-.tb-wf-fields {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.tb-wf-line {
-  display: flex;
-  gap: 6px;
-}
-.tb-wf-title {
-  flex: 1;
-  min-width: 0;
-}
-.tb-wf-type {
-  width: 110px;
-}
-.tb-wf-ref {
-  flex: 1.4;
-  min-width: 0;
-}
-.tb-wf-ref--missing {
-  border-color: var(--danger);
-}
-.tb-wf-actions {
-  display: flex;
-  gap: 4px;
-  padding-top: 3px;
-}
 .tb-wf-footer {
   display: flex;
   gap: 8px;
   margin-top: 12px;
 }
-.tb-wf-branches {
+.tb-wf-ref--missing {
+  border-color: var(--danger);
+}
+.tbf {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+.tbf-canvas {
+  flex: 1;
+  min-width: 0;
+  height: 440px;
+  overflow: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  user-select: none;
+  touch-action: none;
+}
+.tbf-svg {
+  display: block;
+}
+.tbf-node rect {
+  fill: var(--bg-secondary);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+.tbf-node--stage {
+  cursor: grab;
+}
+.tbf-node--ready rect,
+.tbf-node--done rect {
+  fill: var(--bg-tertiary);
+}
+.tbf-node--sel rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.tbf-node--open rect {
+  stroke: var(--warning);
+  stroke-dasharray: 5 3;
+}
+.tbf-node--missing rect {
+  stroke: var(--danger);
+}
+.tbf-title {
+  font-size: 13px;
+  font-weight: 600;
+  fill: var(--text-primary);
+}
+.tbf-sub {
+  font-size: 11px;
+  fill: var(--text-muted);
+}
+.tbf-handle {
+  fill: var(--accent);
+  stroke: var(--bg-primary);
+  stroke-width: 2;
+  cursor: crosshair;
+}
+.tbf-edge {
+  cursor: pointer;
+}
+.tbf-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+}
+.tbf-edge-line,
+.tbf-temp {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+.tbf-edge--branch .tbf-edge-line {
+  stroke-dasharray: 6 3;
+}
+.tbf-edge--sel .tbf-edge-line,
+.tbf-temp {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.tbf-temp {
+  pointer-events: none;
+}
+.tbf-arrowhead {
+  fill: var(--text-muted);
+}
+.tbf-arrowhead--sel {
+  fill: var(--accent);
+}
+.tbf-label {
+  font-size: 11px;
+  fill: var(--text-primary);
+  stroke: var(--bg-primary);
+  stroke-width: 4;
+  paint-order: stroke;
+}
+.tbf-label--dim {
+  fill: var(--text-muted);
+}
+.tbf-panel {
+  width: 260px;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.tbf-form {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: 8px;
 }
-.tb-wf-branch {
+.tbf-field {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 3px;
   width: 100%;
   font-size: 12px;
+  color: var(--text-secondary);
 }
-.tb-wf-branch input {
-  flex: 1;
-  min-width: 0;
+.tbf-field input,
+.tbf-field select,
+.tbf-field textarea {
+  width: 100%;
 }
-.tb-wf-branch select {
-  flex: 0 1 180px;
-  min-width: 0;
+.tbf-head {
+  color: var(--text-secondary);
 }
-.tb-wf-branch-else {
+.tbf-row {
+  display: flex;
+  gap: 6px;
+}
+.tbf-warn {
   font-size: 12px;
+  color: var(--warning);
+}
+.tbf-help {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.tbf-help p {
+  margin: 0 0 8px;
+}
+.tbf-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
 }
 .tb-wf-diff {
   display: grid;

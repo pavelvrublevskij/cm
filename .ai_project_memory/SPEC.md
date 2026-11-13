@@ -90,7 +90,7 @@ Written only through `writeDataJson()` / `safeDataWrite()`, which refuse any pat
 | `artifact-index.json` | Session artifact index |
 | `archived-sessions.json`, `session-colors.json` | Session archive and colors |
 | `skill-usage.json` | Skill usage counts |
-| `task-board.json` | Task board: cards (title, notes = description, project, column, closed, sessionId, run = { status, message }) and project lanes (`parallel`, `stages` = [{ id, title, type skill|agent|prompt, ref, prompt }], `skillsSnapshot`) |
+| `task-board.json` | Task board: cards (title, notes = description, project, column, closed, sessionId, run = { status, message }) and project lanes (`parallel`, `stages` = [{ id, title, type skill|agent|prompt, ref, prompt, next = stage id or done (default arrow), branches = [{ when, to }], pos = { x, y } }], first stage = the one Ready leads to, stored in default-arrow order, `skillsSnapshot`) |
 | `board-hooks.json` | Claude Code hooks (SessionStart, UserPromptSubmit, Stop, Notification → `scripts/board-hook.js`), passed only to Task Board sessions with `--settings`; rewritten on each ticket start |
 
 **Settings shared by several launch paths or by server and scripts belong in `app-config.json`**, never in script-local files.

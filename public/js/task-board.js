@@ -437,10 +437,11 @@ const TaskBoard = {
       toast(e.message, 'error');
       return;
     }
-    TaskBoard._wf = Object.assign({ slug, diff: false }, data, { stages: data.stages.map(s => Object.assign({}, s)) });
+    TaskBoard._wf = Object.assign({ slug, diff: false }, data, { stages: JSON.parse(JSON.stringify(data.stages)) });
+    TaskBoardFlow.prepare(TaskBoard._wf);
     openModal({
       title: 'Workflow — ' + decodeName(slug),
-      width: 820,
+      width: 1040,
       body: '<div id="tb-wf"></div>',
       buttons: [{ label: 'Save', primary: true, onClick: () => TaskBoard.saveWorkflow() }],
       onClose: () => { TaskBoard._wf = null; }
@@ -450,7 +451,9 @@ const TaskBoard = {
 
   renderWorkflow() {
     const el = document.getElementById('tb-wf');
-    if (el && TaskBoard._wf) el.innerHTML = TaskBoard.workflowHtml(TaskBoard._wf);
+    if (!el || !TaskBoard._wf) return;
+    el.innerHTML = TaskBoard.workflowHtml(TaskBoard._wf);
+    TaskBoardFlow.bind();
   },
 
   stageLabel(s) {
@@ -462,58 +465,6 @@ const TaskBoard = {
       .map(a => [a.name, a.name + ' · ' + a.source]);
     if (stage.ref && !list.some(([v]) => v === stage.ref)) list.unshift([stage.ref, stage.ref + ' (missing)']);
     return list;
-  },
-
-  stageRowHtml(wf, s, i) {
-    const missing = (wf.missing || []).includes(s.id);
-    const ref = s.type === 'prompt'
-      ? ''
-      : `<select class="tb-wf-ref${missing ? ' tb-wf-ref--missing' : ''}" onchange="TaskBoard.wfSet(${i}, 'ref', this.value)">${
-          TaskBoard.refOptions(wf.available, s).map(([v, label]) => `<option value="${escapeAttr(v)}"${v === s.ref ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')
-        }</select>`;
-    const types = [['skill', 'Skill'], ['agent', 'Agent'], ['prompt', 'Prompt']]
-      .map(([v, label]) => `<option value="${v}"${v === s.type ? ' selected' : ''}>${label}</option>`).join('');
-    const last = wf.stages.length - 1;
-    return `<div class="tb-wf-row">
-        <span class="tb-wf-num">${i + 1}</span>
-        <div class="tb-wf-fields">
-          <div class="tb-wf-line">
-            <input type="text" class="tb-wf-title" value="${escapeAttr(s.title)}" placeholder="Stage name" oninput="TaskBoard.wfSet(${i}, 'title', this.value, true)">
-            <select class="tb-wf-type" onchange="TaskBoard.wfSet(${i}, 'type', this.value)">${types}</select>
-            ${ref}
-          </div>
-          <textarea rows="2" placeholder="${s.type === 'prompt' ? 'What Claude should do in this stage' : 'Extra instructions (optional)'}" oninput="TaskBoard.wfSet(${i}, 'prompt', this.value, true)">${escapeHtml(s.prompt)}</textarea>
-          ${TaskBoard.branchesHtml(wf, s, i)}
-        </div>
-        <div class="tb-wf-actions">
-          <button class="btn btn-sm" onclick="TaskBoard.wfMove(${i}, -1)"${i === 0 ? ' disabled' : ''} title="Move up">&uarr;</button>
-          <button class="btn btn-sm" onclick="TaskBoard.wfMove(${i}, 1)"${i === last ? ' disabled' : ''} title="Move down">&darr;</button>
-          <button class="btn btn-sm" onclick="TaskBoard.wfRemove(${i})" title="Remove stage">&times;</button>
-        </div>
-      </div>`;
-  },
-
-  /**
-   * A stage's conditions: "If <text> go to <stage | Done>", checked in order by Claude when the
-   * stage is finished. Without a matching condition the ticket goes on to the next stage.
-   */
-  branchesHtml(wf, s, i) {
-    const branches = s.branches || [];
-    const targets = wf.stages.map((t, n) => [t.id, `${n + 1}. ${t.title || 'Untitled'}`]).concat([['done', 'Done']]);
-    const rows = branches.map((b, j) => `<div class="tb-wf-branch">
-        <span class="tb-wf-dim">If</span>
-        <input type="text" value="${escapeAttr(b.when)}" placeholder="condition, e.g. the ticket is a bug" oninput="TaskBoard.wfSetBranch(${i}, ${j}, 'when', this.value, true)">
-        <span class="tb-wf-dim">go to</span>
-        <select onchange="TaskBoard.wfSetBranch(${i}, ${j}, 'to', this.value)">${
-          targets.map(([v, label]) => `<option value="${escapeAttr(v)}"${v === b.to ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')
-        }</select>
-        <button class="btn btn-sm" onclick="TaskBoard.wfRemoveBranch(${i}, ${j})" title="Remove condition">&times;</button>
-      </div>`).join('');
-    const add = branches.length < 4
-      ? `<button class="btn btn-sm tb-wf-branch-add" onclick="TaskBoard.wfAddBranch(${i})" title="Jump to another stage when a condition holds">+ Condition</button>`
-      : '';
-    const otherwise = branches.length ? `<div class="tb-wf-dim tb-wf-branch-else">Otherwise: ${i === wf.stages.length - 1 ? 'Done' : 'next stage'}</div>` : '';
-    return `<div class="tb-wf-branches">${rows}${otherwise}${add}</div>`;
   },
 
   diffHtml(wf) {
@@ -530,7 +481,7 @@ const TaskBoard = {
       </div>`;
   },
 
-  /** The editor body: skill-change banner or diff, the stage rows, add/recommend. Pure, for tests. */
+  /** The editor body: skill-change banner or diff, the toolbar and the diagram. Pure, for tests. */
   workflowHtml(wf) {
     let top = '';
     if (wf.diff) top = TaskBoard.diffHtml(wf);
@@ -538,71 +489,40 @@ const TaskBoard = {
       top = `<div class="tb-wf-banner">Skills or agents in this project changed since the workflow was saved.
           <button class="btn btn-sm" onclick="TaskBoard.wfShowDiff()">Compare with recommended</button></div>`;
     }
-    const rows = wf.stages.length
-      ? wf.stages.map((s, i) => TaskBoard.stageRowHtml(wf, s, i)).join('')
-      : '<div class="tb-col-empty">No stages yet — use Recommend, or add a stage.</div>';
+    const empty = wf.stages.length ? '' : '<div class="tb-col-empty">No stages yet — use Recommend, or add a stage.</div>';
     return `${top}
-      <div class="tb-wf-hint">After Ready the stages run in this order, each one starting by itself when the previous one is done. Then the ticket goes to Done. A condition lets Claude jump to another stage instead; one ticket runs the same stage at most 3 times.</div>
-      <div class="tb-wf-rows">${rows}</div>
       <div class="tb-wf-footer">
         <button class="btn btn-sm" onclick="TaskBoard.wfAdd()"${wf.stages.length >= 10 ? ' disabled' : ''}>+ Add stage</button>
         <button class="btn btn-sm" onclick="TaskBoard.wfRecommend()" title="Pick stages from this project's skills by name and description — no AI">Recommend</button>
+        <button class="btn btn-sm" onclick="TaskBoard.wfLayout()" title="Arrange the stages from left to right">Auto-layout</button>
+      </div>
+      ${empty}
+      <div class="tbf">
+        <div class="tbf-canvas" id="tbf-canvas">${TaskBoardFlow.svgHtml(wf, null)}</div>
+        <div class="tbf-panel" id="tbf-panel">${TaskBoardFlow.panelHtml(wf)}</div>
       </div>`;
   },
 
-  /** Update one field; typing (quiet) keeps focus, so it does not re-render. */
-  wfSet(i, field, value, quiet) {
-    const s = TaskBoard._wf.stages[i];
-    s[field] = value;
-    if (field === 'type') {
-      const first = TaskBoard._wf.available.find(a => a.kind === value);
-      s.ref = value === 'prompt' ? '' : (first ? first.name : '');
-    }
-    if (!quiet) TaskBoard.renderWorkflow();
-  },
-
-  wfMove(i, delta) {
-    const stages = TaskBoard._wf.stages;
-    const [s] = stages.splice(i, 1);
-    stages.splice(i + delta, 0, s);
-    TaskBoard.renderWorkflow();
-  },
-
-  /** Conditions jumping to a removed stage go with it. */
-  wfRemove(i) {
-    const [gone] = TaskBoard._wf.stages.splice(i, 1);
-    for (const s of TaskBoard._wf.stages) s.branches = (s.branches || []).filter(b => b.to !== gone.id);
-    TaskBoard.renderWorkflow();
-  },
-
-  /** A new stage gets its id here, so conditions can point at it before the workflow is saved. */
+  /** A new stage gets its id here, so arrows can point at it before the workflow is saved. */
   newStageId() {
     return 's-' + (Math.random().toString(36).slice(2) + '00000000').slice(0, 8);
   },
 
   wfAdd() {
-    TaskBoard._wf.stages.push({ id: TaskBoard.newStageId(), title: '', type: 'prompt', ref: '', prompt: '', branches: [] });
+    TaskBoardFlow.newStage(TaskBoard._wf, TaskBoard.newStageId());
     TaskBoard.renderWorkflow();
   },
 
-  wfAddBranch(i) {
-    const s = TaskBoard._wf.stages[i];
-    s.branches = (s.branches || []).concat([{ when: '', to: 'done' }]);
+  wfLayout() {
+    TaskBoardFlow.layout(TaskBoard._wf);
     TaskBoard.renderWorkflow();
   },
 
-  wfSetBranch(i, j, field, value, quiet) {
-    TaskBoard._wf.stages[i].branches[j][field] = value;
-    if (!quiet) TaskBoard.renderWorkflow();
-  },
-
-  wfRemoveBranch(i, j) {
-    TaskBoard._wf.stages[i].branches.splice(j, 1);
-    TaskBoard.renderWorkflow();
-  },
-
+  /** Recommended stages in a row, each leading to the next, the last to Done. */
   wfRecommend() {
-    TaskBoard._wf.stages = TaskBoard._wf.recommended.map(s => Object.assign({ id: TaskBoard.newStageId(), branches: [] }, s));
+    const wf = TaskBoard._wf;
+    wf.stages = wf.recommended.map(s => Object.assign({ id: TaskBoard.newStageId() }, s));
+    TaskBoardFlow.prepare(wf);
     TaskBoard.renderWorkflow();
     toast('Recommended stages loaded — review them and Save');
   },
