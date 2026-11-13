@@ -267,6 +267,34 @@ test('the sidebar shows how many tickets are in workflow progress, hidden at zer
   TaskBoard._progress = null;
 });
 
+test('a newly waiting ticket raises a 15s toast that opens its session on click', async () => {
+  const toasts = [];
+  Object.assign(context, {
+    document: { getElementById: () => null },
+    ActiveSessionsBar: { _render() {}, _renderSidebar() {} },
+    App: { currentView: 'sessions' },
+    toast: (msg, type, opts) => toasts.push({ msg, type, opts })
+  });
+  const opened = [];
+  const openSession = TaskBoard.openSession;
+  TaskBoard.openSession = card => opened.push(card.id);
+  TaskBoard.attention = [{ id: 'a', sessionId: 's1' }];
+  const waiting = [{ id: 'a', sessionId: 's1' }, { id: 'b', sessionId: 's2', sessionSlug: 'C--work-b' }];
+  context.api = async () => ({ waiting, active: 2, inProgress: 2, done: 0 });
+  await TaskBoard.refreshAttention();
+  assert.strictEqual(toasts.length, 1);
+  assert.strictEqual(toasts[0].msg, 'Task Board: 2 tickets need your input');
+  assert.strictEqual(toasts[0].opts.duration, 15000);
+  toasts[0].opts.onClick();
+  assert.deepStrictEqual(opened, ['b']);
+  context.api = async () => ({ waiting: [...waiting, { id: 'c', sessionId: '' }], active: 3, inProgress: 3, done: 0 });
+  await TaskBoard.refreshAttention();
+  assert.strictEqual(toasts[1].opts.onClick, undefined, 'no session yet: nothing to open');
+  TaskBoard.openSession = openSession;
+  TaskBoard.attention = [];
+  TaskBoard._progress = null;
+});
+
 test('the workflow editor shows a stage\'s conditions with stage and Done targets', () => {
   const wf = {
     slug: 'p', available: [], missing: [], diff: false,

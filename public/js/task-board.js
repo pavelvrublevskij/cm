@@ -9,6 +9,7 @@ const TaskBoard = {
   DELETABLE: ['todo', 'done'],
   USER_MOVES: { todo: ['ready'], ready: ['todo'], done: ['todo'] },
   RUN_LABELS: { starting: 'starting', running: 'running', needs_input: 'needs input', conflict: 'conflict' },
+  ATTENTION_TOAST_MS: 15000,
   board: { cards: [], projects: {}, status: {} },
   attention: [],
   _progress: null,
@@ -30,7 +31,7 @@ const TaskBoard = {
     try { data = await api('/api/task-board/attention'); } catch (_) { return; }
     const list = data.waiting;
     const known = new Set(TaskBoard.attention.map(a => a.id));
-    const fresh = list.some(a => !known.has(a.id));
+    const fresh = list.find(a => !known.has(a.id));
     if (TaskBoard.allDone(TaskBoard._progress, data)) toast('Task Board: all tickets are done');
     TaskBoard._progress = { active: data.active, done: data.done };
     TaskBoard.attention = list;
@@ -46,7 +47,12 @@ const TaskBoard = {
     }
     ActiveSessionsBar._render();
     ActiveSessionsBar._renderSidebar();
-    if (fresh && App.currentView !== 'task-board') toast(TaskBoard.attentionMessage(list.length), 'warning');
+    if (fresh && App.currentView !== 'task-board') {
+      toast(TaskBoard.attentionMessage(list.length), 'warning', {
+        duration: TaskBoard.ATTENTION_TOAST_MS,
+        onClick: fresh.sessionId ? () => TaskBoard.openSession(fresh) : undefined
+      });
+    }
   },
 
   /** The last running or waiting ticket just finished, and it (or another) reached Done. */

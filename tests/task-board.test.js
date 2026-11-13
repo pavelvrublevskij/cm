@@ -166,6 +166,7 @@ test('attention lists only open tickets in a stage that need input or hit a conf
   await withWorkflow(SLUG);
   const stage = (await request(app).get('/api/task-board')).body.projects[SLUG].stages[0].id;
   const asking = await put('ask', stage, 'needs_input');
+  lib.mutateCard(asking.id, c => { c.sessionSlug = 'C--work-ask'; });
   const blocked = await put('block', stage, 'conflict');
   await put('busy', stage, 'running');
   await put('stopped', stage, 'needs_input', true);
@@ -174,8 +175,8 @@ test('attention lists only open tickets in a stage that need input or hit a conf
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(res.body, {
     waiting: [
-      { id: asking.id, project: SLUG, sessionId: 'sid-ask', status: 'needs_input', message: 'why ask' },
-      { id: blocked.id, project: SLUG, sessionId: 'sid-block', status: 'conflict', message: 'why block' }
+      { id: asking.id, project: SLUG, sessionId: 'sid-ask', sessionSlug: 'C--work-ask', status: 'needs_input', message: 'why ask' },
+      { id: blocked.id, project: SLUG, sessionId: 'sid-block', sessionSlug: '', status: 'conflict', message: 'why block' }
     ],
     active: 4,
     inProgress: 3,

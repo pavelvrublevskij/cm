@@ -2938,6 +2938,10 @@ mark.search-highlight {
   max-width: 360px;
 }
 
+.toast--clickable {
+  cursor: pointer;
+}
+
 .toast-success {
   background: rgba(63, 185, 80, 0.15);
   border: 1px solid var(--success);
