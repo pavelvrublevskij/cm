@@ -475,6 +475,7 @@ const TaskBoard = {
     openModal({
       title: 'Workflow — ' + decodeName(slug),
       width: 1040,
+      maximizable: true,
       body: '<div id="tb-wf"></div>',
       buttons: [{ label: 'Save', primary: true, onClick: () => TaskBoard.saveWorkflow() }],
       onClose: () => { TaskBoard._wf = null; }

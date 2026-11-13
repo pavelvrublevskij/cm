@@ -10,9 +10,10 @@
  * @param {Function} [opts.onClose] - Called after the modal is dismissed, however it was dismissed
  * @param {string} [opts.cancelLabel] - Label for the dismiss button (default "Cancel")
  * @param {boolean|{minWidth?: number, minHeight?: number}} [opts.resizable] - Adds a drag handle to resize the modal
+ * @param {boolean} [opts.maximizable] - Adds a title-bar button that toggles the modal fullscreen
  * @returns {HTMLElement} The overlay element (for external removal if needed)
  */
-function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel, resizable }) {
+function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel, resizable, maximizable }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   const close = () => { overlay.remove(); if (onClose) onClose(); };
@@ -23,7 +24,23 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
 
   const h3 = document.createElement('h3');
   h3.textContent = title;
-  modal.appendChild(h3);
+  if (maximizable) {
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+    header.appendChild(h3);
+    const maxBtn = document.createElement('button');
+    maxBtn.className = 'btn btn-sm modal-maximize';
+    const setMaxState = full => {
+      maxBtn.textContent = full ? '❒' : '□';
+      maxBtn.title = full ? 'Restore' : 'Maximize';
+    };
+    setMaxState(false);
+    maxBtn.onclick = () => setMaxState(modal.classList.toggle('modal--fullscreen'));
+    header.appendChild(maxBtn);
+    modal.appendChild(header);
+  } else {
+    modal.appendChild(h3);
+  }
 
   const content = document.createElement('div');
   content.className = 'modal-body';
