@@ -1324,6 +1324,18 @@ input[type="radio"] + label {
   color: var(--accent);
 }
 
+.nav-item .icon {
+  position: relative;
+}
+
+.fav-folder-star {
+  position: absolute;
+  right: -2px;
+  top: -4px;
+  font-size: 10px;
+  color: var(--accent);
+}
+
 .project-list .nav-item .fav-star {
   margin: 0 0 0 auto;
 }

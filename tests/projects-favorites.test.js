@@ -175,3 +175,12 @@ test('a starred child under a starred parent is listed once, nested under the pa
   const nav = els['project-nav-list'].innerHTML;
   assert.strictEqual((nav.match(/data-slug="svc"/g) || []).length, 2, 'one row plus its active badge');
 });
+
+test('a starred project gets a star on its sidebar folder icon, others do not', () => {
+  render([project('alpha', { favorite: true }), project('beta')]);
+  context.Projects._othersOpen = true;
+  context.Projects.renderNav();
+  const row = slug => els['project-nav-list'].innerHTML.split('data-slug="' + slug + '"')[1].split('nav-label')[0];
+  assert.ok(row('alpha').includes('fav-folder-star'));
+  assert.ok(!row('beta').includes('fav-folder-star'));
+});

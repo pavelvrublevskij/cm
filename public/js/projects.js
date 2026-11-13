@@ -249,7 +249,7 @@ const Projects = {
     const cls = px === undefined ? 'nav-item' : 'nav-item nav-item--sub';
     return `
       <div class="${cls}" data-slug="${p.slug}"${indent} onclick="App.navigate('project-detail', { slug: '${p.slug}' })" title="${escapeAttr(title)}">
-        <span class="icon">&#128193;</span>
+        <span class="icon">&#128193;${p.favorite ? '<span class="fav-folder-star">&#9733;</span>' : ''}</span>
         <span class="nav-label">${escapeHtml(label)}</span>
         <span class="badge badge-active nav-active-badge" data-slug="${p.slug}" style="display:none"></span>
         ${Projects._starHtml(p)}
