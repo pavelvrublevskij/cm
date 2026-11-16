@@ -6711,6 +6711,10 @@ body.git-split-dragging {
   padding: 6px 0;
   color: var(--text-secondary);
 }
+.tb-editor-question {
+  margin: 0 0 12px;
+  font-weight: 600;
+}
 .tb-workflow-btn {
   margin-left: 4px;
 }

@@ -461,3 +461,52 @@ test('a lane shows the project branch only when git gives one', () => {
   assert.doesNotMatch(TaskBoard.laneHtml(withBranch, 'C--work-alpha'), /tb-lane-git/);
   assert.doesNotMatch(TaskBoard.laneHtml(BOARD, 'C--work-zeta'), /tb-lane-git/);
 });
+
+test('a ticket moved back to ToDo opens with a follow-up question and its notes to edit', () => {
+  let modal = null;
+  Object.assign(context, {
+    openModal: m => { modal = m; },
+    formGroup: (label, input) => `<label>${label}</label>${input}`,
+    setTimeout: () => {},
+    Projects: { data: [] }
+  });
+  TaskBoard.board = BOARD;
+  TaskBoard.openEditor('1', null, true);
+  assert.strictEqual(modal.title, 'Follow up ticket');
+  assert.match(modal.body, /^<p class="tb-editor-question">What should change\?/);
+  assert.match(modal.body, /<textarea id="tb-notes"[^>]*>first line\nsecond<\/textarea>/);
+  assert.doesNotMatch(modal.body, /readonly/);
+  TaskBoard.openEditor('1');
+  assert.strictEqual(modal.title, 'Edit ticket');
+  assert.doesNotMatch(modal.body, /tb-editor-question/);
+});
+
+test('dropping a ticket back into ToDo opens the follow-up dialog, other drops do not', async () => {
+  const load = TaskBoard.load;
+  const openEditor = TaskBoard.openEditor;
+  const opened = [];
+  let fail = false;
+  TaskBoard.load = async () => {};
+  TaskBoard.openEditor = (...args) => opened.push(args);
+  Object.assign(context, {
+    api: async () => { if (fail) throw new Error('nope'); },
+    toast: () => {}
+  });
+  const drop = async (card, column) => {
+    TaskBoard._drag = card;
+    const col = { dataset: { lane: card.project, column }, classList: { remove() {} }, querySelectorAll: () => [] };
+    await TaskBoard.onDrop({ currentTarget: col, clientY: 0, preventDefault() {} });
+  };
+  try {
+    await drop({ id: 'd', project: 'p', column: 'done' }, 'todo');
+    await drop({ id: 'r', project: 'p', column: 'ready' }, 'todo');
+    await drop({ id: 't', project: 'p', column: 'todo' }, 'ready');
+    await drop({ id: 'k', project: 'p', column: 'todo' }, 'todo');
+    fail = true;
+    await drop({ id: 'f', project: 'p', column: 'done' }, 'todo');
+  } finally {
+    TaskBoard.load = load;
+    TaskBoard.openEditor = openEditor;
+  }
+  assert.deepStrictEqual(plain(opened), [['d', null, true], ['r', null, true]]);
+});

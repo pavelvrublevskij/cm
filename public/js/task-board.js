@@ -325,8 +325,11 @@ const TaskBoard = {
     return (Projects.data || []).map(p => [p.slug, decodeName(p.slug)]);
   },
 
-  /** New card (id null, optionally preset to a lane) or edit an existing one. */
-  openEditor(id, lane) {
+  /**
+   * New card (id null, optionally preset to a lane) or edit an existing one. followUp: the card was
+   * just moved back to ToDo, so ask what to change or follow up on, with its notes ready to edit.
+   */
+  openEditor(id, lane, followUp) {
     const card = id ? TaskBoard.findCard(id) : null;
     if (id && !card) return;
     const options = TaskBoard.projectOptions();
@@ -340,7 +343,10 @@ const TaskBoard = {
       : formGroup('Project', frontmatterSelectHtml('tb-project', options, lane || options[0][0]));
     const editable = !card || card.column === 'todo';
     const ro = editable ? '' : ' readonly';
-    const body = projectField
+    const question = followUp && editable
+      ? '<p class="tb-editor-question">What should change? Edit the notes or add follow-up requirements/questions.</p>'
+      : '';
+    const body = question + projectField
       + formGroup('Title (optional)', `<input type="text" id="tb-title" value="${escapeAttr(card ? card.title : '')}"${ro}>`)
       + formGroup('Description / ticket number', `<textarea id="tb-notes" rows="8" placeholder="What Claude should do — this becomes your first message in the session"${ro}>${escapeHtml(card ? card.notes : '')}</textarea>`);
     const buttons = [];
@@ -354,8 +360,16 @@ const TaskBoard = {
       buttons.push({ label: 'Delete', danger: true, onClick: () => TaskBoard.confirmDelete(card.id) });
     }
     if (editable) buttons.push({ label: card ? 'Save' : 'Add', primary: true, onClick: () => TaskBoard.save(card) });
-    openModal({ title: !card ? 'New ticket' : editable ? 'Edit ticket' : 'Ticket', width: 560, body, buttons });
-    if (editable) setTimeout(() => { const t = document.getElementById('tb-notes'); if (t) t.focus(); }, 0);
+    const title = !card ? 'New ticket' : !editable ? 'Ticket' : question ? 'Follow up ticket' : 'Edit ticket';
+    openModal({ title, width: 560, body, buttons });
+    if (editable) {
+      setTimeout(() => {
+        const t = document.getElementById('tb-notes');
+        if (!t) return;
+        t.focus();
+        if (question) t.setSelectionRange(t.value.length, t.value.length);
+      }, 0);
+    }
   },
 
   async save(card) {
@@ -786,12 +800,16 @@ const TaskBoard = {
     if (!TaskBoard.dropAllowed(col)) return;
     e.preventDefault();
     const card = TaskBoard._drag;
+    const from = card.column;
     const index = TaskBoard.dropIndex(col, e.clientY);
+    let moved = false;
     try {
       await api('/api/task-board/cards/' + encodeURIComponent(card.id) + '/move', { method: 'POST', body: { column: col.dataset.column, index } });
+      moved = true;
     } catch (err) {
       toast(err.message, 'error');
     }
     await TaskBoard.load();
+    if (moved && from !== 'todo' && col.dataset.column === 'todo') TaskBoard.openEditor(card.id, null, true);
   }
 };
