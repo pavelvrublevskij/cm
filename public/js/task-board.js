@@ -219,6 +219,21 @@ const TaskBoard = {
     return card.column === column || (TaskBoard.USER_MOVES[card.column] || []).includes(column);
   },
 
+  /** Ticket types the workflow's first stage recognises: tooltip and icon. */
+  KIND_ICONS: {
+    bug: { label: 'Bug', path: 'M8 1.5a2.5 2.5 0 0 1 2.45 2H11a.75.75 0 0 1 .53 1.28l-.6.6c.33.47.56 1 .66 1.62h1.66a.75.75 0 0 1 0 1.5h-1.6v1h1.6a.75.75 0 0 1 0 1.5h-1.83A4 4 0 0 1 4.58 11H2.75a.75.75 0 0 1 0-1.5h1.6v-1h-1.6a.75.75 0 0 1 0-1.5h1.66c.1-.61.33-1.15.66-1.62l-.6-.6A.75.75 0 0 1 5 3.5h.55A2.5 2.5 0 0 1 8 1.5Zm-.75 5v6.92a2.5 2.5 0 0 0 1.5 0V6.5Z' },
+    feature: { label: 'Feature', path: 'M8 .75a.75.75 0 0 1 .7.48l1.6 4.17 4.17 1.6a.75.75 0 0 1 0 1.4l-4.17 1.6-1.6 4.17a.75.75 0 0 1-1.4 0l-1.6-4.17-4.17-1.6a.75.75 0 0 1 0-1.4l4.17-1.6 1.6-4.17A.75.75 0 0 1 8 .75Z' },
+    question: { label: 'Question', path: 'M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm0 11.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm0-8A2.75 2.75 0 0 0 5.25 6.25a.75.75 0 0 0 1.5 0 1.25 1.25 0 1 1 1.92 1.05c-.6.4-1.42 1-1.42 2.2a.75.75 0 0 0 1.5 0c0-.35.2-.55.75-.92A2.75 2.75 0 0 0 8 3.5Z' },
+    other: { label: 'Other', path: 'M3.75 1h5.5L13 4.75v9.5A1.75 1.75 0 0 1 11.25 16h-7.5A1.75 1.75 0 0 1 2 14.25V2.75C2 1.78 2.78 1 3.75 1Zm0 1.5a.25.25 0 0 0-.25.25v11.5c0 .14.11.25.25.25h7.5c.14 0 .25-.11.25-.25V5.5H9.25a.75.75 0 0 1-.75-.75V2.5Z' }
+  },
+
+  /** The ticket type icon shown before its heading, once the workflow recognised it. */
+  kindIconHtml(card) {
+    const kind = TaskBoard.KIND_ICONS[card.kind];
+    if (!kind) return '';
+    return `<span class="tb-card-kind tb-card-kind--${card.kind}" title="${kind.label}" aria-label="${kind.label}"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="${kind.path}"/></svg></span>`;
+  },
+
   /** Compact card: one line with the heading, and the current stage as dots (its name on hover). */
   lineCardHtml(card, heading, stages) {
     const at = stages ? stages.findIndex(s => s.id === card.column) : -1;
@@ -229,7 +244,7 @@ const TaskBoard = {
     const tip = heading + (gitBranch ? '\nBranch: ' + gitBranch : '');
     return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}" title="${escapeAttr(tip)}"
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
-        <span class="tb-line-text">${escapeHtml(heading)}</span>
+        <span class="tb-line-text">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</span>
         ${TaskBoard.badgeHtml(card)}
         ${dots}
         ${TaskBoard.deleteIconHtml(card)}
@@ -257,7 +272,7 @@ const TaskBoard = {
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         ${TaskBoard.deleteIconHtml(card)}
         ${badge ? `<div class="tb-card-head">${badge}</div>` : ''}
-        ${heading ? `<div class="tb-card-title">${escapeHtml(heading)}</div>` : ''}
+        ${heading ? `<div class="tb-card-title">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</div>` : ''}
         ${notes ? `<div class="tb-card-notes">${escapeHtml(notes)}</div>` : ''}
         ${gitBranch ? `<div class="tb-card-git" title="Worktree branch">&#5833; ${escapeHtml(gitBranch)}</div>` : ''}
         ${branch}

@@ -440,6 +440,15 @@ test('a ticket that took a condition shows it on its card', () => {
   assert.ok(!TaskBoard.cardHtml(Object.assign({}, card, { column: 'done' }), null, false).includes('tb-card-branch'));
 });
 
+test('a recognised ticket type shows its icon before the heading, in both card modes', () => {
+  const card = { id: 'k', title: 'Fix login', notes: '', column: 'done', kind: 'bug' };
+  assert.match(TaskBoard.cardHtml(card, null, false), /<div class="tb-card-title"><span class="tb-card-kind tb-card-kind--bug" title="Bug"[^]*?<\/span>Fix login<\/div>/);
+  assert.match(TaskBoard.cardHtml(card, null, true), /<span class="tb-line-text"><span class="tb-card-kind tb-card-kind--bug"/);
+  for (const kind of ['feature', 'question', 'other']) assert.match(TaskBoard.kindIconHtml({ kind }), new RegExp('tb-card-kind--' + kind));
+  assert.strictEqual(TaskBoard.kindIconHtml({}), '');
+  assert.strictEqual(TaskBoard.kindIconHtml({ kind: 'chore' }), '');
+});
+
 test('a ticket with a worktree shows its branch on the card, in compact mode on hover, and in the session banner', () => {
   const card = { id: 'g', title: 'Fix login', notes: '', project: 'p', column: 'done', worktree: 'cm-ab12', gitBranch: 'worktree-cm-ab12' };
   assert.match(TaskBoard.cardHtml(card, null, false), /class="tb-card-git" title="Worktree branch">&#5833; worktree-cm-ab12</);

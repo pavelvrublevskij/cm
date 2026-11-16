@@ -6699,6 +6699,15 @@ body.git-split-dragging {
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
+.tb-card-kind {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-right: 5px;
+  color: var(--text-secondary);
+}
+.tb-card-kind--bug { color: var(--danger, #e5534b); }
+.tb-card-kind--feature { color: var(--accent); }
+.tb-card-kind--question { color: var(--warning, #d29922); }
 .tb-card-notes {
   margin-top: 2px;
   font-size: 12px;

@@ -13,6 +13,7 @@
 - **Favorite projects** — star a project to pin it on top of the sidebar and All Projects; the rest fold into "Other projects".
 - **Saved workflows** — save a project's workflow under a name and load it again, even after the lane was removed; Export/Import a workflow as a JSON file to reuse it in another project.
 - **Fullscreen workflow editor** — a button in the workflow dialog's title bar maximizes it to the full window.
+- **Ticket type icon** — when a ticket starts, Claude recognises it as a bug, feature, question or other, and the card shows a matching icon before its title.
 - **Easier to spot the open session** — its pill in the active sessions bar and its sidebar row get a full accent border.
 
 ### Fixes

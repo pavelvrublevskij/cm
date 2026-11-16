@@ -112,6 +112,8 @@ test('stageMessage leads with the ticket on stage 1 and names skills and agents'
   assert.ok(first.startsWith('ABC-1 fix login\n\n[Task Board · stage 1/3: Plan]'));
   assert.match(first, /Use the "writing-plans" skill for this stage\.\nkeep it short/);
   assert.match(first, /CM-STAGE: done/);
+  assert.match(first, /"CM-TYPE: <type>".*bug, feature, question, other/);
+  assert.ok(!runner.stageMessage({}, stages, 1).includes('CM-TYPE'));
   assert.match(runner.stageMessage({}, stages, 1), /^\[Task Board · stage 2\/3: Check\]\n\nUse the "tester" subagent/);
   assert.match(runner.stageMessage({}, stages, 2), /Write the changelog/);
   assert.strictEqual(runner.stageMessage({ title: 'Only title', notes: '' }, stages, 0).split('\n')[0], 'Only title');
@@ -214,6 +216,29 @@ test('Stop with CM-STAGE: done moves to the next stage and sends it', async () =
   await wait(250);
   assert.strictEqual((await cardOf(card.id)).column, stages[1].id);
   assert.match(pasted(spawned[0].entry)[1], /^\[Task Board · stage 2\/2: Build\]/);
+});
+
+test('parseType reads the last known CM-TYPE line', () => {
+  assert.strictEqual(runner.parseType('x\nCM-TYPE: Bug\nCM-STAGE: done'), 'bug');
+  assert.strictEqual(runner.parseType('**CM-TYPE: question**'), 'question');
+  assert.strictEqual(runner.parseType('CM-TYPE: feature\nCM-TYPE: other'), 'other');
+  assert.strictEqual(runner.parseType('CM-TYPE: chore'), null);
+  assert.strictEqual(runner.parseType('no type here'), null);
+});
+
+test('Stop with a CM-TYPE line stores the ticket type; a restart clears it', async () => {
+  await setStages(['Plan', 'Build']);
+  const card = await addTicket({ notes: 'x' });
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Stop', { lastAssistantMessage: 'Which database?\nCM-TYPE: feature' });
+  assert.strictEqual((await cardOf(card.id)).kind, 'feature');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-TYPE: bug\nCM-STAGE: done' });
+  await wait(250);
+  assert.strictEqual((await cardOf(card.id)).kind, 'bug');
+  await request(app).post(`/api/task-board/cards/${card.id}/stop`);
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  assert.strictEqual((await cardOf(card.id)).kind, null);
 });
 
 test('needs input: no marker, a question, a notification; running again after the answer', async () => {
