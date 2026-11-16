@@ -37,6 +37,7 @@ const App = {
     Projects.load().then(() => {
       // Restore route from hash or default to settings
       App.restoreRoute();
+      Projects.startPolling();
     });
 
     if (typeof Autostart !== 'undefined') Autostart.checkFirstRun();
@@ -219,29 +220,7 @@ const App = {
       document.querySelectorAll('#view-project-detail .tab-btn').forEach(b => b.classList.remove('active'));
       document.getElementById('sessions-tab-btn').classList.add('active');
       Sessions.load(opts.slug);
-      // Show counts on tabs
-      const project = Projects.data.find(p => p.slug === opts.slug);
-      const memoryTabBtn = document.getElementById('memory-tab-btn');
-      if (memoryTabBtn) {
-        const count = project ? project.memoryCount : 0;
-        memoryTabBtn.textContent = count > 0 ? `Memory (${count})` : 'Memory';
-      }
-      const sessionsTabBtn = document.getElementById('sessions-tab-btn');
-      if (sessionsTabBtn) {
-        const count = project ? project.sessionCount : 0;
-        sessionsTabBtn.style.display = count > 0 ? '' : 'none';
-        sessionsTabBtn.textContent = count > 0 ? `Sessions (${count})` : 'Sessions';
-      }
-      const skillsTabBtn = document.getElementById('skills-tab-btn');
-      if (skillsTabBtn) {
-        const count = project ? project.skillsCount : 0;
-        skillsTabBtn.textContent = count > 0 ? `Skills (${count})` : 'Skills';
-      }
-      const stylesTabBtn = document.getElementById('output-styles-tab-btn');
-      if (stylesTabBtn) {
-        const count = project ? project.outputStylesCount : 0;
-        stylesTabBtn.textContent = count > 0 ? `Output Styles (${count})` : 'Output Styles';
-      }
+      Projects.renderTabCounts(opts.slug);
       // Load per-project token usage in header
       ProjectUsage.load(opts.slug);
       if (typeof GitActions !== 'undefined') GitActions.init(opts.slug);
