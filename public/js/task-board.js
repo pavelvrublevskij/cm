@@ -555,10 +555,10 @@ const TaskBoard = {
     return card.gitBranch || (card.worktree ? 'worktree-' + card.worktree : '');
   },
 
-  /** A Finalize or Done ticket with a worktree takes its worktree and branch with it; the session always stays. */
+  /** A ticket with a worktree takes its worktree with it; its branch and session always stay. */
   deleteMessageHtml(card) {
-    const worktree = ['finalize', 'done'].includes(card.column) && card.worktree
-      ? ` Its worktree <code>.claude/worktrees/${escapeHtml(card.worktree)}</code> and branch <code>${escapeHtml(TaskBoard.gitBranchOf(card))}</code> are removed too.`
+    const worktree = card.worktree
+      ? ` Its worktree <code>.claude/worktrees/${escapeHtml(card.worktree)}</code> is removed; branch <code>${escapeHtml(TaskBoard.gitBranchOf(card))}</code> is kept.`
       : '';
     return `<p>The ticket is removed from the board.${worktree} Its session, if any, stays in the session history.</p>`;
   },

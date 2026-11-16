@@ -97,14 +97,14 @@ router.post('/cards/:id/pr', wrapRoute(async (req, res) => {
 
 /**
  * DELETE /api/task-board/cards/:id — only from ToDo, Done or waiting in Finalize; the card's session
- * stays in history. Deleting a Finalize or Done ticket also removes its worktree and branch:
- * { ok, warning } when they had to stay.
+ * stays in history. Deleting a ticket also removes its worktree (its branch stays):
+ * { ok, warning } when the worktree had to stay.
  */
 router.delete('/cards/:id', wrapRoute(async (req, res) => {
   const result = board.deleteCard(req.params.id);
   if (result.error || result.notFound) return send(res, result);
   const { card } = result;
-  const warning = ['finalize', 'done'].includes(card.column) && card.worktree ? await runner.removeWorktree(card) : '';
+  const warning = card.worktree ? await runner.removeWorktree(card) : '';
   res.json({ ok: true, warning });
 }));
 

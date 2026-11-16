@@ -395,11 +395,12 @@ test('Recommend loads a chain of stages ending in Done', () => {
   delete context.toast;
 });
 
-test('deleting a Done ticket with a worktree says the worktree and branch go too', () => {
-  assert.match(TaskBoard.deleteMessageHtml({ column: 'done', worktree: 'cm-ab12' }), /<code>\.claude\/worktrees\/cm-ab12<\/code> and branch <code>worktree-cm-ab12<\/code> are removed too/);
-  assert.ok(!TaskBoard.deleteMessageHtml({ column: 'todo', worktree: 'cm-ab12' }).includes('worktree'));
+test('deleting a ticket with a worktree says the worktree goes and the branch is kept', () => {
+  for (const column of ['todo', 'finalize', 'done']) {
+    assert.match(TaskBoard.deleteMessageHtml({ column, worktree: 'cm-ab12' }), /<code>\.claude\/worktrees\/cm-ab12<\/code> is removed; branch <code>worktree-cm-ab12<\/code> is kept/);
+  }
   assert.ok(!TaskBoard.deleteMessageHtml({ column: 'done' }).includes('worktree'));
-  assert.match(TaskBoard.deleteMessageHtml({ column: 'finalize', finalized: true, worktree: 'cm-ab12', gitBranch: 'feature/login' }), /branch <code>feature\/login<\/code> are removed too/);
+  assert.match(TaskBoard.deleteMessageHtml({ column: 'finalize', finalized: true, worktree: 'cm-ab12', gitBranch: 'feature/login' }), /branch <code>feature\/login<\/code> is kept/);
 });
 
 test('a Finalize ticket waiting on its branch: merge or PR badge, deletable, no longer in the workflow', () => {
