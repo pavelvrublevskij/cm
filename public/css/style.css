@@ -6683,6 +6683,40 @@ body.git-split-dragging {
 .tb-card:hover .tb-card-delete {
   visibility: visible;
 }
+.tb-card-memo {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+.tb-card--line .tb-card-memo {
+  margin-top: 0;
+  height: 16px;
+  flex-shrink: 0;
+}
+.tb-card:hover .tb-card-memo,
+.tb-card-memo--has {
+  opacity: 1;
+}
+.tb-card-memo--open {
+  color: var(--accent);
+}
+.tb-todo-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.tb-todo-row .tb-todo-text {
+  flex: 1;
+}
+.tb-todo-row .tb-todo-done:checked + .tb-todo-text {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
 .tb-badge {
   font-size: 10px;
   padding: 0 5px;

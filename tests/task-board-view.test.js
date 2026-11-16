@@ -471,6 +471,17 @@ test('a lane shows the project branch only when git gives one', () => {
   assert.doesNotMatch(TaskBoard.laneHtml(BOARD, 'C--work-zeta'), /tb-lane-git/);
 });
 
+test('Finalize and Done cards show a notes button with done/total to-dos', () => {
+  const card = { id: '9', title: 'T', notes: '', project: 'C--work-zeta', column: 'done', closed: false, memo: 'wait\nmore', todos: [{ text: 'a', done: true }, { text: 'b', done: false }] };
+  const html = TaskBoard.cardHtml(card, [], false);
+  assert.match(html, /tb-card-memo tb-card-memo--has tb-card-memo--open/);
+  assert.match(html, /1\/2/);
+  assert.match(html, /title="wait"/);
+  assert.match(TaskBoard.cardHtml(card, [], true), /tb-card-memo/);
+  assert.doesNotMatch(TaskBoard.cardHtml({ ...card, column: 'todo' }, [], false), /tb-card-memo/);
+  assert.doesNotMatch(TaskBoard.memoIconHtml({ ...card, memo: '', todos: [] }), /--has/);
+});
+
 test('a ticket moved back to ToDo opens with a follow-up question and its notes to edit', () => {
   let modal = null;
   Object.assign(context, {

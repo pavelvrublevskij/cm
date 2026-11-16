@@ -7,6 +7,7 @@ const TaskBoard = {
   COMPACT_KEY: 'claude-manager-task-board-compact',
   COLUMN_TITLES: { todo: 'ToDo', ready: 'Ready', finalize: 'Finalize', done: 'Done' },
   DELETABLE: ['todo', 'done'],
+  MEMO_COLUMNS: ['finalize', 'done'],
   USER_MOVES: { todo: ['ready'], ready: ['todo'], done: ['todo'] },
   RUN_LABELS: { starting: 'starting', running: 'running', needs_input: 'needs input', conflict: 'conflict' },
   ATTENTION_TOAST_MS: 15000,
@@ -247,8 +248,64 @@ const TaskBoard = {
         <span class="tb-line-text">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</span>
         ${TaskBoard.badgeHtml(card)}
         ${dots}
+        ${TaskBoard.memoIconHtml(card)}
         ${TaskBoard.deleteIconHtml(card)}
       </div>`;
+  },
+
+  /** Notes button on a Finalize/Done card: highlighted when it has a note or to-dos, with done/total to-dos. */
+  memoIconHtml(card) {
+    if (!TaskBoard.MEMO_COLUMNS.includes(card.column)) return '';
+    const todos = card.todos || [];
+    const memo = (card.memo || '').trim();
+    const has = memo || todos.length;
+    const open = todos.filter(t => !t.done).length;
+    const count = todos.length ? `<span class="tb-memo-count">${todos.length - open}/${todos.length}</span>` : '';
+    const tip = memo ? memo.split('\n')[0] : has ? `${open} open to-do${open === 1 ? '' : 's'}` : 'Add notes / to-dos';
+    return `<button class="icon-btn tb-card-memo${has ? ' tb-card-memo--has' : ''}${open ? ' tb-card-memo--open' : ''}" draggable="false" title="${escapeAttr(tip)}" aria-label="Notes"
+        onclick="event.stopPropagation(); TaskBoard.openMemo('${escapeAttr(card.id)}')"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M2.5 1.75C2.5.78 3.28 0 4.25 0h7.5c.97 0 1.75.78 1.75 1.75v12.5A1.75 1.75 0 0 1 11.75 16h-7.5A1.75 1.75 0 0 1 2.5 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .14.11.25.25.25h7.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25ZM5 4.75A.75.75 0 0 1 5.75 4h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 4.75Zm0 3A.75.75 0 0 1 5.75 7h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 7.75Zm0 3a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"/></svg>${count}</button>`;
+  },
+
+  todoRowHtml(todo) {
+    return `<div class="tb-todo-row">
+        <input type="checkbox" class="tb-todo-done"${todo.done ? ' checked' : ''}>
+        <input type="text" class="tb-todo-text" maxlength="300" value="${escapeAttr(todo.text)}" placeholder="To-do">
+        <button class="btn btn-sm" onclick="this.parentElement.remove()" title="Remove" aria-label="Remove to-do">&times;</button>
+      </div>`;
+  },
+
+  /** Own note and to-do list on a Finalize/Done ticket — for the user only, never sent to Claude. */
+  openMemo(id) {
+    const card = TaskBoard.findCard(id);
+    if (!card) return;
+    const heading = card.title || (card.notes || '').trim().split('\n')[0];
+    const body = `<div class="tb-editor-project">${escapeHtml(heading)}</div>`
+      + formGroup('Note', `<textarea id="tb-memo" rows="5" maxlength="5000" placeholder="Only for you — not sent to Claude">${escapeHtml(card.memo || '')}</textarea>`)
+      + formGroup('To-do', `<div id="tb-todos">${(card.todos || []).map(TaskBoard.todoRowHtml).join('')}</div>
+          <button class="btn btn-sm" onclick="TaskBoard.addTodoRow()">+ To-do</button>`);
+    openModal({ title: 'Notes', width: 520, body, buttons: [{ label: 'Save', primary: true, onClick: () => TaskBoard.saveMemo(card.id) }] });
+    if (!(card.todos || []).length && !card.memo) setTimeout(() => { const t = document.getElementById('tb-memo'); if (t) t.focus(); }, 0);
+  },
+
+  addTodoRow() {
+    const list = document.getElementById('tb-todos');
+    list.insertAdjacentHTML('beforeend', TaskBoard.todoRowHtml({ text: '', done: false }));
+    list.lastElementChild.querySelector('.tb-todo-text').focus();
+  },
+
+  async saveMemo(id) {
+    const todos = Array.from(document.querySelectorAll('#tb-todos .tb-todo-row')).map(row => ({
+      text: row.querySelector('.tb-todo-text').value,
+      done: row.querySelector('.tb-todo-done').checked
+    }));
+    const memo = document.getElementById('tb-memo').value;
+    try {
+      await api('/api/task-board/cards/' + encodeURIComponent(id) + '/memo', { method: 'PUT', body: { memo, todos } });
+    } catch (e) {
+      toast(e.message, 'error');
+      return false;
+    }
+    await TaskBoard.load();
   },
 
   deleteIconHtml(card) {
@@ -277,6 +334,7 @@ const TaskBoard = {
         ${gitBranch ? `<div class="tb-card-git" title="Worktree branch">&#5833; ${escapeHtml(gitBranch)}</div>` : ''}
         ${branch}
         ${message ? `<div class="tb-card-run">${escapeHtml(message)}</div>` : ''}
+        ${TaskBoard.memoIconHtml(card)}
       </div>`;
   },
 
