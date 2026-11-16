@@ -200,6 +200,20 @@ test('the toolbar has the Saved menu, Export and Import', () => {
   assert.ok(!html.includes('No saved workflows'));
 });
 
+test('the Saved menu marks the saved workflow the stages match, ignoring box positions', () => {
+  const copy = WF.stages.map(s => Object.assign({}, s, { pos: { x: 999, y: 999 } }));
+  const changed = WF.stages.map((s, i) => Object.assign({}, s, i ? { prompt: 'Other' } : {}));
+  const html = TaskBoard.workflowHtml(Object.assign({}, WF, { saved: [{ name: 'Bugfix', stages: [] }, { name: 'Std <x>', stages: copy }] }));
+  assert.match(html, />Saved: Std &lt;x&gt; </);
+  assert.match(html, /id="tb-wf-saved-menu" data-active="1"/);
+  assert.match(html, /tb-wf-saved-row active" aria-current="true">\s*<button[^>]*TaskBoard.wfLoad\(1\)" title="In use">&#10003; Std &lt;x&gt;</);
+  assert.strictEqual((html.match(/tb-wf-saved-row active/g) || []).length, 1);
+  const none = TaskBoard.workflowHtml(Object.assign({}, WF, { saved: [{ name: 'Std', stages: changed }] }));
+  assert.match(none, />Saved · 1 </);
+  assert.match(none, /data-active="-1"/);
+  assert.ok(!none.includes('tb-wf-saved-row active'));
+});
+
 test('export keeps the stage fields and drops editor state', () => {
   const data = plain(TaskBoard.exportData(Object.assign({}, WF, { slug: 'C--work-alpha' })));
   assert.strictEqual(data.name, 'work/alpha');

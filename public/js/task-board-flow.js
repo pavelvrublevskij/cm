@@ -340,6 +340,7 @@ const TaskBoardFlow = {
   renderSvg() {
     const canvas = document.getElementById('tbf-canvas');
     if (canvas && TaskBoard._wf) canvas.innerHTML = TaskBoardFlow.svgHtml(TaskBoard._wf, TaskBoardFlow._drag);
+    TaskBoard.renderSavedMenu();
   },
 
   renderPanel() {

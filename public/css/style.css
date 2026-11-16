@@ -6813,6 +6813,10 @@ body.git-split-dragging {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tb-wf-saved-row.active .action-menu-item {
+  font-weight: 600;
+  color: var(--accent);
+}
 .tb-wf-saved-empty {
   padding: 6px 10px;
   font-size: 12px;

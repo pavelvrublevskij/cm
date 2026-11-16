@@ -630,17 +630,29 @@ const TaskBoard = {
       </div>`;
   },
 
+  /** Whether two stage lists are the same workflow; box positions are ignored. Pure, for tests. */
+  sameStages(a, b) {
+    const key = stages => JSON.stringify((stages || []).map(s => [s.id, s.title, s.type, s.ref, s.prompt, s.next, s.branches || []]));
+    return key(a) === key(b);
+  },
+
+  /** Index of the saved workflow the editor's stages match, or -1. */
+  activeSavedIndex(wf) {
+    return (wf.saved || []).findIndex(w => TaskBoard.sameStages(w.stages, wf.stages));
+  },
+
   /** The Saved dropdown: named workflows of this project to load or delete, and Save as. */
   savedMenuHtml(wf) {
     const saved = wf.saved || [];
+    const active = TaskBoard.activeSavedIndex(wf);
     const rows = saved.length
-      ? saved.map((w, i) => `<div class="tb-wf-saved-row">
-          <button class="action-menu-item" onclick="TaskBoard.wfLoad(${i})" title="Load into the editor">${escapeHtml(w.name)}</button>
+      ? saved.map((w, i) => `<div class="tb-wf-saved-row${i === active ? ' active' : ''}"${i === active ? ' aria-current="true"' : ''}>
+          <button class="action-menu-item" onclick="TaskBoard.wfLoad(${i})" title="${i === active ? 'In use' : 'Load into the editor'}">${i === active ? '&#10003; ' : ''}${escapeHtml(w.name)}</button>
           <button class="btn btn-sm" onclick="TaskBoard.wfDeleteSaved(${i})" title="Delete" aria-label="Delete ${escapeAttr(w.name)}">&times;</button>
         </div>`).join('')
       : '<div class="tb-wf-dim tb-wf-saved-empty">No saved workflows</div>';
-    return `<div class="action-menu">
-        <button class="btn btn-sm" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)">Saved${saved.length ? ' · ' + saved.length : ''} <span class="dd-arrow"></span></button>
+    return `<div class="action-menu" id="tb-wf-saved-menu" data-active="${active}">
+        <button class="btn btn-sm" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)">Saved${active >= 0 ? ': ' + escapeHtml(saved[active].name) : saved.length ? ' · ' + saved.length : ''} <span class="dd-arrow"></span></button>
         <div class="action-menu-panel tb-wf-saved" onclick="event.stopPropagation()">
           ${rows}
           <div class="tb-wf-save-as">
@@ -649,6 +661,13 @@ const TaskBoard = {
           </div>
         </div>
       </div>`;
+  },
+
+  /** Redraw the Saved menu when diagram edits change which saved workflow the stages match. */
+  renderSavedMenu() {
+    const el = document.getElementById('tb-wf-saved-menu');
+    const wf = TaskBoard._wf;
+    if (el && wf && el.dataset.active !== String(TaskBoard.activeSavedIndex(wf))) el.outerHTML = TaskBoard.savedMenuHtml(wf);
   },
 
   /** Saved or imported stages replace the editor's, checked by the server; Save keeps them. */

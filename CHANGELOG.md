@@ -11,7 +11,7 @@
 - **Follow up a ticket** — dragging a ticket back to ToDo opens it with its notes, asking what should change or be followed up.
 - **Project branch on the board** — each lane shows the project's current git branch, where worktree tickets merge at Finalize.
 - **Favorite projects** — star a project to pin it on top of the sidebar and All Projects; the rest fold into "Other projects".
-- **Saved workflows** — save a project's workflow under a name and load it again, even after the lane was removed; Export/Import a workflow as a JSON file to reuse it in another project.
+- **Saved workflows** — save a project's workflow under a name and load it again, even after the lane was removed; Export/Import a workflow as a JSON file to reuse it in another project. The Saved menu marks the saved workflow in use.
 - **Fullscreen workflow editor** — a button in the workflow dialog's title bar maximizes it to the full window.
 - **Ticket notes** — on Finalize and Done tickets keep your own note and to-do list (never sent to Claude); the card shows done/total to-dos.
 - **Ticket type icon** — when a ticket starts, Claude recognises it as a bug, feature, question or other, and the card shows a matching icon before its title.
