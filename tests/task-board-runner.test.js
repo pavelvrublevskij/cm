@@ -657,7 +657,37 @@ test('finishing a worktree ticket: claude merges its base in and names the branc
   const del = await request(app).delete('/api/task-board/cards/' + card.id);
   assert.deepStrictEqual(del.body, { ok: true, warning: '' });
   assert.ok(!fs.existsSync(wtDir(card)));
-  assert.strictEqual(sh(['branch', '--list', 'feature/ticket-0'], GIT_ROOT), '');
+  assert.match(sh(['branch', '--list', 'feature/ticket-0'], GIT_ROOT), /feature\/ticket-0/, 'the branch stays');
+});
+
+test('a ticket deleted from ToDo loses its worktree; its branch stays', async () => {
+  makeRepo();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await toWaitingInFinalize(card, 0, 'feature/back');
+  await request(app).post(`/api/task-board/cards/${card.id}/merge`);
+  assert.strictEqual((await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'todo' })).status, 200);
+
+  const del = await request(app).delete('/api/task-board/cards/' + card.id);
+  assert.deepStrictEqual(del.body, { ok: true, warning: '' });
+  assert.ok(!fs.existsSync(wtDir(card)));
+  assert.match(sh(['branch', '--list', 'feature/back'], GIT_ROOT), /feature\/back/);
+});
+
+test('a worktree with uncommitted changes is kept on delete and reported; the ticket still goes', async () => {
+  makeRepo();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await toWaitingInFinalize(card, 0, 'feature/dirty');
+  fs.writeFileSync(path.join(wtDir(card), 'wip.txt'), 'wip\n');
+
+  const del = await request(app).delete('/api/task-board/cards/' + card.id);
+  assert.strictEqual(del.body.ok, true);
+  assert.match(del.body.warning, /^The worktree \.claude\/worktrees\/cm-\w{8} was kept: /);
+  assert.ok(fs.existsSync(wtDir(card)));
+  assert.strictEqual(await cardOf(card.id), undefined);
 });
 
 test('three tickets at once end in Finalize on three branches, each from the parent branch', async () => {
