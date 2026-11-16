@@ -28,7 +28,7 @@ async function api(url, opts = {}) {
 }
 
 /** Show a toast notification; `onClick` makes it clickable (a click runs it and closes the toast). */
-function toast(message, type = 'success', { duration = 3000, onClick } = {}) {
+function toast(message, type = 'success', { duration = 15000, onClick } = {}) {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
@@ -38,7 +38,7 @@ function toast(message, type = 'success', { duration = 3000, onClick } = {}) {
     el.addEventListener('click', () => { el.remove(); onClick(); });
   }
   container.appendChild(el);
-  setTimeout(() => el.remove(), duration);
+  setTimeout(() => el.remove(), Math.max(duration, 15000));
 }
 
 function stripAnsi(text) {

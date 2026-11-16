@@ -29,14 +29,14 @@ function setup() {
   return { toast: sandbox.toast, container, timers };
 }
 
-test('a toast closes after 3s by default and is not clickable', () => {
+test('a toast closes after 15s by default and is not clickable', () => {
   const { toast, container, timers } = setup();
   toast('Saved');
   const el = container.children[0];
   assert.strictEqual(el.className, 'toast toast-success');
   assert.strictEqual(el.classes.length, 0);
   assert.strictEqual(el.listeners.click, undefined);
-  assert.strictEqual(timers[0].ms, 3000);
+  assert.strictEqual(timers[0].ms, 15000);
   timers[0].fn();
   assert.ok(el.removed);
 });
@@ -51,4 +51,12 @@ test('a toast with a duration and onClick stays that long and a click runs it an
   el.listeners.click();
   assert.strictEqual(clicked, 1);
   assert.ok(el.removed);
+});
+
+test('a toast stays at least 15s even when asked for less, and keeps a longer duration', () => {
+  const { toast, timers } = setup();
+  toast('Short', 'success', { duration: 2000 });
+  toast('Long', 'success', { duration: 20000 });
+  assert.strictEqual(timers[0].ms, 15000);
+  assert.strictEqual(timers[1].ms, 20000);
 });
