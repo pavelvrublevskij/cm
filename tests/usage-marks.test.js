@@ -110,6 +110,15 @@ test('mark impact compares the mark window before vs after, scoped to the mark p
   assert.strictEqual(mark.projectName.length > 0, true);
 });
 
+test('a mark saved on a worktree slug shows under its parent project with the parent usage', async () => {
+  const m = await request(app).post('/api/usage/marks').send({ date: '2025-06-10', title: 'Worktree mark', project: SLUG + '--claude-worktrees-cm-1' });
+  const res = await request(app).get('/api/usage/marks?projects=' + SLUG + '&from=2025-06-01&to=2025-06-30');
+  const mark = res.body.marks.find(x => x.id === m.body.id);
+  assert.ok(mark);
+  assert.strictEqual(mark.impact.before.activeDays, 2);
+  assert.strictEqual(mark.impact.after.avgTokensPerDay, 500);
+});
+
 test('mark impact reports efficiency that does not grow with workload', async () => {
   const m = await request(app).post('/api/usage/marks').send({ date: '2025-06-10', title: 'Efficiency', project: SLUG });
   const res = await request(app).get('/api/usage/marks?projects=' + SLUG);
