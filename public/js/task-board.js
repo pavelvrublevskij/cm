@@ -531,12 +531,119 @@ const TaskBoard = {
         <button class="btn btn-sm" onclick="TaskBoard.wfAdd()"${wf.stages.length >= 10 ? ' disabled' : ''}>+ Add stage</button>
         <button class="btn btn-sm" onclick="TaskBoard.wfRecommend()" title="Pick stages from this project's skills by name and description — no AI">Recommend</button>
         <button class="btn btn-sm" onclick="TaskBoard.wfLayout()" title="Arrange the stages from left to right">Auto-layout</button>
+        ${TaskBoard.savedMenuHtml(wf)}
+        <button class="btn btn-sm" onclick="TaskBoard.wfExport()" title="Download the stages as a JSON file">Export</button>
+        <button class="btn btn-sm" onclick="document.getElementById('tb-wf-file').click()" title="Load stages from an exported JSON file">Import</button>
+        <input type="file" id="tb-wf-file" accept=".json,application/json" hidden onchange="TaskBoard.wfImportFile(this)">
       </div>
       ${empty}
       <div class="tbf">
         <div class="tbf-canvas" id="tbf-canvas">${TaskBoardFlow.svgHtml(wf, null)}</div>
         <div class="tbf-panel" id="tbf-panel">${TaskBoardFlow.panelHtml(wf)}</div>
       </div>`;
+  },
+
+  /** The Saved dropdown: named workflows of this project to load or delete, and Save as. */
+  savedMenuHtml(wf) {
+    const saved = wf.saved || [];
+    const rows = saved.length
+      ? saved.map((w, i) => `<div class="tb-wf-saved-row">
+          <button class="action-menu-item" onclick="TaskBoard.wfLoad(${i})" title="Load into the editor">${escapeHtml(w.name)}</button>
+          <button class="btn btn-sm" onclick="TaskBoard.wfDeleteSaved(${i})" title="Delete" aria-label="Delete ${escapeAttr(w.name)}">&times;</button>
+        </div>`).join('')
+      : '<div class="tb-wf-dim tb-wf-saved-empty">No saved workflows</div>';
+    return `<div class="action-menu">
+        <button class="btn btn-sm" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)">Saved${saved.length ? ' · ' + saved.length : ''} <span class="dd-arrow"></span></button>
+        <div class="action-menu-panel tb-wf-saved" onclick="event.stopPropagation()">
+          ${rows}
+          <div class="tb-wf-save-as">
+            <input type="text" id="tb-wf-name" placeholder="Name" maxlength="60" aria-label="Workflow name">
+            <button class="btn btn-sm" onclick="TaskBoard.wfSaveAs()">Save as</button>
+          </div>
+        </div>
+      </div>`;
+  },
+
+  /** Saved or imported stages replace the editor's, checked by the server; Save keeps them. */
+  async wfApply(stages, message) {
+    const wf = TaskBoard._wf;
+    let data;
+    try {
+      data = await api('/api/task-board/lanes/' + encodeURIComponent(wf.slug) + '/workflow/check', { method: 'POST', body: { stages } });
+    } catch (e) {
+      toast(e.message, 'error');
+      return;
+    }
+    wf.stages = data.stages;
+    wf.missing = data.missing;
+    TaskBoardFlow.prepare(wf);
+    TaskBoard.renderWorkflow();
+    toast(message);
+  },
+
+  wfLoad(i) {
+    const w = TaskBoard._wf.saved[i];
+    TaskBoard.wfApply(w.stages, `"${w.name}" loaded — review it and Save`);
+  },
+
+  async wfSaveAs() {
+    const wf = TaskBoard._wf;
+    const name = document.getElementById('tb-wf-name').value;
+    try {
+      wf.saved = (await api('/api/task-board/lanes/' + encodeURIComponent(wf.slug) + '/workflows', { method: 'POST', body: { name, stages: wf.stages } })).saved;
+    } catch (e) {
+      toast(e.message, 'error');
+      return;
+    }
+    TaskBoard.renderWorkflow();
+    toast(`Saved as "${name.trim()}"`);
+  },
+
+  async wfDeleteSaved(i) {
+    const wf = TaskBoard._wf;
+    const name = wf.saved[i].name;
+    try {
+      wf.saved = (await api('/api/task-board/lanes/' + encodeURIComponent(wf.slug) + '/workflows/' + encodeURIComponent(name), { method: 'DELETE' })).saved;
+    } catch (e) {
+      toast(e.message, 'error');
+      return;
+    }
+    TaskBoard.renderWorkflow();
+    toast(`"${name}" deleted`);
+  },
+
+  /** What Export downloads and Import reads. Pure, for tests. */
+  exportData(wf) {
+    return { name: decodeName(wf.slug), stages: wf.stages.map(({ id, title, type, ref, prompt, next, branches, pos }) => ({ id, title, type, ref, prompt, next, branches, pos })) };
+  },
+
+  wfExport() {
+    const data = TaskBoard.exportData(TaskBoard._wf);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = data.name.replace(/[^\w.-]+/g, '-') + '-workflow.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+
+  async wfImportFile(input) {
+    const file = input.files[0];
+    input.value = '';
+    if (!file) return;
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch (_) {
+      toast('Not a workflow file', 'error');
+      return;
+    }
+    const stages = data && Array.isArray(data.stages) ? data.stages : null;
+    if (!stages) {
+      toast('Not a workflow file', 'error');
+      return;
+    }
+    TaskBoard.wfApply(stages, 'Workflow imported — review it and Save');
   },
 
   /** A new stage gets its id here, so arrows can point at it before the workflow is saved. */

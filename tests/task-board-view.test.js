@@ -186,6 +186,27 @@ test('the diff view shows current and recommended stages side by side', () => {
   assert.match(html, /Keep current/);
 });
 
+test('the toolbar has the Saved menu, Export and Import', () => {
+  const none = TaskBoard.workflowHtml(WF);
+  assert.match(none, />Saved <span class="dd-arrow">/);
+  assert.match(none, /No saved workflows/);
+  assert.match(none, /TaskBoard.wfSaveAs\(\)/);
+  assert.match(none, /TaskBoard.wfExport\(\)"[^>]*>Export</);
+  assert.match(none, /id="tb-wf-file"[^>]*onchange="TaskBoard.wfImportFile\(this\)"/);
+  const html = TaskBoard.workflowHtml(Object.assign({}, WF, { saved: [{ name: 'Std <x>', stages: [] }, { name: 'Bugfix', stages: [] }] }));
+  assert.match(html, />Saved · 2 </);
+  assert.match(html, /TaskBoard.wfLoad\(0\)" title="Load into the editor">Std &lt;x&gt;</);
+  assert.match(html, /TaskBoard.wfDeleteSaved\(1\)/);
+  assert.ok(!html.includes('No saved workflows'));
+});
+
+test('export keeps the stage fields and drops editor state', () => {
+  const data = plain(TaskBoard.exportData(Object.assign({}, WF, { slug: 'C--work-alpha' })));
+  assert.strictEqual(data.name, 'work/alpha');
+  assert.deepStrictEqual(Object.keys(data.stages[0]).sort(), ['branches', 'id', 'next', 'pos', 'prompt', 'ref', 'title', 'type']);
+  assert.deepStrictEqual(data.stages.map(s => s.title), ['Plan', 'Do <it>']);
+});
+
 test('an empty workflow invites Recommend', () => {
   const html = TaskBoard.workflowHtml(Object.assign({}, WF, { stages: [], skillsChanged: false }));
   assert.match(html, /No stages yet/);

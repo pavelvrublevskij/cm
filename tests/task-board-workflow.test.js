@@ -39,6 +39,7 @@ before(() => {
 
 beforeEach(() => {
   fs.rmSync(paths.TASK_BOARD_FILE, { force: true });
+  fs.rmSync(paths.TASK_BOARD_WORKFLOWS_FILE, { force: true });
 });
 
 const A = (kind, name, description, source = 'global') => ({ kind, name, description, source });
@@ -225,4 +226,48 @@ test('a stage that still holds tickets cannot be removed', async () => {
   assert.match(res.body.error, /still has tickets/);
   const kept = await request(app).put(`/api/task-board/lanes/${SLUG}/workflow`).send({ stages: [Object.assign({}, saved.stages[0], { title: 'Planning' })] });
   assert.strictEqual(kept.status, 200);
+});
+
+test('named workflows are saved, listed, replaced by name and deleted', async () => {
+  await request(app).put('/api/task-board/lanes/' + SLUG).send({});
+  const url = `/api/task-board/lanes/${SLUG}/workflows`;
+  const plan = [{ title: 'Plan', type: 'skill', ref: 'writing-plans' }];
+  assert.strictEqual((await request(app).post(url).send({ name: ' ', stages: plan })).status, 400);
+  assert.strictEqual((await request(app).post(url).send({ name: 'x'.repeat(61), stages: plan })).status, 400);
+  assert.strictEqual((await request(app).post(url).send({ name: 'Bad', stages: [{ title: 'X', type: 'nope' }] })).status, 400);
+  let res = await request(app).post(url).send({ name: ' Standard ', stages: plan });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  await request(app).post(url).send({ name: 'Bugfix', stages: plan });
+  res = await request(app).post(url).send({ name: 'Standard', stages: [{ title: 'Do', type: 'prompt', prompt: 'Do it' }] });
+  assert.deepStrictEqual(res.body.saved.map(w => w.name), ['Bugfix', 'Standard']);
+  assert.strictEqual(res.body.saved[1].stages[0].title, 'Do');
+  const got = (await request(app).get(`/api/task-board/lanes/${SLUG}/workflow`)).body;
+  assert.deepStrictEqual(got.saved.map(w => w.name), ['Bugfix', 'Standard']);
+  res = await request(app).delete(`${url}/Bugfix`);
+  assert.deepStrictEqual(res.body.saved.map(w => w.name), ['Standard']);
+  assert.strictEqual((await request(app).delete(`${url}/Bugfix`)).status, 404);
+});
+
+test('saved workflows stay after the lane is removed and come back with it', async () => {
+  await request(app).put('/api/task-board/lanes/' + SLUG).send({});
+  await request(app).post(`/api/task-board/lanes/${SLUG}/workflows`).send({ name: 'Standard', stages: [{ title: 'Plan', type: 'skill', ref: 'writing-plans' }] });
+  assert.strictEqual((await request(app).delete('/api/task-board/lanes/' + SLUG)).status, 200);
+  await request(app).put('/api/task-board/lanes/' + SLUG).send({});
+  const got = (await request(app).get(`/api/task-board/lanes/${SLUG}/workflow`)).body;
+  assert.deepStrictEqual(got.stages, []);
+  assert.deepStrictEqual(got.saved.map(w => w.name), ['Standard']);
+});
+
+test('check keeps stages whose skill is missing and reports them; broken stages are refused', async () => {
+  const url = `/api/task-board/lanes/${SLUG}/workflow/check`;
+  const res = await request(app).post(url).send({ stages: [
+    { id: 's-aaaaaa', title: 'Plan', type: 'skill', ref: 'writing-plans' },
+    { id: 's-bbbbbb', title: 'Other', type: 'skill', ref: 'from-another-project' }
+  ] });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.deepStrictEqual(res.body.stages.map(s => s.id), ['s-aaaaaa', 's-bbbbbb']);
+  assert.deepStrictEqual(res.body.missing, ['s-bbbbbb']);
+  assert.strictEqual((await request(app).post(url).send({ stages: 'nope' })).status, 400);
+  assert.strictEqual((await request(app).post(url).send({ stages: [{ title: '', type: 'prompt', prompt: 'x' }] })).status, 400);
+  assert.strictEqual((await request(app).post(url).send({ stages: [{ title: 'No ref', type: 'skill', ref: ' ' }] })).status, 400);
 });

@@ -6749,6 +6749,38 @@ body.git-split-dragging {
   gap: 8px;
   margin-top: 12px;
 }
+.tb-wf-saved {
+  left: 0;
+  right: auto;
+  min-width: 240px;
+  padding: 4px;
+}
+.tb-wf-saved-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tb-wf-saved-row .action-menu-item {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-wf-saved-empty {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.tb-wf-save-as {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.tb-wf-save-as input {
+  flex: 1;
+  min-width: 0;
+}
 .tb-wf-ref--missing {
   border-color: var(--danger);
 }

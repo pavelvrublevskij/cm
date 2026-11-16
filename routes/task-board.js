@@ -131,4 +131,20 @@ router.post('/lanes/:slug/workflow/dismiss', wrapRoute((req, res) => {
   send(res, board.dismissSkillsChange(req.params.slug));
 }));
 
+/** POST /api/task-board/lanes/:slug/workflow/check — { stages } from a saved or imported workflow → { stages, missing } */
+router.post('/lanes/:slug/workflow/check', wrapRoute((req, res) => {
+  send(res, board.checkStages(req.params.slug, (req.body || {}).stages));
+}));
+
+/** POST /api/task-board/lanes/:slug/workflows — { name, stages }: save a named workflow (replaces one of that name) */
+router.post('/lanes/:slug/workflows', wrapRoute((req, res) => {
+  const body = req.body || {};
+  send(res, board.saveNamedWorkflow(req.params.slug, body.name, body.stages));
+}));
+
+/** DELETE /api/task-board/lanes/:slug/workflows/:name — remove a named workflow */
+router.delete('/lanes/:slug/workflows/:name', wrapRoute((req, res) => {
+  send(res, board.deleteNamedWorkflow(req.params.slug, req.params.name));
+}));
+
 module.exports = router;

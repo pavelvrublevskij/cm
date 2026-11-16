@@ -10,6 +10,7 @@
 - **Parallel lanes** — a project with Parallel checked runs up to 3 tickets at once (CM Settings), each in its own git worktree from your current branch; when done it merges in the latest of your branch, resolves conflicts and lands as one local commit. Move it back to ToDo to fix it on the same branch; deleting it from Done removes the worktree.
 - **Project branch on the board** — each lane shows the project's current git branch, where worktree tickets merge at Finalize.
 - **Favorite projects** — star a project to pin it on top of the sidebar and All Projects; the rest fold into "Other projects".
+- **Saved workflows** — save a project's workflow under a name and load it again, even after the lane was removed; Export/Import a workflow as a JSON file to reuse it in another project.
 - **Fullscreen workflow editor** — a button in the workflow dialog's title bar maximizes it to the full window.
 - **Easier to spot the open session** — its pill in the active sessions bar and its sidebar row get a full accent border.
 
