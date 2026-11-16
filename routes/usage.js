@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { wrapRoute } = require('../lib/file-helpers');
-const { decodeSlug } = require('../lib/slug');
+const { decodeSlug, parentSlug } = require('../lib/slug');
 const { getModelPricingMap, calcCostMultiModel, addTokens, emptyTokens, buildIndex } = require('../lib/usage-index');
 const { getLastFetchedAt, PRICING_URL, resolveModelPrice } = require('../lib/pricing');
 const { getFilteredByModel, sumByModel, aggregateByPeriod } = require('../lib/usage-filters');
@@ -53,11 +53,12 @@ router.get('/summary', wrapRoute((req, res) => {
   const allProjects = {};
   for (const s of sessions) {
     for (const m of Object.keys(s.byModel || {})) allModels.add(m);
-    if (!allProjects[s.slug]) allProjects[s.slug] = decodeSlug(s.slug);
+    const project = parentSlug(s.slug);
+    if (!allProjects[project]) allProjects[project] = decodeSlug(project);
   }
 
   for (const s of sessions) {
-    if (projects.size && !projects.has(s.slug)) continue;
+    if (projects.size && !projects.has(parentSlug(s.slug))) continue;
     const sByModel = getFilteredByModel(s, models, from, to, fromTime, toTime);
     if (!Object.keys(sByModel).length) continue;
 
@@ -65,7 +66,7 @@ router.get('/summary', wrapRoute((req, res) => {
       if (!byModel[m]) byModel[m] = emptyTokens();
       addTokens(byModel[m], tokens);
     }
-    slugs.add(s.slug);
+    slugs.add(parentSlug(s.slug));
     sessionCount++;
   }
 
@@ -99,7 +100,7 @@ router.get('/project/:slug', wrapRoute((req, res) => {
   let sessionCount = 0;
 
   for (const s of Object.values(index.sessions)) {
-    if (s.slug !== req.params.slug) continue;
+    if (s.slug !== req.params.slug && parentSlug(s.slug) !== req.params.slug) continue;
     const sByModel = getFilteredByModel(s, new Set(), from, to, fromTime, toTime);
     if (!Object.keys(sByModel).length) continue;
     sessionCount++;
@@ -142,18 +143,19 @@ router.get('/by-project', wrapRoute((req, res) => {
   const result = {};
 
   for (const s of Object.values(index.sessions)) {
-    if (projects.size && !projects.has(s.slug)) continue;
+    const project = parentSlug(s.slug);
+    if (projects.size && !projects.has(project)) continue;
     const sByModel = getFilteredByModel(s, models, from, to, fromTime, toTime);
     if (!Object.keys(sByModel).length) continue;
 
-    if (!result[s.slug]) {
-      result[s.slug] = { slug: s.slug, name: decodeSlug(s.slug), sessionCount: 0, byModel: {}, ...emptyTokens() };
+    if (!result[project]) {
+      result[project] = { slug: project, name: decodeSlug(project), sessionCount: 0, byModel: {}, ...emptyTokens() };
     }
-    result[s.slug].sessionCount++;
+    result[project].sessionCount++;
     for (const [m, tokens] of Object.entries(sByModel)) {
-      if (!result[s.slug].byModel[m]) result[s.slug].byModel[m] = emptyTokens();
-      addTokens(result[s.slug].byModel[m], tokens);
-      addTokens(result[s.slug], tokens);
+      if (!result[project].byModel[m]) result[project].byModel[m] = emptyTokens();
+      addTokens(result[project].byModel[m], tokens);
+      addTokens(result[project], tokens);
     }
   }
 
