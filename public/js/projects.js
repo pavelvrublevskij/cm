@@ -29,6 +29,63 @@ const Projects = {
     }
   },
 
+  POLL_MS: 15000,
+  _timer: null,
+  _favoriteRev: 0,
+  _favoritePending: 0,
+
+  startPolling() {
+    if (Projects._timer) return;
+    Projects._timer = setInterval(Projects.refresh, Projects.POLL_MS);
+  },
+
+  /** Re-fetch projects in the background; re-render only when the list actually changed. */
+  async refresh() {
+    const rev = Projects._favoriteRev;
+    try {
+      const data = await api('/api/projects');
+      // A star clicked while this fetch was in flight would be undone by its stale result.
+      if (Projects._favoritePending || rev !== Projects._favoriteRev) return;
+      if (JSON.stringify(data) === JSON.stringify(Projects.data)) return;
+      Projects.data = data;
+      Projects.renderGrid();
+      Projects.renderNav();
+      if (typeof ActiveCount !== 'undefined') ActiveCount._apply();
+      if (App.currentView === 'project-detail') {
+        document.querySelectorAll('.project-list .nav-item').forEach(el => {
+          el.classList.toggle('active', el.dataset.slug === App.currentProject);
+        });
+        Projects.renderTabCounts(App.currentProject);
+      }
+    } catch (_) { /* silent — next tick retries */ }
+  },
+
+  /** Counts on the project-detail tab buttons. */
+  renderTabCounts(slug) {
+    const project = Projects.data.find(p => p.slug === slug);
+    const memoryTabBtn = document.getElementById('memory-tab-btn');
+    if (memoryTabBtn) {
+      const count = project ? project.memoryCount : 0;
+      memoryTabBtn.textContent = count > 0 ? `Memory (${count})` : 'Memory';
+    }
+    const sessionsTabBtn = document.getElementById('sessions-tab-btn');
+    if (sessionsTabBtn) {
+      const count = project ? project.sessionCount : 0;
+      sessionsTabBtn.style.display = count > 0 ? '' : 'none';
+      sessionsTabBtn.textContent = count > 0 ? `Sessions (${count})` : 'Sessions';
+    }
+    const skillsTabBtn = document.getElementById('skills-tab-btn');
+    if (skillsTabBtn) {
+      const count = project ? project.skillsCount : 0;
+      skillsTabBtn.textContent = count > 0 ? `Skills (${count})` : 'Skills';
+    }
+    const stylesTabBtn = document.getElementById('output-styles-tab-btn');
+    if (stylesTabBtn) {
+      const count = project ? project.outputStylesCount : 0;
+      stylesTabBtn.textContent = count > 0 ? `Output Styles (${count})` : 'Output Styles';
+    }
+  },
+
   /** Split `list` (default Projects.data) into auto-detected clusters (with summed stats) and singletons. */
   _grouped(list = Projects.data) {
     const byId = {};
@@ -130,6 +187,8 @@ const Projects = {
     if (!p) return;
     const favorite = !p.favorite;
     p.favorite = favorite;
+    Projects._favoriteRev++;
+    Projects._favoritePending++;
     Projects.renderGrid();
     Projects.renderNav();
     try {
@@ -139,6 +198,8 @@ const Projects = {
       Projects.renderGrid();
       Projects.renderNav();
       toast('Could not update favorite: ' + e.message, 'error');
+    } finally {
+      Projects._favoritePending--;
     }
   },
 
