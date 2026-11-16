@@ -200,6 +200,18 @@ test('a ticket in Finalize counts as in progress and cannot be moved by hand', a
   const res = (await request(app).get('/api/task-board/attention')).body;
   assert.deepStrictEqual([res.waiting.length, res.active, res.inProgress], [1, 1, 1]);
   assert.strictEqual((await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'done' })).status, 400);
+  assert.strictEqual((await request(app).delete('/api/task-board/cards/' + card.id)).status, 400, 'running in Finalize');
+});
+
+test('a Finalize ticket waiting to be merged no longer counts as in progress and can be deleted', async () => {
+  const lib = require('../lib/task-board');
+  const card = await addCard({ title: 'Waiting', project: SLUG });
+  lib.mutateCard(card.id, c => { c.column = 'finalize'; c.finalized = true; c.run = { status: 'done', message: 'Ready' }; });
+  assert.ok(!lib.isRunning(lib.readBoard().cards[0]));
+  const res = (await request(app).get('/api/task-board/attention')).body;
+  assert.deepStrictEqual([res.waiting.length, res.active, res.inProgress], [0, 0, 0]);
+  assert.strictEqual((await request(app).post(`/api/task-board/cards/${card.id}/stop`)).status, 400);
+  assert.deepStrictEqual((await request(app).delete('/api/task-board/cards/' + card.id)).body, { ok: true, warning: '' });
 });
 
 async function inColumn(column) {

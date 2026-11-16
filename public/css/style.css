@@ -7067,6 +7067,10 @@ body.git-split-dragging {
   color: #fff;
   background: var(--danger);
 }
+.tb-badge--ready {
+  color: var(--bg-primary);
+  background: var(--success);
+}
 .tb-card-run {
   margin-top: 4px;
   font-size: 11px;

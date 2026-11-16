@@ -5,9 +5,9 @@
 - **Task Board** — tickets for all projects on one board, one lane per project; drag from ToDo to Ready, delete from ToDo/Done only, with a trash icon on the card.
 - **Project workflows** — stages between Ready and Done built from the project's skills and agents; Recommend picks them for you, and you're told when skills change.
 - **Workflow diagram** — draw the workflow: drag stages around and drag arrows between them; extra arrows are conditions ("if it's a bug, go to Bugfix"); loops stop after 3 runs of a stage.
-- **Finalize** — before Done every ticket runs the project's tests; a worktree ticket first commits and merges in the latest of your branch.
+- **Finalize** — before Done every ticket runs the project's tests; a worktree ticket first commits, merges in the latest of your branch and names its branch after the project's rules, then waits for you to Merge (merge commit, no squash) or Create PR.
 - **Tickets run by themselves** — moving a ticket to Ready starts a background Claude session that works through the stages; click it to open the live terminal, it waits for you when it needs input. A sidebar count and toasts tell you when tickets need your input and when all are done.
-- **Parallel lanes** — a project with Parallel checked runs up to 3 tickets at once (CM Settings), each in its own git worktree from your current branch; when done it merges in the latest of your branch, resolves conflicts and lands as one local commit. Move it back to ToDo to fix it on the same branch; deleting it from Done removes the worktree.
+- **Parallel lanes** — a project with Parallel checked runs up to 3 tickets at once (CM Settings); in a git project every ticket gets its own worktree and branch from your current branch. Move it back to ToDo to fix it on the same branch; deleting it from Finalize or Done removes the worktree and branch.
 - **Follow up a ticket** — dragging a ticket back to ToDo opens it with its notes, asking what should change or be followed up.
 - **Project branch on the board** — each lane shows the project's current git branch, where worktree tickets merge at Finalize.
 - **Favorite projects** — star a project to pin it on top of the sidebar and All Projects; the rest fold into "Other projects".

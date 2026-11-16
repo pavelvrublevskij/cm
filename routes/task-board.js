@@ -85,15 +85,26 @@ router.post('/hook', wrapRoute((req, res) => {
   res.json(result);
 }));
 
+/** POST /api/task-board/cards/:id/merge — merge a Finalize ticket's branch into its base (no squash); it goes to Done */
+router.post('/cards/:id/merge', wrapRoute(async (req, res) => {
+  send(res, await runner.merge(req.params.id));
+}));
+
+/** POST /api/task-board/cards/:id/pr — push a Finalize ticket's branch and create a PR into its base; it goes to Done */
+router.post('/cards/:id/pr', wrapRoute(async (req, res) => {
+  send(res, await runner.createPr(req.params.id));
+}));
+
 /**
- * DELETE /api/task-board/cards/:id — only from ToDo or Done; the card's session stays in history.
- * Deleting a Done ticket also removes its worktree and branch: { ok, warning } when they had to stay.
+ * DELETE /api/task-board/cards/:id — only from ToDo, Done or waiting in Finalize; the card's session
+ * stays in history. Deleting a Finalize or Done ticket also removes its worktree and branch:
+ * { ok, warning } when they had to stay.
  */
 router.delete('/cards/:id', wrapRoute(async (req, res) => {
   const result = board.deleteCard(req.params.id);
   if (result.error || result.notFound) return send(res, result);
   const { card } = result;
-  const warning = card.column === 'done' && card.worktree ? await runner.removeWorktree(card) : '';
+  const warning = ['finalize', 'done'].includes(card.column) && card.worktree ? await runner.removeWorktree(card) : '';
   res.json({ ok: true, warning });
 }));
 

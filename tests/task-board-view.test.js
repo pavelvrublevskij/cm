@@ -399,6 +399,20 @@ test('deleting a Done ticket with a worktree says the worktree and branch go too
   assert.match(TaskBoard.deleteMessageHtml({ column: 'done', worktree: 'cm-ab12' }), /<code>\.claude\/worktrees\/cm-ab12<\/code> and branch <code>worktree-cm-ab12<\/code> are removed too/);
   assert.ok(!TaskBoard.deleteMessageHtml({ column: 'todo', worktree: 'cm-ab12' }).includes('worktree'));
   assert.ok(!TaskBoard.deleteMessageHtml({ column: 'done' }).includes('worktree'));
+  assert.match(TaskBoard.deleteMessageHtml({ column: 'finalize', finalized: true, worktree: 'cm-ab12', gitBranch: 'feature/login' }), /branch <code>feature\/login<\/code> are removed too/);
+});
+
+test('a Finalize ticket waiting on its branch: merge or PR badge, deletable, no longer in the workflow', () => {
+  const card = { id: 'w', title: 'Fix login', notes: '', project: 'p', column: 'finalize', finalized: true, worktree: 'cm-ab12',
+    gitBranch: 'fix/login', baseBranch: 'main', run: { status: 'done', message: 'Ready: merge fix/login into main or create a PR' } };
+  assert.ok(!TaskBoard.inWorkflow(card));
+  assert.ok(TaskBoard.canDelete(card));
+  assert.ok(!TaskBoard.canDelete({ column: 'finalize' }));
+  const html = TaskBoard.cardHtml(card, null, false);
+  assert.match(html, /tb-badge--ready[^>]*>merge or PR</);
+  assert.match(html, /&#5833; fix\/login &larr; main</);
+  assert.match(html, /tb-card-run">Ready: merge fix\/login into main or create a PR</);
+  assert.match(html, /tb-card-delete/);
 });
 
 test('the sidebar shows how many tickets are in workflow progress, hidden at zero', async () => {
@@ -465,7 +479,7 @@ test('a recognised ticket type shows its icon before the heading, in both card m
 
 test('a ticket with a worktree shows its branch on the card, in compact mode on hover, and in the session banner', () => {
   const card = { id: 'g', title: 'Fix login', notes: '', project: 'p', column: 'done', worktree: 'cm-ab12', gitBranch: 'worktree-cm-ab12' };
-  assert.match(TaskBoard.cardHtml(card, null, false), /class="tb-card-git" title="Worktree branch">&#5833; worktree-cm-ab12</);
+  assert.match(TaskBoard.cardHtml(card, null, false), /class="tb-card-git" title="Ticket branch">&#5833; worktree-cm-ab12</);
   assert.match(TaskBoard.cardHtml(card, null, true), /title="Fix login\nBranch: worktree-cm-ab12"/);
   assert.match(TaskBoard.sessionInfoHtml(card, null), /on branch <code>worktree-cm-ab12<\/code>/);
   assert.strictEqual(TaskBoard.gitBranchOf({ worktree: 'cm-old' }), 'worktree-cm-old', 'tickets from before gitBranch was stored');

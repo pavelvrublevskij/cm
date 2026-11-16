@@ -106,9 +106,16 @@ const TaskBoard = {
     }, ms);
   },
 
-  /** Inside the workflow: past Ready, not yet Done (its stages, then Finalize). */
+  /**
+   * Inside the workflow: past Ready, not yet Done (its stages, then Finalize). A worktree ticket that
+   * passed Finalize waits there to be merged or sent as a PR, no longer running.
+   */
   inWorkflow(card) {
-    return card.column === 'finalize' || !TaskBoard.COLUMN_TITLES[card.column];
+    return (card.column === 'finalize' || !TaskBoard.COLUMN_TITLES[card.column]) && !card.finalized;
+  },
+
+  canDelete(card) {
+    return TaskBoard.DELETABLE.includes(card.column) || (card.column === 'finalize' && !!card.finalized);
   },
 
   /**
@@ -124,6 +131,7 @@ const TaskBoard = {
         ? `<span class="tb-badge tb-badge--starting" title="Move it back to ToDo to cancel">starts in ${left}s</span>`
         : '<span class="tb-badge tb-badge--starting" title="Starts when the ticket before it is done">queued</span>';
     }
+    if (card.finalized) return `<span class="tb-badge tb-badge--ready" title="${escapeAttr(run.message || '')}">merge or PR</span>`;
     const label = TaskBoard.inWorkflow(card) && TaskBoard.RUN_LABELS[run.status];
     if (!label) return '';
     return `<span class="tb-badge tb-badge--${run.status}" title="${escapeAttr(run.message || '')}">${label}</span>`;
@@ -309,7 +317,7 @@ const TaskBoard = {
   },
 
   deleteIconHtml(card) {
-    if (!TaskBoard.DELETABLE.includes(card.column)) return '';
+    if (!TaskBoard.canDelete(card)) return '';
     return `<button class="icon-btn tb-card-delete" draggable="false" title="Delete ticket" aria-label="Delete ticket"
         onclick="event.stopPropagation(); TaskBoard.confirmDelete('${escapeAttr(card.id)}')"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h-3ZM11 3V1.75A1.75 1.75 0 0 0 9.25 0h-2.5A1.75 1.75 0 0 0 5 1.75V3H2.75a.75.75 0 0 0 0 1.5h.67l.83 9.41A1.75 1.75 0 0 0 6 15.5h4a1.75 1.75 0 0 0 1.74-1.59l.84-9.41h.67a.75.75 0 0 0 0-1.5Zm-6.08 1.5h6.16l-.83 9.28a.25.25 0 0 1-.25.22H6a.25.25 0 0 1-.25-.22Z"/></svg></button>`;
   },
@@ -321,7 +329,7 @@ const TaskBoard = {
     if (compact) return TaskBoard.lineCardHtml(card, heading, stages);
     const notes = card.title ? lines[0] : lines[1];
     const badge = TaskBoard.badgeHtml(card);
-    const message = card.run && card.run.message && TaskBoard.inWorkflow(card) ? card.run.message : '';
+    const message = card.run && card.run.message && (TaskBoard.inWorkflow(card) || card.finalized) ? card.run.message : '';
     const branch = card.branch && TaskBoard.inWorkflow(card)
       ? `<div class="tb-card-branch" title="Condition taken after ${escapeAttr(card.branch.from)}">If ${escapeHtml(card.branch.when)}</div>` : '';
     const gitBranch = TaskBoard.gitBranchOf(card);
@@ -331,7 +339,7 @@ const TaskBoard = {
         ${badge ? `<div class="tb-card-head">${badge}</div>` : ''}
         ${heading ? `<div class="tb-card-title">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</div>` : ''}
         ${notes ? `<div class="tb-card-notes">${escapeHtml(notes)}</div>` : ''}
-        ${gitBranch ? `<div class="tb-card-git" title="Worktree branch">&#5833; ${escapeHtml(gitBranch)}</div>` : ''}
+        ${gitBranch ? `<div class="tb-card-git" title="Ticket branch${card.baseBranch ? ', branched from ' + escapeAttr(card.baseBranch) : ''}">&#5833; ${escapeHtml(gitBranch)}${card.baseBranch ? ' &larr; ' + escapeHtml(card.baseBranch) : ''}</div>` : ''}
         ${branch}
         ${message ? `<div class="tb-card-run">${escapeHtml(message)}</div>` : ''}
         ${TaskBoard.memoIconHtml(card)}
@@ -412,7 +420,8 @@ const TaskBoard = {
     }
     const projectField = card
       ? formGroup('Project', `<div class="tb-editor-project">${escapeHtml(decodeName(card.project))}</div>`)
-        + (TaskBoard.gitBranchOf(card) ? formGroup('Branch', `<div class="tb-editor-project tb-card-git">${escapeHtml(TaskBoard.gitBranchOf(card))}</div>`) : '')
+        + (TaskBoard.gitBranchOf(card) ? formGroup('Branch', `<div class="tb-editor-project tb-card-git">${escapeHtml(TaskBoard.gitBranchOf(card))}${card.baseBranch ? ' &larr; ' + escapeHtml(card.baseBranch) : ''}</div>`) : '')
+        + (card.prUrl ? formGroup('Pull request', `<div class="tb-editor-project"><a href="${escapeAttr(card.prUrl)}" target="_blank" rel="noopener">${escapeHtml(card.prUrl)}</a></div>`) : '')
       : formGroup('Project', frontmatterSelectHtml('tb-project', options, lane || options[0][0]));
     const editable = !card || card.column === 'todo';
     const ro = editable ? '' : ' readonly';
@@ -429,8 +438,12 @@ const TaskBoard = {
     if (card && TaskBoard.inWorkflow(card)) {
       buttons.push({ label: 'Stop', danger: true, onClick: () => TaskBoard.stop(card.id) });
     }
-    if (card && TaskBoard.DELETABLE.includes(card.column)) {
+    if (card && TaskBoard.canDelete(card)) {
       buttons.push({ label: 'Delete', danger: true, onClick: () => TaskBoard.confirmDelete(card.id) });
+    }
+    if (card && card.finalized) {
+      buttons.push({ label: 'Create PR', onClick: () => TaskBoard.land(card.id, 'pr') });
+      buttons.push({ label: 'Merge into ' + card.baseBranch, primary: true, onClick: () => TaskBoard.land(card.id, 'merge') });
     }
     if (editable) buttons.push({ label: card ? 'Save' : 'Add', primary: true, onClick: () => TaskBoard.save(card) });
     const title = !card ? 'New ticket' : !editable ? 'Ticket' : question ? 'Follow up ticket' : 'Edit ticket';
@@ -454,6 +467,17 @@ const TaskBoard = {
     try {
       if (card) await api('/api/task-board/cards/' + encodeURIComponent(card.id), { method: 'PUT', body: payload });
       else await api('/api/task-board/cards', { method: 'POST', body: payload });
+    } catch (e) {
+      toast(e.message, 'error');
+      return false;
+    }
+    await TaskBoard.load();
+  },
+
+  /** A Finalize ticket waiting on its branch: merge it into its base (action 'merge') or create a PR ('pr'). */
+  async land(id, action) {
+    try {
+      await api('/api/task-board/cards/' + encodeURIComponent(id) + '/' + action, { method: 'POST' });
     } catch (e) {
       toast(e.message, 'error');
       return false;
@@ -531,9 +555,9 @@ const TaskBoard = {
     return card.gitBranch || (card.worktree ? 'worktree-' + card.worktree : '');
   },
 
-  /** A Done ticket with a worktree takes its worktree and branch with it; the session always stays. */
+  /** A Finalize or Done ticket with a worktree takes its worktree and branch with it; the session always stays. */
   deleteMessageHtml(card) {
-    const worktree = card.column === 'done' && card.worktree
+    const worktree = ['finalize', 'done'].includes(card.column) && card.worktree
       ? ` Its worktree <code>.claude/worktrees/${escapeHtml(card.worktree)}</code> and branch <code>${escapeHtml(TaskBoard.gitBranchOf(card))}</code> are removed too.`
       : '';
     return `<p>The ticket is removed from the board.${worktree} Its session, if any, stays in the session history.</p>`;
