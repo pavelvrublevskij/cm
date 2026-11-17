@@ -33,6 +33,8 @@ process.stdin.on('end', () => {
     sessionId: event.session_id || '',
     transcriptPath: event.transcript_path || '',
     message: event.message || '',
+    notificationType: event.notification_type || '',
+    agentId: event.agent_id || '',
     lastAssistantMessage: event.last_assistant_message || ''
   });
 });
