@@ -18,6 +18,12 @@ const Tour = {
       position: 'right'
     },
     {
+      element: '.compact-switch',
+      title: 'Compact Mode',
+      text: 'Turn on Compact to show only the General and Projects sections in the sidebar.',
+      position: 'right'
+    },
+    {
       element: '#theme-toggle',
       title: 'Themes',
       text: 'Cycle through 4 built-in themes — Dark, Light, Matrix, and Default. Click to switch.',

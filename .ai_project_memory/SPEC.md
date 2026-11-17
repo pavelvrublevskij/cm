@@ -115,7 +115,7 @@ Hash routing (`#view/slug/sessionId[/readonly]`) — the URL survives refresh.
 | CM Settings (`manager-settings`) | Pricing URL/history/manual pricing, editor autosave, autostart toggle |
 | Changelog | Renders `CHANGELOG.md` |
 
-Also: onboarding tour (`public/js/tour.js`, re-triggered by a minor version bump), update check and in-app update, 4 themes.
+Also: sidebar compact mode (switch in the sidebar footer, `public/js/compact-mode.js`, localStorage; shows only General and Projects), onboarding tour (`public/js/tour.js`, re-triggered by a minor version bump), update check and in-app update, 4 themes.
 
 ## 6. API
 
