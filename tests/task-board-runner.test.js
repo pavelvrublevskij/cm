@@ -510,6 +510,114 @@ test('on start-up, tickets left inside a workflow are closed and Ready ones star
   assert.strictEqual(spawned[0].opts.env.CM_BOARD_CARD, waiting.id);
 });
 
+test('on start-up, a ticket with a session resumes it and runs its stage again', async () => {
+  const stages = await setStages(['Plan', 'Build']);
+  const [card] = await readyTickets(SLUG, 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-TYPE: bug\nCM-STAGE: done' });
+  runner._reset();
+  spawned = [];
+  startDriver();
+  let c = await cardOf(card.id);
+  assert.deepStrictEqual([c.column, c.closed, c.kind, c.run.status], [stages[1].id, false, 'bug', 'starting']);
+  assert.deepStrictEqual(spawned[0].opts.args.slice(-2), ['--resume', SID]);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await wait(30);
+  const text = pasted(spawned[0].entry)[0];
+  assert.match(text, /CM was restarted/);
+  assert.match(text, /\[Task Board · stage 2\/2: Build\]/);
+  c = await cardOf(card.id);
+  assert.deepStrictEqual([c.run.status, c.run.message, c.visits[c.column]], ['running', 'Resumed after CM restart', 1]);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await hook(0, 'UserPromptSubmit');
+  c = await cardOf(card.id);
+  assert.deepStrictEqual([c.column, c.run.message], ['finalize', 'Run the tests']);
+});
+
+test('on start-up, a ticket stuck on a notification resumes and gets its stage again', async () => {
+  await setStages(['Plan']);
+  const [card] = await readyTickets(SLUG, 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Notification', { message: 'Claude needs your permission' });
+  runner._reset();
+  spawned = [];
+  startDriver();
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await wait(30);
+  assert.match(pasted(spawned[0].entry)[0], /\[Task Board · stage 1\/1: Plan\]/);
+  assert.strictEqual((await cardOf(card.id)).run.status, 'running');
+});
+
+test('on start-up, a worktree ticket resolving Merge conflicts resumes that, with its merge', async () => {
+  await setStages(['Plan']);
+  const [card] = await readyTickets(SLUG, 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  const dir = path.join(PROJECT_ROOT, '.claude', 'worktrees', 'cm-merge');
+  fs.mkdirSync(dir, { recursive: true });
+  const data = JSON.parse(fs.readFileSync(paths.TASK_BOARD_FILE, 'utf-8'));
+  Object.assign(data.cards.find(c => c.id === card.id), { column: 'finalize', worktree: 'cm-merge', baseBranch: 'main', autoMerge: true });
+  fs.writeFileSync(paths.TASK_BOARD_FILE, JSON.stringify(data));
+  runner._reset();
+  spawned = [];
+  startDriver();
+  assert.strictEqual(spawned[0].projectPath, dir);
+  const newSid = '99999999-2222-3333-4444-555555555555';
+  await hook(0, 'SessionStart', { sessionId: newSid });
+  await wait(30);
+  assert.match(pasted(spawned[0].entry)[0], /\[Task Board · Merge conflicts\]/);
+  const c = await cardOf(card.id);
+  assert.deepStrictEqual([c.sessionId, c.run.message], [newSid, 'Resolving conflicts with main']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('on start-up, a ticket whose folder is gone is closed instead of resumed', async () => {
+  await setStages(['Plan']);
+  const [card] = await readyTickets(SLUG, 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  const data = JSON.parse(fs.readFileSync(paths.TASK_BOARD_FILE, 'utf-8'));
+  data.cards.find(c => c.id === card.id).worktree = 'cm-gone';
+  fs.writeFileSync(paths.TASK_BOARD_FILE, JSON.stringify(data));
+  runner._reset();
+  spawned = [];
+  startDriver();
+  const c = await cardOf(card.id);
+  assert.deepStrictEqual([c.column, c.closed, c.run.message], ['todo', true, 'Stopped: CM was restarted']);
+  assert.strictEqual(spawned.length, 0);
+});
+
+test('on start-up, a ticket that waited for the user resumes and keeps waiting', async () => {
+  await setStages(['Plan']);
+  const [card] = await readyTickets(SLUG, 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: needs_input pick a db' });
+  runner._reset();
+  spawned = [];
+  startDriver();
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await wait(30);
+  assert.deepStrictEqual(pasted(spawned[0].entry), []);
+  assert.strictEqual((await cardOf(card.id)).sessionId, SID);
+  const c = await cardOf(card.id);
+  assert.deepStrictEqual([c.run.status, c.run.message], ['needs_input', 'pick a db']);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  assert.strictEqual((await cardOf(card.id)).column, 'finalize');
+});
+
+test('on start-up, a ticket in Finalize resumes the Finalize step', async () => {
+  await setStages(['Plan']);
+  const [card] = await readyTickets(SLUG, 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  runner._reset();
+  spawned = [];
+  startDriver();
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await wait(30);
+  assert.match(pasted(spawned[0].entry)[0], /\[Task Board · Finalize\]/);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  assert.strictEqual((await cardOf(card.id)).column, 'done');
+});
+
 test('the hook script reports a claude event to CM', async () => {
   await setStages(['Plan']);
   const card = await addTicket({ notes: 'x' });
