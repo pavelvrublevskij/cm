@@ -819,7 +819,7 @@ test('Merge is refused while the project folder is off the base branch; the tick
   assert.strictEqual((await cardOf(card.id)).column, 'done');
 });
 
-test('a Merge that conflicts with a ticket merged before is undone; the ticket keeps waiting', async () => {
+test('a Merge whose base conflicts with the ticket branch resumes its session to resolve them, then lands by itself', async () => {
   makeRepo();
   await parallelLane(GIT_SLUG, ['Plan']);
   const cards = await readyTickets(GIT_SLUG, 2);
@@ -830,11 +830,150 @@ test('a Merge that conflicts with a ticket merged before is undone; the ticket k
   assert.strictEqual((await request(app).post(`/api/task-board/cards/${cards[0].id}/merge`)).status, 200);
   const head = sh(['rev-parse', 'HEAD'], GIT_ROOT);
   const res = await request(app).post(`/api/task-board/cards/${cards[1].id}/merge`);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  const resolving = res.body.card;
+  assert.deepStrictEqual([resolving.column, resolving.finalized, resolving.run.status, resolving.run.message],
+    ['finalize', false, 'running', 'Resolving conflicts with feature-x']);
+  assert.strictEqual(sh(['rev-parse', 'HEAD'], GIT_ROOT), head, 'the base is untouched');
+  assert.strictEqual(sh(['diff', '--name-only', '--diff-filter=U'], wtDir(cards[1])), 'same.txt', 'the conflicts wait in the worktree');
+
+  const i = spawned.length - 1;
+  const resumed = spawned[i];
+  assert.strictEqual(resumed.projectPath, wtDir(cards[1]));
+  assert.deepStrictEqual(resumed.opts.args, ['--settings', runner.HOOKS_FILE, '--resume', resolving.sessionId]);
+  await hook(i, 'SessionStart', { sessionId: resolving.sessionId });
+  await until(() => pasted(resumed.entry).length === 1);
+  assert.match(pasted(resumed.entry)[0], /^\[Task Board · Merge conflicts\]\n\nMerging the latest "feature-x" into this branch stopped with conflicts/);
+
+  await hook(i, 'Stop', { lastAssistantMessage: 'CM-STAGE: needs_input which wording to keep?' });
+  const asking = await cardOf(cards[1].id);
+  assert.deepStrictEqual([asking.run.status, asking.run.message], ['needs_input', 'which wording to keep?']);
+  assert.strictEqual((await request(app).get('/api/task-board/attention')).body.waiting[0].id, cards[1].id);
+
+  fs.writeFileSync(path.join(wtDir(cards[1]), 'same.txt'), 'both\n');
+  sh(['add', 'same.txt'], wtDir(cards[1]));
+  sh(['commit', '-q', '--no-edit'], wtDir(cards[1]));
+  await hook(i, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(cards[1].id)).column === 'done');
+  assert.strictEqual((await cardOf(cards[1].id)).run.message, 'Merged into feature-x');
+  assert.ok(resumed.entry.terminated);
+  assert.strictEqual(fs.readFileSync(path.join(GIT_ROOT, 'same.txt'), 'utf-8').trim(), 'both');
+});
+
+test('Merge pulls the base from its upstream first and merges it into the ticket branch', async () => {
+  makeRepo();
+  const origin = path.join(HOME, 'pullorigin.git');
+  const clone = path.join(HOME, 'pullclone');
+  fs.rmSync(origin, { recursive: true, force: true });
+  fs.rmSync(clone, { recursive: true, force: true });
+  sh(['init', '-q', '--bare', origin], HOME);
+  sh(['remote', 'add', 'origin', origin], GIT_ROOT);
+  sh(['push', '-q', '-u', 'origin', 'feature-x'], GIT_ROOT);
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await toWaitingInFinalize(card, 0, 'feature/pulled');
+
+  sh(['clone', '-q', '-b', 'feature-x', origin, clone], HOME);
+  sh(['config', 'user.email', 'cm@test.local'], clone);
+  sh(['config', 'user.name', 'CM Test'], clone);
+  fs.writeFileSync(path.join(clone, 'remote.txt'), 'remote\n');
+  sh(['add', 'remote.txt'], clone);
+  sh(['commit', '-q', '-m', 'pushed by someone else'], clone);
+  sh(['push', '-q'], clone);
+
+  const res = await request(app).post(`/api/task-board/cards/${card.id}/merge`);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.strictEqual((await cardOf(card.id)).column, 'done');
+  assert.ok(fs.existsSync(path.join(GIT_ROOT, 'remote.txt')));
+  assert.ok(fs.existsSync(path.join(GIT_ROOT, 'ticket.txt')));
+  sh(['merge-base', '--is-ancestor', 'origin/feature-x', 'feature/pulled'], GIT_ROOT);
+});
+
+/** A commit on the base branch in the project folder that conflicts with the ticket's ticket.txt. */
+function conflictOnBase() {
+  fs.writeFileSync(path.join(GIT_ROOT, 'ticket.txt'), 'base side\n');
+  sh(['add', 'ticket.txt'], GIT_ROOT);
+  sh(['commit', '-q', '-m', 'conflicting base work'], GIT_ROOT);
+}
+
+test('an auto-merge that fails after the conflicts are resolved leaves the ticket waiting in Finalize with why', async () => {
+  makeRepo();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await toWaitingInFinalize(card, 0, 'feature/later');
+  conflictOnBase();
+  const res = await request(app).post(`/api/task-board/cards/${card.id}/merge`);
+  assert.strictEqual(res.body.card.run.message, 'Resolving conflicts with feature-x');
+  await hook(1, 'SessionStart', { sessionId: res.body.card.sessionId });
+  await hook(1, 'UserPromptSubmit', {});
+  assert.strictEqual((await cardOf(card.id)).run.message, 'Resolving conflicts with feature-x', 'the status stays while claude works');
+
+  fs.writeFileSync(path.join(wtDir(card), 'ticket.txt'), 'both\n');
+  sh(['add', 'ticket.txt'], wtDir(card));
+  sh(['commit', '-q', '--no-edit'], wtDir(card));
+  sh(['checkout', '-q', 'main'], GIT_ROOT);
+  await hook(1, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => /^Merge failed: /.test((await cardOf(card.id)).run.message));
+  const c = await cardOf(card.id);
+  assert.deepStrictEqual([c.column, c.finalized], ['finalize', true]);
+  assert.match(c.run.message, /on "main": switch it to "feature-x" first/);
+
+  sh(['checkout', '-q', 'feature-x'], GIT_ROOT);
+  assert.strictEqual((await request(app).post(`/api/task-board/cards/${card.id}/merge`)).status, 200);
+  assert.strictEqual((await cardOf(card.id)).column, 'done');
+});
+
+test('Merge conflicts are not resolved while the lane runs another ticket: the merge is undone and the ticket keeps waiting', async () => {
+  makeRepo();
+  await request(app).put('/api/task-board/lanes/' + GIT_SLUG).send({});
+  await request(app).put(`/api/task-board/lanes/${GIT_SLUG}/workflow`).send({ stages: [{ title: 'Plan', type: 'prompt', prompt: 'Do Plan' }] });
+  const cards = await readyTickets(GIT_SLUG, 2);
+  await until(() => spawned.length === 1);
+  await toWaitingInFinalize(cards[0], 0, 'fix/busy');
+  await until(() => spawned.length === 2);
+  conflictOnBase();
+  const res = await request(app).post(`/api/task-board/cards/${cards[0].id}/merge`);
   assert.strictEqual(res.status, 400);
-  assert.match(res.body.error, /conflicts with feature-x: merge feature-x into it in its worktree first, or create a PR/);
+  assert.match(res.body.error, /feature-x conflicts with fix\/busy and the lane is busy/);
+  assert.strictEqual(spawned.length, 2, 'no second claude in the lane');
+  assert.strictEqual(sh(['status', '--porcelain', '--untracked-files=no'], wtDir(cards[0])), '', 'the merge was undone');
+  const c = await cardOf(cards[0].id);
+  assert.deepStrictEqual([c.column, c.finalized], ['finalize', true]);
+});
+
+test('Merge reports a pull that cannot fast-forward and changes nothing', async () => {
+  makeRepo();
+  const origin = path.join(HOME, 'pullorigin.git');
+  const clone = path.join(HOME, 'pullclone');
+  fs.rmSync(origin, { recursive: true, force: true });
+  fs.rmSync(clone, { recursive: true, force: true });
+  sh(['init', '-q', '--bare', origin], HOME);
+  sh(['remote', 'add', 'origin', origin], GIT_ROOT);
+  sh(['push', '-q', '-u', 'origin', 'feature-x'], GIT_ROOT);
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await toWaitingInFinalize(card, 0, 'feature/diverged');
+
+  sh(['clone', '-q', '-b', 'feature-x', origin, clone], HOME);
+  sh(['config', 'user.email', 'cm@test.local'], clone);
+  sh(['config', 'user.name', 'CM Test'], clone);
+  fs.writeFileSync(path.join(clone, 'remote.txt'), 'remote\n');
+  sh(['add', 'remote.txt'], clone);
+  sh(['commit', '-q', '-m', 'pushed by someone else'], clone);
+  sh(['push', '-q'], clone);
+  fs.writeFileSync(path.join(GIT_ROOT, 'local.txt'), 'local\n');
+  sh(['add', 'local.txt'], GIT_ROOT);
+  sh(['commit', '-q', '-m', 'local only'], GIT_ROOT);
+  const head = sh(['rev-parse', 'HEAD'], GIT_ROOT);
+
+  const res = await request(app).post(`/api/task-board/cards/${card.id}/merge`);
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /^Could not pull feature-x: /);
   assert.strictEqual(sh(['rev-parse', 'HEAD'], GIT_ROOT), head);
-  assert.strictEqual(sh(['status', '--porcelain', '--untracked-files=no'], GIT_ROOT), '', 'the merge was undone');
-  assert.strictEqual((await cardOf(cards[1].id)).column, 'finalize');
+  assert.strictEqual((await cardOf(card.id)).finalized, true);
 });
 
 test('Create PR pushes the ticket branch and opens a PR into its base; the ticket goes to Done with the PR link', async () => {
