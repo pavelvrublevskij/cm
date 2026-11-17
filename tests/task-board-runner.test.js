@@ -260,6 +260,67 @@ test('needs input: no marker, a question, a notification; running again after th
   assert.deepStrictEqual([c.run.status, c.run.message], ['conflict', 'merge conflict in a.js']);
 });
 
+test('a working subagent keeps the ticket running through Stop and idle notifications', async () => {
+  await setStages(['Plan']);
+  const card = await addTicket({ notes: 'x' });
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'SubagentStart', { agentId: 'agent-1' });
+  await hook(0, 'Stop', { lastAssistantMessage: 'Waiting for the subagent.' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'running');
+  await hook(0, 'Notification', { notificationType: 'idle_prompt', message: 'Claude is waiting for your input' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'running');
+  await hook(0, 'Notification', { notificationType: 'permission_prompt', message: 'Claude needs your permission to use Bash' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'needs_input');
+  await hook(0, 'SubagentStop', { agentId: 'agent-1' });
+  await hook(0, 'Stop', { lastAssistantMessage: 'Waiting.' });
+  const c = await cardOf(card.id);
+  assert.deepStrictEqual([c.run.status, c.run.message], ['needs_input', 'Claude stopped without reporting the stage result']);
+  await hook(0, 'Notification', { notificationType: 'idle_prompt', message: 'Claude is waiting for your input' });
+  assert.strictEqual((await cardOf(card.id)).run.message, 'Claude is waiting for your input');
+});
+
+test('subagents: one of two stopping keeps running; a stage result advances and forgets them', async () => {
+  const stages = await setStages(['Plan', 'Build']);
+  const card = await addTicket({ notes: 'x' });
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'SubagentStart', { agentId: 'agent-1' });
+  await hook(0, 'SubagentStart', { agentId: 'agent-2' });
+  await hook(0, 'SubagentStop', { agentId: 'agent-1' });
+  await hook(0, 'Stop', { lastAssistantMessage: 'Waiting.' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'running');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  assert.strictEqual((await cardOf(card.id)).column, stages[1].id);
+  await hook(0, 'Stop', { lastAssistantMessage: 'Which database?' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'needs_input');
+});
+
+test('subagents: a needs_input result forgets them; an auth notification keeps the ticket running', async () => {
+  await setStages(['Plan']);
+  const card = await addTicket({ notes: 'x' });
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Notification', { notificationType: 'auth_success', message: 'Logged in' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'running');
+  await hook(0, 'SubagentStart', { agentId: 'agent-1' });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: needs_input which database' });
+  await hook(0, 'UserPromptSubmit');
+  await hook(0, 'Notification', { notificationType: 'idle_prompt', message: 'Claude is waiting for your input' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'needs_input');
+});
+
+test('subagents: a later SessionStart (/clear, compaction) forgets them', async () => {
+  await setStages(['Plan']);
+  const card = await addTicket({ notes: 'x' });
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'SubagentStart', { agentId: 'agent-1' });
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await hook(0, 'Stop', { lastAssistantMessage: 'Which database?' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'needs_input');
+});
+
 test('the Stop result is read from the transcript when the hook does not carry it', async () => {
   await setStages(['Plan', 'Build']);
   const card = await addTicket({ notes: 'x' });
