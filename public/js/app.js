@@ -14,6 +14,7 @@ const App = {
     });
 
     if (typeof SidebarResize !== 'undefined') SidebarResize.init();
+    if (typeof CompactMode !== 'undefined') CompactMode.init();
 
     // Restore sidebar collapsed state
     if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1') {
