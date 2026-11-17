@@ -463,6 +463,25 @@ test('a newly waiting ticket raises a 15s toast that opens its session on click'
   TaskBoard._progress = null;
 });
 
+test('a re-render keeps each lane\'s horizontal scroll position', () => {
+  const lanes = keys => keys.map(k => { const cols = { scrollLeft: 0 }; return { dataset: { lane: k }, cols, querySelector: () => cols }; });
+  let current = lanes(['C--work-alpha', 'C--work-zeta']);
+  const body = {
+    querySelectorAll: () => current,
+    set innerHTML(_) { current = lanes(['C--work-alpha', 'C--work-zeta']); }
+  };
+  Object.assign(context, { document: { getElementById: id => (id === 'task-board-body' ? body : null) } });
+  context.localStorage = { getItem: k => (k === TaskBoard.COMPACT_KEY ? '0' : null), setItem() {} };
+  const board = TaskBoard.board;
+  TaskBoard.board = BOARD;
+  current[1].cols.scrollLeft = 240;
+  TaskBoard.render();
+  assert.strictEqual(current[0].cols.scrollLeft, 0);
+  assert.strictEqual(current[1].cols.scrollLeft, 240);
+  delete context.localStorage;
+  TaskBoard.board = board;
+});
+
 test('a ticket that took a condition shows it on its card', () => {
   const card = { id: 'r', title: 'T', notes: '', project: 'p', column: 's-b', closed: false, run: { status: 'running' }, branch: { from: 'Triage', when: 'a <bug>' } };
   assert.match(TaskBoard.cardHtml(card, null, false), /tb-card-branch" title="Condition taken after Triage">If a &lt;bug&gt;</);
