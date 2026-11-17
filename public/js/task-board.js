@@ -177,7 +177,19 @@ const TaskBoard = {
 
   render() {
     const el = document.getElementById('task-board-body');
-    if (el) el.innerHTML = TaskBoard.html(TaskBoard.board, TaskBoard.hidden(), TaskBoard.compact());
+    if (el) {
+      // Keep each lane's horizontal scroll across re-renders
+      const scroll = {};
+      el.querySelectorAll('.tb-lane[data-lane]').forEach(lane => {
+        const cols = lane.querySelector('.tb-cols');
+        if (cols) scroll[lane.dataset.lane] = cols.scrollLeft;
+      });
+      el.innerHTML = TaskBoard.html(TaskBoard.board, TaskBoard.hidden(), TaskBoard.compact());
+      el.querySelectorAll('.tb-lane[data-lane]').forEach(lane => {
+        const cols = lane.querySelector('.tb-cols');
+        if (cols && scroll[lane.dataset.lane]) cols.scrollLeft = scroll[lane.dataset.lane];
+      });
+    }
     const btn = document.getElementById('task-board-compact-btn');
     if (btn) btn.classList.toggle('btn-active', TaskBoard.compact());
   },
