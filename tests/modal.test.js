@@ -20,9 +20,10 @@ function makeEl(tag) {
       contains: c => set.has(c),
       toggle(c) { if (set.has(c)) set.delete(c); else set.add(c); return set.has(c); },
     },
+    listeners: {},
     appendChild(c) { this.children.push(c); return c; },
-    addEventListener() {},
-    remove() {},
+    addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+    remove() { this.removed = true; },
   };
 }
 
@@ -58,4 +59,13 @@ test('modal without maximizable has no fullscreen button', () => {
   const ctx = load();
   const overlay = ctx.openModal({ title: 'Plain', body: '' });
   assert.strictEqual(find(overlay.children[0], 'modal-maximize'), undefined);
+});
+
+test('clicking outside the modal does not close it', () => {
+  const ctx = load();
+  let closed = false;
+  const overlay = ctx.openModal({ title: 'Plain', body: '', onClose: () => { closed = true; } });
+  for (const fn of overlay.listeners.click || []) fn({ target: overlay });
+  assert.ok(!overlay.removed);
+  assert.ok(!closed);
 });
