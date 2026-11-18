@@ -2,11 +2,14 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { app, HOME, paths } = require('./helpers/app');
 const { slugForPath } = require('./helpers/slug');
 
-const PROJECT = path.join(HOME, 'removed-wt-project');
+// Outside HOME: tests may run from a Claude worktree, and a second worktree marker in the slug would
+// make the project look like part of that worktree.
+const PROJECT = path.join(fs.realpathSync.native(os.tmpdir()), `removed-wt-project-${process.pid}`);
 const LIVE_WT = path.join(PROJECT, '.claude', 'worktrees', 'cm-live');
 let projectSlug, removedSlug, liveSlug, orphanSlug;
 
