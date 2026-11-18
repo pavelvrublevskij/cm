@@ -6,7 +6,7 @@ const { wrapRoute, safeSlug } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
 const { PROJECTS_DIR } = require('../lib/paths');
 const { computeGroups } = require('../lib/project-grouping');
-const { listProjectDirs } = require('../lib/project-list');
+const { listProjectDirs, removedWorktreeSlugs } = require('../lib/project-list');
 const { getProjectArtifacts } = require('../lib/artifact-index');
 const { readFavorites, setFavorite } = require('../lib/project-favorites');
 
@@ -46,7 +46,9 @@ function openFolder(folderPath) {
 
 router.get('/', wrapRoute((req, res) => {
   const favorites = new Set(readFavorites());
-  const projects = listProjectDirs().map(({ slug, path: projectPath }) => {
+  const dirs = listProjectDirs();
+  const removed = removedWorktreeSlugs(dirs);
+  const projects = dirs.filter(p => !removed.has(p.slug)).map(({ slug, path: projectPath }) => {
     const stateDir = path.join(PROJECTS_DIR, slug);
     const memoryDir = path.join(stateDir, 'memory');
 

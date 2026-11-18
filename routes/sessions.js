@@ -6,7 +6,8 @@ const { safeSlug, wrapRoute, backup } = require('../lib/file-helpers');
 const { CLAUDE_DIR } = require('../lib/paths');
 const planCache = require('../lib/plan-cache');
 const { getProjectUsageMap, getSessionUsage, calcCost } = require('../lib/usage-index');
-const { decodeSlug } = require('../lib/slug');
+const { decodeSlug, parentSlug } = require('../lib/slug');
+const { listProjectDirs, removedWorktreeSlugs } = require('../lib/project-list');
 const { scanSession, firstMeaningfulPrompt } = require('../lib/session-scan');
 const terminalServer = require('../lib/terminal-server');
 const activeSessions = require('../lib/active-sessions');
@@ -223,11 +224,15 @@ function listProjectSessions(slug, dir, showArchived) {
  * Collects `fn(slug, dir)` across this project alone, or across every project grouped with it when
  * the request asks for scope=group — which folds in sibling worktrees and linked-in repos so their
  * sessions are listed and searched alongside this project's own. Assumes the request's own slug has
- * already been validated; members resolved from the group are validated here.
+ * already been validated; members resolved from the group are validated here. Removed Claude
+ * worktrees of the included projects are always folded in.
  */
 function forProjectScope(req, fn) {
   const ownSlug = req.params.slug;
   const slugs = req.query.scope === 'group' ? groupMemberSlugs(ownSlug) : [ownSlug];
+  for (const removed of removedWorktreeSlugs(listProjectDirs())) {
+    if (slugs.includes(parentSlug(removed))) slugs.push(removed);
+  }
 
   const out = [];
   for (const memberSlug of slugs) {
