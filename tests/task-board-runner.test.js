@@ -109,7 +109,8 @@ test('stageMessage leads with the ticket on stage 1 and names skills and agents'
     { title: 'Ship', type: 'prompt', ref: '', prompt: 'Write the changelog' }
   ];
   const first = runner.stageMessage({ title: 'T', notes: 'ABC-1 fix login' }, stages, 0);
-  assert.ok(first.startsWith('ABC-1 fix login\n\n[Task Board · stage 1/3: Plan]'));
+  assert.ok(first.startsWith('T\n\nABC-1 fix login\n\n[Task Board · stage 1/3: Plan]'));
+  assert.ok(runner.stageMessage({ title: '', notes: 'Only notes' }, stages, 0).startsWith('Only notes\n\n[Task Board'));
   assert.match(first, /Use the "writing-plans" skill for this stage\.\nkeep it short/);
   assert.match(first, /CM-STAGE: done/);
   assert.match(first, /"CM-TYPE: <type>".*bug, feature, question, other/);
