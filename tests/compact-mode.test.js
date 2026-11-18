@@ -77,3 +77,8 @@ test('sidebar has the compact mode switch', () => {
   assert.match(html, /<div class="sidebar-footer">[\s\S]*id="compact-mode-switch"[\s\S]*CompactMode\.toggle\(\)/);
   assert.match(html, /<script src="\/js\/compact-mode\.js"><\/script>/);
 });
+
+test('compact switch keeps its label when sidebar is collapsed', () => {
+  assert.match(css, /\.app\.sidebar-collapsed \.compact-switch\s*\{[^}]*flex-direction:\s*column;/);
+  assert.match(css, /\.app\.sidebar-collapsed \.compact-switch \.nav-label\s*\{[^}]*display:\s*inline;/);
+});
