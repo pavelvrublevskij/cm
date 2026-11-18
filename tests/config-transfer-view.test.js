@@ -36,7 +36,10 @@ function makeContext() {
       harness.fetches.push([url, init]);
       return harness.response;
     },
-    Projects: { data: [{ slug: 'p1', path: '/p1' }, { slug: 'p2', path: '/p2' }] }
+    Projects: {
+      data: [{ slug: 'p1', path: '/code/p1' }, { slug: 'p2', path: '/code/p2' }],
+      _favoriteLabel: p => 'name-' + p.slug
+    }
   });
   vm.runInContext(src + '\nthis.makeFrontmatterCrud = makeFrontmatterCrud;', context);
   return context;
@@ -119,6 +122,8 @@ test('copy targets: global list offers only projects; project list offers Global
   const gBody = harness.modals[0].body;
   assert.ok(!gBody.includes('value="global"'));
   assert.ok(gBody.includes('value="p1"') && gBody.includes('value="p2"'));
+  assert.ok(gBody.includes('>name-p1</option>'), 'options are labelled with project names');
+  assert.ok(gBody.includes('title="/code/p1"'), 'full path stays as the tooltip');
 
   const p = crud(makeContext(), { transferKind: 'skills' });
   await p.load('p1');
