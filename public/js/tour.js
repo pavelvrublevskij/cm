@@ -85,12 +85,6 @@ const Tour = {
       position: 'right'
     },
     {
-      element: '.nav-item[data-view="skills"]',
-      title: 'Share Skills and Agents',
-      text: 'Export skills and agents as a zip and import them again, globally or per project. Each card\'s ⋮ menu also copies it to Global or another project.',
-      position: 'right'
-    },
-    {
       element: '.nav-item[data-view="task-board"]',
       title: 'Task Board',
       text: 'Tickets for all your projects on one board. Draw each project\'s workflow from its skills, with arrows between the stages, then drag a ticket to Ready to start it.',
