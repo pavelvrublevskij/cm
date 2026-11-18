@@ -256,6 +256,18 @@ body {
   background: var(--accent);
 }
 
+.app.sidebar-collapsed .compact-switch {
+  flex-direction: column;
+  gap: 3px;
+}
+
+.app.sidebar-collapsed .compact-switch .nav-label {
+  display: inline;
+  font-size: 9px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .theme-toggle {
   width: 36px;
   height: 36px;
