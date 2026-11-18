@@ -176,6 +176,7 @@ const App = {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
 
     App.currentView = view;
+    if (typeof TaskBoard !== 'undefined') TaskBoard.hidePreview();
 
     // Simple views with direct ID mapping
     const simpleViews = {

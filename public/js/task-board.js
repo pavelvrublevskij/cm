@@ -17,6 +17,11 @@ const TaskBoard = {
   _drag: null,
   _wf: null,
   _poll: null,
+  PREVIEW_DELAY_MS: 1000,
+  PREVIEW_MESSAGES: 20,
+  PREVIEW_HIDE_MS: 200,
+  _preview: { id: null },
+  _pointer: null,
 
   /**
    * Tickets waiting for the user, watched from every view at the conversation refresh rate: the
@@ -139,6 +144,7 @@ const TaskBoard = {
 
   /** A ticket in the workflow opens its session (live terminal); any other opens the editor. */
   openCard(id) {
+    TaskBoard.hidePreview();
     const card = TaskBoard.findCard(id);
     if (!card) return;
     if (TaskBoard.inWorkflow(card) && card.sessionId) {
@@ -146,6 +152,97 @@ const TaskBoard = {
       return;
     }
     TaskBoard.openEditor(id);
+  },
+
+  /** Hovering a ticket with a session for a second shows its latest conversation lines. */
+  onCardOver(e) {
+    const el = e.target.closest('.tb-card');
+    if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+    TaskBoard.hoverCard(el.dataset.id);
+  },
+
+  onPointerMove(e) {
+    TaskBoard._pointer = { x: e.clientX, y: e.clientY };
+  },
+
+  /** A re-render replaces the cards without a mouseout: keep the preview only while the pointer is still on its card or in it. */
+  checkPreview() {
+    const p = TaskBoard._preview, at = TaskBoard._pointer;
+    if (!p.id) return;
+    const under = at && document.elementFromPoint(at.x, at.y);
+    const card = under && under.closest('.tb-card');
+    if ((card && card.dataset.id === p.id) || (p.el && p.el.contains(under))) return;
+    TaskBoard.hidePreview();
+  },
+
+  onCardOut(e) {
+    const el = e.target.closest('.tb-card');
+    if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+    TaskBoard.leavePreview();
+  },
+
+  hoverCard(id) {
+    const p = TaskBoard._preview;
+    if (p.id === id) { clearTimeout(p.hide); return; }
+    TaskBoard.hidePreview();
+    const card = TaskBoard.findCard(id);
+    if (!card || !card.sessionId || TaskBoard._drag) return;
+    TaskBoard._preview = { id, timer: setTimeout(() => TaskBoard.showPreview(card), TaskBoard.PREVIEW_DELAY_MS) };
+  },
+
+  /** Before the preview shows, leaving cancels it; once shown, a short grace lets the pointer move into it. */
+  leavePreview() {
+    const p = TaskBoard._preview;
+    if (!p.el) { TaskBoard.hidePreview(); return; }
+    clearTimeout(p.hide);
+    p.hide = setTimeout(() => TaskBoard.hidePreview(), TaskBoard.PREVIEW_HIDE_MS);
+  },
+
+  hidePreview() {
+    const p = TaskBoard._preview;
+    clearTimeout(p.timer);
+    clearTimeout(p.hide);
+    if (p.el) p.el.remove();
+    TaskBoard._preview = { id: null };
+  },
+
+  async showPreview(card) {
+    const p = TaskBoard._preview;
+    const anchor = document.querySelector(`#task-board-body .tb-card[data-id="${CSS.escape(card.id)}"]`);
+    if (!anchor) { TaskBoard.hidePreview(); return; }
+    const el = document.createElement('div');
+    el.className = 'tb-preview';
+    el.onmouseenter = () => clearTimeout(p.hide);
+    el.onmouseleave = () => TaskBoard.leavePreview();
+    el.onmousemove = TaskBoard.onPointerMove;
+    document.body.appendChild(el);
+    p.timer = null;
+    p.el = el;
+    showLoading(el, 'Loading conversation...');
+    TaskBoard.placePreview(el, anchor.getBoundingClientRect());
+    let html;
+    try { html = await TaskBoard.previewHtml(card); }
+    catch (_) { html = '<div class="empty-state"><p>Failed to load messages</p></div>'; }
+    if (TaskBoard._preview !== p) return;
+    el.innerHTML = html;
+    addCodeCopyButtons(el);
+  },
+
+  /** Beside the card: on its right when it fits, else on its left; kept inside the window. */
+  placePreview(el, rect) {
+    const gap = 8;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const left = rect.right + gap + w <= window.innerWidth ? rect.right + gap : Math.max(gap, rect.left - gap - w);
+    const top = Math.max(gap, Math.min(rect.top, window.innerHeight - h - gap));
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+  },
+
+  /** The ticket session's last messages, newest first as in Session Details. */
+  async previewHtml(card) {
+    const data = await api(`/api/projects/${encodeURIComponent(card.sessionSlug || card.project)}/sessions/${encodeURIComponent(card.sessionId)}?offset=0&limit=${TaskBoard.PREVIEW_MESSAGES}`);
+    if (!data.total) return '<div class="empty-state"><p>No messages in this session</p></div>';
+    return data.messages.map(m => Sessions.renderMessage(m)).join('');
   },
 
   /** A ticket's session runs hidden; opening it lists it like any running session from then on. */
@@ -185,6 +282,7 @@ const TaskBoard = {
         if (cols) scroll[lane.dataset.lane] = cols.scrollLeft;
       });
       el.innerHTML = TaskBoard.html(TaskBoard.board, TaskBoard.hidden(), TaskBoard.compact());
+      TaskBoard.checkPreview();
       el.querySelectorAll('.tb-lane[data-lane]').forEach(lane => {
         const cols = lane.querySelector('.tb-cols');
         if (cols && scroll[lane.dataset.lane]) cols.scrollLeft = scroll[lane.dataset.lane];
@@ -883,6 +981,7 @@ const TaskBoard = {
   },
 
   onDragStart(e) {
+    TaskBoard.hidePreview();
     const el = e.target.closest('.tb-card');
     TaskBoard._drag = el ? TaskBoard.findCard(el.dataset.id) : null;
     if (!TaskBoard._drag) return;

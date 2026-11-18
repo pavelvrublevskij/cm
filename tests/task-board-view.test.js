@@ -578,3 +578,144 @@ test('dropping a ticket back into ToDo opens the follow-up dialog, other drops d
   }
   assert.deepStrictEqual(plain(opened), [['d', null, true], ['r', null, true]]);
 });
+
+function previewEnv({ cards, api }) {
+  const timers = [];
+  const appended = [];
+  const anchor = { getBoundingClientRect: () => ({ top: 100, left: 50, right: 250 }) };
+  Object.assign(context, {
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    clearTimeout: id => { if (id) timers[id - 1].cleared = true; },
+    CSS: { escape: s => s },
+    window: { innerWidth: 1600, innerHeight: 900 },
+    document: {
+      querySelector: () => anchor,
+      createElement: () => ({ style: {}, offsetWidth: 520, offsetHeight: 480, remove() { this.removed = true; } }),
+      body: { appendChild: el => appended.push(el) }
+    },
+    showLoading: (el, text) => { el.innerHTML = 'LOADING ' + text; },
+    addCodeCopyButtons: () => {},
+    Sessions: { renderMessage: m => `<msg>${m.text}</msg>` },
+    api
+  });
+  TaskBoard.board = { cards, projects: {} };
+  TaskBoard._drag = null;
+  TaskBoard._preview = { id: null };
+  return { timers, appended };
+}
+
+test('hovering a ticket with a session shows its last messages after a second, loading first', async () => {
+  const calls = [];
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const { timers, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'C--p', sessionSlug: 'C--p-wt', sessionId: 's1' }],
+    api: async url => {
+      calls.push(url);
+      await gate;
+      return { total: 25, messages: [{ text: 'newest' }, { text: 'older' }] };
+    }
+  });
+  TaskBoard.hoverCard('a');
+  assert.strictEqual(timers.length, 1);
+  assert.strictEqual(timers[0].ms, 1000);
+  assert.strictEqual(appended.length, 0);
+  const shown = timers[0].fn();
+  assert.match(appended[0].innerHTML, /LOADING/);
+  assert.strictEqual(appended[0].style.left, '258px');
+  release();
+  await shown;
+  assert.deepStrictEqual(calls, ['/api/projects/C--p-wt/sessions/s1?offset=0&limit=20']);
+  assert.strictEqual(appended[0].innerHTML, '<msg>newest</msg><msg>older</msg>');
+});
+
+test('leaving a ticket before a second shows no preview; tickets without a session get none', () => {
+  const { timers } = previewEnv({ cards: [{ id: 'a', project: 'p', sessionId: 's1' }, { id: 'b', project: 'p' }], api: async () => ({}) });
+  TaskBoard.hoverCard('a');
+  TaskBoard.leavePreview();
+  assert.ok(timers[0].cleared);
+  assert.strictEqual(TaskBoard._preview.id, null);
+  TaskBoard.hoverCard('b');
+  assert.strictEqual(timers.length, 1);
+});
+
+test('a preview whose ticket was left before it loaded is not filled', async () => {
+  const { timers, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1' }],
+    api: async () => ({ total: 3, messages: [{ text: 'x' }] })
+  });
+  TaskBoard.hoverCard('a');
+  const shown = timers[0].fn();
+  TaskBoard.hidePreview();
+  await shown;
+  assert.ok(appended[0].removed);
+  assert.match(appended[0].innerHTML, /LOADING/);
+});
+
+test('a shown preview stays while the pointer moves into it and closes after leaving it', async () => {
+  const { timers, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1' }],
+    api: async () => ({ total: 0, messages: [] })
+  });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  assert.match(appended[0].innerHTML, /No messages/);
+  TaskBoard.leavePreview();
+  appended[0].onmouseenter();
+  assert.ok(timers[1].cleared);
+  appended[0].onmouseleave();
+  timers[2].fn();
+  assert.ok(appended[0].removed);
+});
+
+test('pointer events only start or leave a preview when crossing a card edge', () => {
+  const { timers } = previewEnv({ cards: [{ id: 'a', project: 'p', sessionId: 's1' }], api: async () => ({}) });
+  const inner = {};
+  const card = { dataset: { id: 'a' }, contains: n => n === inner };
+  const target = { closest: () => card };
+  TaskBoard.onCardOver({ target, relatedTarget: inner });
+  assert.strictEqual(timers.length, 0);
+  TaskBoard.onCardOver({ target, relatedTarget: null });
+  assert.strictEqual(TaskBoard._preview.id, 'a');
+  TaskBoard.onCardOut({ target, relatedTarget: inner });
+  assert.strictEqual(TaskBoard._preview.id, 'a');
+  TaskBoard.onCardOut({ target, relatedTarget: {} });
+  assert.strictEqual(TaskBoard._preview.id, null);
+  TaskBoard.onCardOver({ target: { closest: () => null }, relatedTarget: null });
+  assert.strictEqual(TaskBoard._preview.id, null);
+});
+
+test('after a re-render the preview stays only while the pointer is on its card or in it', async () => {
+  const { timers, appended } = previewEnv({ cards: [{ id: 'a', project: 'p', sessionId: 's1' }], api: async () => ({ total: 0, messages: [] }) });
+  let under = null;
+  context.document.elementFromPoint = () => under;
+  TaskBoard.onPointerMove({ clientX: 10, clientY: 20 });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  under = { closest: () => ({ dataset: { id: 'a' } }) };
+  TaskBoard.checkPreview();
+  assert.strictEqual(TaskBoard._preview.id, 'a');
+  appended[0].contains = n => n === under;
+  under = { closest: () => null };
+  TaskBoard.checkPreview();
+  assert.strictEqual(TaskBoard._preview.id, 'a');
+  appended[0].contains = () => false;
+  TaskBoard.checkPreview();
+  assert.strictEqual(TaskBoard._preview.id, null);
+  assert.ok(appended[0].removed);
+});
+
+test('opening or dragging a ticket closes its preview', () => {
+  const { timers } = previewEnv({ cards: [], api: async () => ({}) });
+  TaskBoard.board.cards = [{ id: 'a', project: 'p', sessionId: 's1', column: 'todo' }];
+  TaskBoard.hoverCard('a');
+  TaskBoard.onDragStart({ target: { closest: () => null } });
+  assert.ok(timers[0].cleared);
+  TaskBoard.hoverCard('a');
+  const openEditor = TaskBoard.openEditor;
+  TaskBoard.openEditor = () => {};
+  TaskBoard.openCard('a');
+  TaskBoard.openEditor = openEditor;
+  assert.ok(timers[1].cleared);
+  assert.strictEqual(TaskBoard._preview.id, null);
+});
