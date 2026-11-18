@@ -590,7 +590,12 @@ function previewEnv({ cards, api }) {
     window: { innerWidth: 1600, innerHeight: 900 },
     document: {
       querySelector: () => anchor,
-      createElement: () => ({ style: {}, offsetWidth: 520, offsetHeight: 480, remove() { this.removed = true; } }),
+      createElement: () => ({
+        style: {}, offsetWidth: 520, offsetHeight: 480, scrollTop: 0, clientHeight: 480, scrollHeight: 2000,
+        remove() { this.removed = true; },
+        insertAdjacentHTML(pos, h) { this.innerHTML += h; },
+        querySelector() { const el = this; return el.innerHTML.includes('tb-preview-loader') ? { remove() { el.innerHTML = el.innerHTML.replace(/<div class="loading tb-preview-loader">.*?Loading\.\.\.<\/div>/, ''); } } : null; }
+      }),
       body: { appendChild: el => appended.push(el) }
     },
     showLoading: (el, text) => { el.innerHTML = 'LOADING ' + text; },
@@ -664,8 +669,29 @@ test('a shown preview stays while the pointer moves into it and closes after lea
   appended[0].onmouseenter();
   assert.ok(timers[1].cleared);
   appended[0].onmouseleave();
+  assert.strictEqual(timers[2].ms, 600);
+  context.document.elementFromPoint = () => null;
   timers[2].fn();
   assert.ok(appended[0].removed);
+});
+
+test('passing over other cards keeps the open preview; once it closes, the card under the pointer starts its own', async () => {
+  const { timers, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1' }, { id: 'b', project: 'p', sessionId: 's2' }],
+    api: async () => ({ total: 0, messages: [] })
+  });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  TaskBoard.leavePreview();
+  TaskBoard.hoverCard('b');
+  assert.strictEqual(TaskBoard._preview.id, 'a');
+  assert.ok(!appended[0].removed);
+  TaskBoard.onPointerMove({ clientX: 1, clientY: 2 });
+  context.document.elementFromPoint = () => ({ closest: () => ({ dataset: { id: 'b' } }) });
+  timers[1].fn();
+  assert.ok(appended[0].removed);
+  assert.strictEqual(TaskBoard._preview.id, 'b');
+  assert.strictEqual(timers[2].ms, 1000);
 });
 
 test('pointer events only start or leave a preview when crossing a card edge', () => {
@@ -718,4 +744,34 @@ test('opening or dragging a ticket closes its preview', () => {
   TaskBoard.openEditor = openEditor;
   assert.ok(timers[1].cleared);
   assert.strictEqual(TaskBoard._preview.id, null);
+});
+
+test('scrolling a preview near its end loads the older messages below, with a loader meanwhile', async () => {
+  const calls = [];
+  let release;
+  const { timers, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1' }],
+    api: async url => {
+      calls.push(url);
+      if (url.includes('offset=0&')) return { total: 30, hasMore: true, messages: [{ text: 'new' }, { text: 'mid' }] };
+      await new Promise(r => { release = r; });
+      return { total: 30, hasMore: false, messages: [{ text: 'old' }] };
+    }
+  });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  const el = appended[0];
+  assert.strictEqual(el.innerHTML, '<msg>new</msg><msg>mid</msg>');
+  el.onscroll();
+  assert.strictEqual(calls.length, 1);
+  el.scrollTop = 1300;
+  const more = TaskBoard.loadPreviewPage(TaskBoard._preview);
+  el.onscroll();
+  assert.match(el.innerHTML, /tb-preview-loader/);
+  release();
+  await more;
+  assert.deepStrictEqual(calls, ['/api/projects/p/sessions/s1?offset=0&limit=20', '/api/projects/p/sessions/s1?offset=2&limit=20']);
+  assert.strictEqual(el.innerHTML, '<msg>new</msg><msg>mid</msg><msg>old</msg>');
+  el.onscroll();
+  assert.strictEqual(calls.length, 2);
 });
