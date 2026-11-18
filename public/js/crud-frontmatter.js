@@ -213,13 +213,14 @@ function makeFrontmatterCrud(opts) {
     /** Pick Global or another project and copy the item there. */
     showCopy(keyValue) {
       document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
-      const targets = (m.slug ? [{ value: 'global', label: 'Global (~/.claude)' }] : [])
-        .concat(Projects.data.filter(p => p.slug !== m.slug).map(p => ({ value: p.slug, label: p.path })));
+      const targets = (m.slug ? [{ value: 'global', label: 'Global (~/.claude)', title: '~/.claude' }] : [])
+        .concat(Projects.data.filter(p => p.slug !== m.slug)
+          .map(p => ({ value: p.slug, label: Projects._favoriteLabel(p), title: p.path })));
       const idp = opts.idPrefix;
       openModal({
         title: `Copy ${opts.itemLabel}: ${keyValue}`,
         body: formGroup('Copy to', `<select id="${idp}-copy-target">${targets.map(t =>
-          `<option value="${escapeHtml(t.value)}">${escapeHtml(t.label)}</option>`).join('')}</select>`),
+          `<option value="${escapeAttr(t.value)}" title="${escapeAttr(t.title)}">${escapeHtml(t.label)}</option>`).join('')}</select>`),
         buttons: [{
           label: 'Copy', primary: true, onClick: () => {
             m.copyTo(keyValue, document.getElementById(`${idp}-copy-target`).value, false);
