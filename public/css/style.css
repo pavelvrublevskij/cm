@@ -2631,7 +2631,10 @@ mark.search-highlight {
 
 #session-messages.tools-hidden .chat-tool,
 #session-messages.tools-hidden .chat-tool-result,
-#session-messages.tools-hidden .chat-msg-tools-only {
+#session-messages.tools-hidden .chat-msg-tools-only,
+.tb-preview .chat-tool,
+.tb-preview .chat-tool-result,
+.tb-preview .chat-msg-tools-only {
   display: none;
 }
 

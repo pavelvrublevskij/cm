@@ -19,7 +19,7 @@ const TaskBoard = {
   _poll: null,
   PREVIEW_DELAY_MS: 1000,
   PREVIEW_MESSAGES: 20,
-  PREVIEW_HIDE_MS: 200,
+  PREVIEW_HIDE_MS: 600,
   _preview: { id: null },
   _pointer: null,
 
@@ -184,6 +184,7 @@ const TaskBoard = {
   hoverCard(id) {
     const p = TaskBoard._preview;
     if (p.id === id) { clearTimeout(p.hide); return; }
+    if (p.el) return; // passing over other cards on the way to the open preview
     TaskBoard.hidePreview();
     const card = TaskBoard.findCard(id);
     if (!card || !card.sessionId || TaskBoard._drag) return;
@@ -195,7 +196,16 @@ const TaskBoard = {
     const p = TaskBoard._preview;
     if (!p.el) { TaskBoard.hidePreview(); return; }
     clearTimeout(p.hide);
-    p.hide = setTimeout(() => TaskBoard.hidePreview(), TaskBoard.PREVIEW_HIDE_MS);
+    p.hide = setTimeout(() => TaskBoard.previewGraceEnd(), TaskBoard.PREVIEW_HIDE_MS);
+  },
+
+  /** Grace over: close, then start the card the pointer has settled on, if any. */
+  previewGraceEnd() {
+    TaskBoard.hidePreview();
+    const at = TaskBoard._pointer;
+    const under = at && document.elementFromPoint(at.x, at.y);
+    const card = under && under.closest('.tb-card');
+    if (card) TaskBoard.hoverCard(card.dataset.id);
   },
 
   hidePreview() {
@@ -220,12 +230,12 @@ const TaskBoard = {
     p.el = el;
     showLoading(el, 'Loading conversation...');
     TaskBoard.placePreview(el, anchor.getBoundingClientRect());
-    let html;
-    try { html = await TaskBoard.previewHtml(card); }
-    catch (_) { html = '<div class="empty-state"><p>Failed to load messages</p></div>'; }
-    if (TaskBoard._preview !== p) return;
-    el.innerHTML = html;
-    addCodeCopyButtons(el);
+    el.onscroll = () => {
+      if (!p.loading && p.hasMore && el.scrollTop + el.clientHeight >= el.scrollHeight - 300) TaskBoard.loadPreviewPage(p);
+    };
+    p.card = card;
+    p.offset = 0;
+    await TaskBoard.loadPreviewPage(p);
   },
 
   /** Beside the card: on its right when it fits, else on its left; kept inside the window. */
@@ -238,11 +248,33 @@ const TaskBoard = {
     el.style.top = top + 'px';
   },
 
-  /** The ticket session's last messages, newest first as in Session Details. */
-  async previewHtml(card) {
-    const data = await api(`/api/projects/${encodeURIComponent(card.sessionSlug || card.project)}/sessions/${encodeURIComponent(card.sessionId)}?offset=0&limit=${TaskBoard.PREVIEW_MESSAGES}`);
-    if (!data.total) return '<div class="empty-state"><p>No messages in this session</p></div>';
-    return data.messages.map(m => Sessions.renderMessage(m)).join('');
+  /** The next page of the ticket session's messages, newest first as in Session Details: older ones load while scrolling down. */
+  async loadPreviewPage(p) {
+    const { card, el } = p;
+    const first = !p.offset;
+    p.loading = true;
+    if (!first) el.insertAdjacentHTML('beforeend', '<div class="loading tb-preview-loader"><div class="spinner"></div> Loading...</div>');
+    let data = null;
+    try {
+      data = await api(`/api/projects/${encodeURIComponent(card.sessionSlug || card.project)}/sessions/${encodeURIComponent(card.sessionId)}?offset=${p.offset}&limit=${TaskBoard.PREVIEW_MESSAGES}`);
+    } catch (_) { /* shown below */ }
+    if (TaskBoard._preview !== p) return;
+    p.loading = false;
+    const loader = el.querySelector('.tb-preview-loader');
+    if (loader) loader.remove();
+    if (!data) {
+      p.hasMore = false;
+      const failed = '<div class="empty-state"><p>Failed to load messages</p></div>';
+      if (first) el.innerHTML = failed; else el.insertAdjacentHTML('beforeend', failed);
+      return;
+    }
+    if (first && !data.total) { el.innerHTML = '<div class="empty-state"><p>No messages in this session</p></div>'; return; }
+    const html = data.messages.map(m => Sessions.renderMessage(m)).join('');
+    if (first) el.innerHTML = html; else el.insertAdjacentHTML('beforeend', html);
+    addCodeCopyButtons(el);
+    p.offset += data.messages.length;
+    p.hasMore = data.hasMore;
+    el.onscroll(); // hidden tool lines can leave too little to scroll
   },
 
   /** A ticket's session runs hidden; opening it lists it like any running session from then on. */
