@@ -26,6 +26,7 @@
 - **Worktree usage counts for its project** — Token Usage counts Claude worktree sessions under the project they were made from, also after the worktree is removed.
 - **Terminal Skills filter** — Up/Down move through the matches and Enter types the highlighted one.
 - **Notifications stay longer** — toasts stay visible for at least 15 seconds.
+- **Dialogs stay open on outside clicks** — clicking or releasing the mouse outside a dialog no longer closes it.
 
 ## v1.9.1
 

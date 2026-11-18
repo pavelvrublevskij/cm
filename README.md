@@ -12,12 +12,12 @@ Runs entirely on your machine. No cloud, no accounts, no external dependencies b
 
 **macOS / Linux / Git Bash on Windows:**
 ```bash
-./run.sh 1
+./run.sh
 ```
 
 **Windows (Command Prompt / PowerShell):**
 ```cmd
-run.bat 1
+run.bat
 ```
 
 The script will install Node.js if missing, install dependencies, and open the app in your browser automatically.

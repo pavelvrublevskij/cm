@@ -72,8 +72,6 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
 
-  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-
   return overlay;
 }
 
