@@ -953,6 +953,7 @@ test('a Merge whose base conflicts with the ticket branch resumes its session to
   await hook(i, 'SessionStart', { sessionId: resolving.sessionId });
   await until(() => pasted(resumed.entry).length === 1);
   assert.match(pasted(resumed.entry)[0], /^\[Task Board · Merge conflicts\]\n\nMerging the latest "feature-x" into this branch stopped with conflicts/);
+  await hook(i, 'UserPromptSubmit');
 
   await hook(i, 'Stop', { lastAssistantMessage: 'CM-STAGE: needs_input which wording to keep?' });
   const asking = await cardOf(cards[1].id);
