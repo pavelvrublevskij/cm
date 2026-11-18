@@ -16,6 +16,7 @@
 - **Ticket notes** — on Finalize and Done tickets keep your own note and to-do list (never sent to Claude); the card shows done/total to-dos.
 - **Ticket type icon** — when a ticket starts, Claude recognises it as a bug, feature, question or other, and the card shows a matching icon before its title.
 - **Compact sidebar** — a Compact switch at the bottom of the sidebar shows only General and Projects.
+- **Ticket conversation on hover** — hold the pointer on a ticket for a second to see its latest conversation lines.
 - **Easier to spot the open session** — its pill in the active sessions bar and its sidebar row get a full accent border.
 
 ### Fixes
