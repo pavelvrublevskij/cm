@@ -111,6 +111,7 @@ Hash routing (`#view/slug/sessionId[/readonly]`) — the URL survives refresh.
 | Global CLAUDE.md | Markdown editor with preview |
 | MCP Servers | User scope + cloud integrations (read-only) |
 | Keybindings, Skills, Agents, Output Styles, Plugins | Global CRUD (plugins read-only) |
+| Skills/Agents transfer | Global and project Skills/Agents lists (`transferKind` in `crud-frontmatter.js`): Export all / Import buttons and a per-card ⋮ menu (Export, Copy to… Global or another project, Delete). Zip: agents as `<name>.md`, skills as whole `<name>/` folders. Import/copy answer 409 with the clashing names, `?overwrite=1` replaces (agents via `backup()`, skills backed up as whole folders); import stages every file first so a failed write changes nothing. Names must be valid on every OS (`lib/config-transfer.js`) |
 | Artifacts | Artifacts across sessions |
 | CM Settings (`manager-settings`) | Pricing URL/history/manual pricing, editor autosave, autostart toggle |
 | Changelog | Renders `CHANGELOG.md` |
@@ -123,6 +124,7 @@ All JSON, all under `/api`. Groups map 1:1 to `routes/*.js`:
 `dashboard`, `settings`, `projects` (projects, sessions, terminal, memory, git, scratchpad, project-files), `claude-md`, `mcp`,
 `keybindings`, `skills`, `agents`, `output-styles`, `plugins`, `project-settings`, `usage`, `health`, `artifacts`, `plans`,
 `file-history`, `autostart`, `task-board`, plus `version`, `changelog`, `update/zip`, `terminal/repair`, `pricing*` in `server.js`.
+`skills` and `agents` also get `GET /export/{global|project/:slug}[?names=…]`, `POST /import/{scope}` (zip body) and `POST /copy/{scope}/:name` `{ target: 'global' | slug }` from `lib/config-transfer.js`.
 Terminal and shells use WebSocket upgrades on the same server.
 
 ## 7. Invariants (never break)

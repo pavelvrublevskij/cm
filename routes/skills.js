@@ -5,11 +5,13 @@ const { backup, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
 const { readFrontmatterFile, writeFrontmatter } = require('../lib/frontmatter');
 const { SKILLS_DIR } = require('../lib/paths');
+const { mountTransferRoutes } = require('../lib/config-transfer');
 const { readUsage, recordUsage } = require('../lib/skill-usage');
 const { listCommands, commandFile } = require('../lib/project-commands');
 const { listSkills } = require('../lib/skill-list');
 
 const router = express.Router();
+mountTransferRoutes(router, 'skills');
 
 router.get('/global', wrapRoute((req, res) => {
   res.json(listSkills(SKILLS_DIR));

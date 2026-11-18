@@ -17,6 +17,7 @@
 - **Ticket type icon** — when a ticket starts, Claude recognises it as a bug, feature, question or other, and the card shows a matching icon before its title.
 - **Compact sidebar** — a Compact switch at the bottom of the sidebar shows only General and Projects.
 - **Ticket conversation on hover** — hold the pointer on a ticket for a second to see its latest conversation lines.
+- **Export, import and copy skills and agents** — global and project skills and agents export to a zip and import from one; the card menu copies one to Global or another project.
 - **Easier to spot the open session** — its pill in the active sessions bar and its sidebar row get a full accent border.
 
 ### Fixes
