@@ -22,6 +22,7 @@
 
 ### Fixes
 
+- **Security hardening** — API rate limiting, stricter name and path checks, and safer terminal launch; CodeQL now runs in CI and with `npm run codeql`.
 - **Projects sidebar refreshes itself** — new and changed projects show up within 15 seconds, no page reload needed.
 - **Sessions of removed worktrees stay with their project** — after a ticket's worktree is deleted, its sessions show in the project's Sessions list, and the worktree no longer shows as a project.
 - **Worktree usage counts for its project** — Token Usage counts Claude worktree sessions under the project they were made from, also after the worktree is removed.

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks the push when the local CodeQL scan has findings. Enable: git config core.hooksPath .githooks
+npm run codeql

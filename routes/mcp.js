@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { backup, readJson, wrapRoute } = require('../lib/file-helpers');
+const { backup, readJson, isSafeKey, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
 const { CLAUDE_DIR, CLAUDE_JSON } = require('../lib/paths');
 
@@ -90,6 +90,7 @@ router.put('/project/:slug/local', wrapRoute((req, res) => {
   if (!claudeJson.projects) claudeJson.projects = {};
   const existingKey = findProjectKey(claudeJson, decodedPath);
   const key = existingKey || toForwardSlashes(decodedPath);
+  if (!isSafeKey(key)) return res.status(400).json({ error: 'Invalid project' });
   if (!claudeJson.projects[key]) claudeJson.projects[key] = {};
   claudeJson.projects[key].mcpServers = (req.body && req.body.servers) || {};
   fs.writeFileSync(CLAUDE_JSON, JSON.stringify(claudeJson, null, 2), 'utf-8');

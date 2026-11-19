@@ -1,8 +1,8 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
-const { safeSlug, wrapRoute, backup } = require('../lib/file-helpers');
+const { execFile } = require('child_process');
+const { safeSlug, safeJoin, wrapRoute, backup } = require('../lib/file-helpers');
 const { CLAUDE_DIR } = require('../lib/paths');
 const planCache = require('../lib/plan-cache');
 const { getProjectUsageMap, getSessionUsage, calcCost } = require('../lib/usage-index');
@@ -19,6 +19,7 @@ const { getAllSessionColors, getSessionColors, setSessionColor, isValidColor } =
 const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
 const { renameSession } = require('../lib/session-rename');
+const { launchTerminal } = require('../lib/terminal-launch');
 
 const router = express.Router({ mergeParams: true });
 
@@ -64,44 +65,6 @@ function isSkippablePrompt(text) {
   const t = (text || '').trim();
   if (t.includes('Caveat: The messages below were generated')) return true;
   return normalizePrompt(t) === '/clear';
-}
-
-
-function safeSpawn(cmd, args, opts) {
-  const proc = spawn(cmd, args, opts);
-  // Without an 'error' listener, an async spawn failure crashes Node.
-  proc.on('error', () => { /* swallowed; caller decides what to do */ });
-  return proc;
-}
-
-function launchTerminal(projectPath, cmd) {
-  if (process.env.__CLAUDE_MANAGER_TEST_HOME) return;
-  const platform = process.platform;
-  if (platform === 'win32') {
-    const wtArgs = ['-d', projectPath, 'cmd.exe', '/k', cmd];
-    const proc = spawn('wt.exe', wtArgs, { detached: true, stdio: 'ignore' });
-    proc.on('error', () => {
-      safeSpawn('cmd.exe', ['/c', `start "" cmd.exe /k "cd /d ${projectPath} && ${cmd}"`], { shell: true, detached: true, stdio: 'ignore' }).unref();
-    });
-    proc.unref();
-  } else if (platform === 'darwin') {
-    const script = `tell application "Terminal" to do script "cd '${projectPath}' && ${cmd}"`;
-    const proc = safeSpawn('osascript', ['-e', script]);
-    proc.unref();
-  } else {
-    const terminals = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
-    for (const term of terminals) {
-      try {
-        const args = term === 'gnome-terminal'
-          ? ['--', 'bash', '-c', `cd '${projectPath}' && ${cmd}; exec bash`]
-          : ['-e', `bash -c "cd '${projectPath}' && ${cmd}; exec bash"`];
-        const proc = safeSpawn(term, args);
-        proc.unref();
-        return;
-      } catch (_) { continue; }
-    }
-    throw new Error('No supported terminal found');
-  }
 }
 
 router.get('/active', wrapRoute((req, res) => {
@@ -639,18 +602,16 @@ router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res)
   const dir = safeSlug(req.params.slug);
   if (!dir) return res.status(400).json({ error: 'Invalid slug' });
 
-  const sessionId = req.params.sessionId;
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
+  const sessionDir = safeJoin(dir, req.params.sessionId);
+  if (!sessionDir) return res.status(400).json({ error: 'Invalid session ID' });
 
   const agentId = req.params.agentId;
   if (!/^[a-zA-Z0-9_-]+$/.test(agentId)) {
     return res.status(400).json({ error: 'Invalid agent ID' });
   }
 
-  const filePath = path.join(dir, sessionId, 'subagents', 'agent-' + agentId + '.jsonl');
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Sub-agent session not found' });
+  const filePath = safeJoin(path.join(sessionDir, 'subagents'), 'agent-' + agentId + '.jsonl');
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ error: 'Sub-agent session not found' });
 
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
   const messages = [];
@@ -719,6 +680,10 @@ router.post('/:slug/sessions/:sessionId/resume', wrapRoute((req, res) => {
 
   const sessionId = req.params.sessionId;
   if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+  // It also goes into a terminal command line: session IDs are UUIDs, so allow nothing else.
+  if (!/^[\w-]+$/.test(sessionId)) {
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 

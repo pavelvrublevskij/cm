@@ -60,7 +60,9 @@ function slugifyHeading(text) {
 function addHeadingIds(html) {
   const seen = new Map();
   return html.replace(/<(h[1-6])>([\s\S]*?)<\/\1>/g, (whole, tag, inner) => {
-    const plain = inner.replace(/<[^>]+>/g, '');
+    // Repeat until stable: a single pass leaves a tag behind in input like "<scr<b>ipt>".
+    let plain = inner, prev;
+    do { prev = plain; plain = plain.replace(/<[^>]*>/g, ''); } while (plain !== prev);
     let slug = slugifyHeading(plain) || 'section';
     const n = seen.get(slug) || 0;
     seen.set(slug, n + 1);

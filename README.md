@@ -142,6 +142,15 @@ Works on Windows, macOS, and Linux. Path resolution handles all OS conventions a
 - Git runs with prompts disabled and a timeout, so a call can never hang the UI waiting for credentials
 - Only safe git operations are exposed as actions (`pull --ff-only`, `fetch --prune`, no forced push); rewriting history is left to the shell, where git can ask you
 - A commit is only ever addressed by a validated hex sha, never by raw input
+- API requests are rate-limited (10000/min by default, board hooks exempt, `CM_RATE_LIMIT` to change)
+
+### CodeQL
+
+CodeQL runs on every PR and push to `main`. To run it locally:
+
+1. Download the [CodeQL bundle](https://github.com/github/codeql-action/releases/latest) for your OS and extract it into `.codeql/` (giving `.codeql/codeql/codeql`), or put `codeql` on `PATH`, or set `CODEQL_PATH`
+2. `npm run codeql` — exits non-zero on findings
+3. Optional, scan before every push: `git config core.hooksPath .githooks`
 
 ## Changelog
 

@@ -31,6 +31,7 @@ CM can be started, stopped or restarted in all of these ways. **Any change to st
 - The run scripts read and save it through `scripts/port.js` (`node scripts/port.js` prints, `node scripts/port.js 3001` saves).
 - The last port chosen in Start is reused by Stop, by autostart (L5) and by any start without `PORT`.
 - Host is always `127.0.0.1` (`HOST` env may override; never bind to the network by default).
+- `/api` and the SPA fallback are rate-limited per client IP: 10000 requests/min, `CM_RATE_LIMIT` env overrides; `/api/task-board/hook` is exempt.
 
 ### 2.3 Process identity
 
@@ -131,7 +132,8 @@ Terminal and shells use WebSocket upgrades on the same server.
 
 - Server binds to `127.0.0.1` by default.
 - `~/.claude/` is written only through feature endpoints with `backup()` first; app data never goes into `~/.claude/`.
-- Path traversal is blocked: `safeSlug()`, `safeMemoryFile()`, validated filenames, hex-only commit shas.
+- Path traversal is blocked: `safeSlug()`, `safeMemoryFile()`, `safeJoin()` for any name from a request, validated filenames, hex-only commit shas.
+- Request values used as object keys go through `isSafeKey()` (no `__proto__`); OS terminals get the project folder as cwd/env, never inside a command line (`lib/terminal-launch.js`).
 - Credentials are read, never written.
 - `/api/task-board/hook` acts only for a running ticket and only with that run's random token.
 - Git runs non-interactive with a timeout; only safe operations are buttons (`pull --ff-only`, `fetch --prune`, no force push).
@@ -153,6 +155,7 @@ Terminal and shells use WebSocket upgrades on the same server.
 - `npm test` runs the full suite (`node --test`, `tests/*.test.js`, isolated HOME and data dir via `tests/helpers/app.js`).
   Every feature or fix gets tests; always run the full suite.
 - CI (`.github/workflows/test.yml`): Ubuntu + macOS × Node 22/24.
+- CodeQL (`.github/workflows/codeql.yml`, config `.github/codeql/codeql-config.yml`) on every PR and push to `main`; GitHub's CodeQL default setup must stay off. Locally `npm run codeql` (CLI from `.codeql/codeql`, `CODEQL_PATH` or `PATH`) must report 0 findings; `.githooks/pre-push` runs it once `git config core.hooksPath .githooks` is set.
 - Release: bump `package.json` version, add a CHANGELOG section, branch `release/x.y.z`, PR to `main`, tag `vx.y.z`.
 
 ## 10. Change checklist

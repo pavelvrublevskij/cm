@@ -31,11 +31,8 @@ function filterProjects(req) {
 function filterDateRange(req) {
   const reDate = /^\d{4}-\d{2}-\d{2}$/;
   const reTime = /^\d{2}:\d{2}$/;
-  const from = req.query.from && reDate.test(req.query.from) ? req.query.from : null;
-  const to = req.query.to && reDate.test(req.query.to) ? req.query.to : null;
-  const fromTime = req.query.fromTime && reTime.test(req.query.fromTime) ? req.query.fromTime : null;
-  const toTime = req.query.toTime && reTime.test(req.query.toTime) ? req.query.toTime : null;
-  return { from, to, fromTime, toTime };
+  const match = (key, re) => typeof req.query[key] === 'string' && re.test(req.query[key]) ? req.query[key] : null;
+  return { from: match('from', reDate), to: match('to', reDate), fromTime: match('fromTime', reTime), toTime: match('toTime', reTime) };
 }
 
 /** GET /api/usage/summary */

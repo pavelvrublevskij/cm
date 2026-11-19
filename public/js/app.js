@@ -120,7 +120,8 @@ const App = {
     }
     const parts = hash.split('/');
     const view = parts[0];
-    const slug = parts[1] || null;
+    // Project slugs are Claude Code's path with every other character turned into '-'.
+    const slug = parts[1] && /^[\w-]+$/.test(parts[1]) ? parts[1] : null;
     const sessionId = parts[2] || null;
     const readOnly = parts[3] === 'readonly';
 
@@ -198,11 +199,13 @@ const App = {
       'changelog': () => Changelog.load()
     };
 
-    if (simpleViews[view]) {
+    // Picked from the own keys, so a view name from the URL can't reach an inherited Object property.
+    const simpleView = Object.keys(simpleViews).find(k => k === view);
+    if (simpleView) {
       document.getElementById('view-' + view).classList.add('active');
       if (typeof GitActions !== 'undefined') GitActions.reset();
       if (typeof GitPanel !== 'undefined') GitPanel.unmount();
-      simpleViews[view]();
+      simpleViews[simpleView]();
     } else if (view === 'project-detail') {
       document.getElementById('view-project-detail').classList.add('active');
       App.currentProject = opts.slug;

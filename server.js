@@ -1,9 +1,22 @@
 const express = require('express');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = require('./lib/port').getPort();
 const HOST = process.env.HOST || '127.0.0.1';
+
+// Generous: the UI polls and the Changes view fetches one diff per file at once.
+// CM_RATE_LIMIT overrides the per-minute cap. Board hooks are never limited: a lost one stalls a ticket.
+const rateLimitOptions = {
+  windowMs: 60 * 1000,
+  limit: parseInt(process.env.CM_RATE_LIMIT, 10) || 10000,
+  skip: req => req.path === '/task-board/hook',
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests' }
+};
+app.use('/api', rateLimit(rateLimitOptions));
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -293,7 +306,7 @@ app.use('/api/projects', require('./routes/project-files'));
 app.use('/api/autostart', require('./routes/autostart'));
 app.use('/api/task-board', require('./routes/task-board'));
 
-app.get('*', (req, res) => {
+app.get('*', rateLimit(rateLimitOptions), (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
