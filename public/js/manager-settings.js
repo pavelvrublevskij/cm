@@ -327,6 +327,8 @@ const ManagerSettings = {
       const status = await api('/api/autostart');
       toggle.checked = status.enabled;
       toggle.disabled = !status.supported;
+      document.getElementById('autostart-manual-command').textContent = status.manualCommand || '';
+      document.getElementById('autostart-manual-note').style.display = status.manualCommand ? '' : 'none';
     } catch (_) {}
   },
 

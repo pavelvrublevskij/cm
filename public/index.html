@@ -806,6 +806,10 @@
                 <input type="checkbox" id="autostart-enabled" onchange="ManagerSettings.saveAutostart(this.checked)">
                 Start automatically at login
               </label>
+              <div class="info-note" id="autostart-manual-note" style="margin-top:12px;display:none">
+                If enabling autostart fails, create the startup shortcut manually by running this in PowerShell:
+                <pre style="white-space:pre-wrap;word-break:break-all;margin:8px 0 0"><code id="autostart-manual-command"></code></pre>
+              </div>
 
               <h3 style="margin-top:24px">Theme</h3>
               <div class="subtitle" style="margin:0 0 12px">Choose a color scheme for the UI.</div>

@@ -102,14 +102,29 @@ test('Windows: enable/disable manage a Startup-folder shortcut (child_process mo
   });
 });
 
-test('GET /api/autostart reports supported/enabled/prompted', async (t) => {
+test('GET /api/autostart reports supported/enabled/prompted/manualCommand', async (t) => {
   fs.rmSync(APP_CONFIG_FILE, { force: true });
   t.mock.method(autostartLib, 'isSupported', () => true);
   t.mock.method(autostartLib, 'isEnabled', () => false);
+  t.mock.method(autostartLib, 'manualCommand', () => 'CMD');
 
   const res = await request(app).get('/api/autostart');
   assert.strictEqual(res.status, 200);
-  assert.deepStrictEqual(res.body, { supported: true, enabled: false, prompted: false });
+  assert.deepStrictEqual(res.body, { supported: true, enabled: false, prompted: false, manualCommand: 'CMD' });
+});
+
+test('manualCommand: on Windows it is the same shortcut script enable() runs; null elsewhere', (t) => {
+  withPlatform('win32', () => {
+    const calls = [];
+    t.mock.method(cp, 'execFileSync', (cmd, args) => { calls.push(args); return Buffer.from(''); });
+    autostartLib.enable();
+    const command = autostartLib.manualCommand();
+    assert.ok(command.includes('CreateShortcut'));
+    assert.ok(command.includes(process.execPath));
+    assert.strictEqual(calls[0][calls[0].length - 1], command);
+  });
+  withPlatform('darwin', () => assert.strictEqual(autostartLib.manualCommand(), null));
+  withPlatform('linux', () => assert.strictEqual(autostartLib.manualCommand(), null));
 });
 
 test('POST /api/autostart/enable calls autostart.enable() and reports enabled', async (t) => {
