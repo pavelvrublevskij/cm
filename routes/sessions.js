@@ -709,6 +709,22 @@ router.post('/:slug/sessions/:sessionId/deactivate', wrapRoute((req, res) => {
   res.json({ ok: true });
 }));
 
+router.get('/:slug/sessions/:sessionId/input-state', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  res.json({ state: terminalServer.inputState(p.slug, p.sessionId) });
+}));
+
+router.post('/:slug/sessions/:sessionId/input', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const text = req.body && req.body.text;
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'Message is empty' });
+  const result = terminalServer.sendInput(p.slug, p.sessionId, text);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true });
+}));
+
 router.post('/:slug/sessions/:sessionId/open-readonly', wrapRoute((req, res) => {
   const p = validateSessionParams(req, res);
   if (!p) return;

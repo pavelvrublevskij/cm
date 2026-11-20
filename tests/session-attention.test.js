@@ -121,14 +121,14 @@ test('the hook script reports the event with its token to CM', async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const url = `http://127.0.0.1:${server.address().port}`;
   const code = await runHookScript(
-    { hook_event_name: 'PreToolUse', notification_type: '', tool_use_id: 'tu1', agent_id: 'ag1' },
+    { hook_event_name: 'PreToolUse', notification_type: '', tool_use_id: 'tu1', tool_name: 'Bash', agent_id: 'ag1' },
     { CM_SESSION_URL: url, CM_SESSION_TOKEN: 'tok' }
   );
   server.close();
   assert.strictEqual(code, 0);
   assert.deepStrictEqual(bodies, [{
     url: '/api/terminal/hook',
-    body: { token: 'tok', event: 'PreToolUse', notificationType: '', toolUseId: 'tu1', agentId: 'ag1' }
+    body: { token: 'tok', event: 'PreToolUse', notificationType: '', toolUseId: 'tu1', toolName: 'Bash', agentId: 'ag1' }
   }]);
 });
 
