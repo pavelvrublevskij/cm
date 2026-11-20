@@ -98,14 +98,19 @@ router.post('/cards/:id/pr', wrapRoute(async (req, res) => {
 /**
  * DELETE /api/task-board/cards/:id — only from ToDo, Done or waiting in Finalize; the card's session
  * stays in history. Deleting a ticket also removes its worktree (its branch stays):
- * { ok, warning } when the worktree had to stay.
+ * { ok, warning, project, worktree } when the worktree had to stay, so it can be force-removed.
  */
 router.delete('/cards/:id', wrapRoute(async (req, res) => {
   const result = board.deleteCard(req.params.id);
   if (result.error || result.notFound) return send(res, result);
   const { card } = result;
   const warning = card.worktree ? await runner.removeWorktree(card) : '';
-  res.json({ ok: true, warning });
+  res.json(warning ? { ok: true, warning, project: card.project, worktree: card.worktree } : { ok: true, warning });
+}));
+
+/** POST /api/task-board/worktrees/force-remove — { project, worktree }: remove a kept worktree, discarding its changes; its branch stays */
+router.post('/worktrees/force-remove', wrapRoute(async (req, res) => {
+  send(res, await runner.forceRemoveWorktree(req.body || {}));
 }));
 
 /** PUT /api/task-board/lanes/:slug — add a project lane or change its settings ({ parallel }) */
