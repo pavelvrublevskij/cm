@@ -25,3 +25,8 @@ test('Board hooks are not rate-limited', async () => {
   const res = await request(app).post('/api/task-board/hook').send({});
   assert.notStrictEqual(res.status, 429);
 });
+
+test('Session hooks are not rate-limited', async () => {
+  const res = await request(app).post('/api/terminal/hook').send({});
+  assert.notStrictEqual(res.status, 429);
+});

@@ -8,10 +8,11 @@ const HOST = process.env.HOST || '127.0.0.1';
 
 // Generous: the UI polls and the Changes view fetches one diff per file at once.
 // CM_RATE_LIMIT overrides the per-minute cap. Board hooks are never limited: a lost one stalls a ticket.
+// Session hooks neither: one fires on every tool call, and a lost one leaves the tab badge wrong.
 const rateLimitOptions = {
   windowMs: 60 * 1000,
   limit: parseInt(process.env.CM_RATE_LIMIT, 10) || 10000,
-  skip: req => req.path === '/task-board/hook',
+  skip: req => req.path === '/task-board/hook' || req.path === '/terminal/hook',
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests' }
@@ -181,6 +182,18 @@ function npmInstall() {
   });
 }
 
+/** POST /api/terminal/hook — events from scripts/session-hook.js, authenticated by the session's token */
+app.post('/api/terminal/hook', (req, res) => {
+  const result = terminalServer.handleHook(req.body || {});
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+/** GET /api/terminal/attention — how many browser-terminal sessions wait for the user */
+app.get('/api/terminal/attention', (req, res) => {
+  res.json({ waiting: terminalServer.attentionCount() });
+});
+
 app.post('/api/terminal/repair', async (req, res) => {
   try {
     fixPtyPermissions();
@@ -328,6 +341,8 @@ if (require.main === module) {
   });
   server.listen(PORT, HOST, () => {
     console.log(`CM running at http://${HOST}:${PORT}`);
+
+    terminalServer.initHooks(`http://${HOST}:${PORT}`);
 
     require('./lib/task-board-runner').init({
       spawn: terminalServer.spawnBackground,

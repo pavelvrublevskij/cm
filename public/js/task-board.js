@@ -25,16 +25,21 @@ const TaskBoard = {
 
   /**
    * Tickets waiting for the user, watched from every view at the conversation refresh rate: the
-   * sidebar count, a toast for a newly waiting ticket while the board is not open, and a badge on
-   * its session in the active sessions bar.
+   * sidebar count, a toast for a newly waiting ticket while the board is not open, a badge on
+   * its session in the active sessions bar, and (with browser-terminal sessions waiting) the tab badge.
    */
   watchAttention() {
     TaskBoard.refreshAttention().finally(() => setTimeout(TaskBoard.watchAttention, Sessions.refreshIntervalMs()));
   },
 
   async refreshAttention() {
+    let sessions = 0;
+    try { sessions = (await api('/api/terminal/attention')).waiting; } catch (_) { /* the tab shows the tickets only */ }
     let data;
-    try { data = await api('/api/task-board/attention'); } catch (_) { return; }
+    try { data = await api('/api/task-board/attention'); } catch (_) { data = null; }
+    // Without a fresh ticket list the tab counts the last known waiting tickets.
+    if (typeof TabBadge !== 'undefined') TabBadge.set((data ? data.waiting.length : TaskBoard.attention.length) + sessions);
+    if (!data) return;
     const list = data.waiting;
     const known = new Set(TaskBoard.attention.map(a => a.id));
     const fresh = list.find(a => !known.has(a.id));
