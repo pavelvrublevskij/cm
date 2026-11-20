@@ -401,6 +401,7 @@ test('deleting a ticket with a worktree says the worktree goes and the branch is
   }
   assert.ok(!TaskBoard.deleteMessageHtml({ column: 'done' }).includes('worktree'));
   assert.match(TaskBoard.deleteMessageHtml({ column: 'finalize', finalized: true, worktree: 'cm-ab12', gitBranch: 'feature/login' }), /branch <code>feature\/login<\/code> is kept/);
+  assert.match(TaskBoard.deleteMessageHtml({ column: 'done', worktree: 'cm-ab12' }), /uncommitted changes, it is kept and you can force-remove it, which discards them/);
 });
 
 test('a Finalize ticket waiting on its branch: merge or PR badge, deletable, no longer in the workflow', () => {
@@ -528,6 +529,49 @@ test('Finalize and Done cards show a notes button with done/total to-dos', () =>
   assert.match(TaskBoard.cardHtml(card, [], true), /tb-card-memo/);
   assert.doesNotMatch(TaskBoard.cardHtml({ ...card, column: 'todo' }, [], false), /tb-card-memo/);
   assert.doesNotMatch(TaskBoard.memoIconHtml({ ...card, memo: '', todos: [] }), /--has/);
+});
+
+test('a kept worktree on delete opens the Force remove dialog, which posts project and worktree', async () => {
+  const load = TaskBoard.load;
+  const modals = [];
+  const calls = [];
+  const toasts = [];
+  let deleted = { ok: true, warning: 'The worktree .claude/worktrees/cm-ab12cd34 was kept: dirty', project: 'p', worktree: 'cm-ab12cd34' };
+  let fail = false;
+  TaskBoard.load = async () => {};
+  Object.assign(context, {
+    openModal: m => { modals.push(m); },
+    api: async (url, opts) => {
+      calls.push({ url, opts });
+      if (opts.method === 'DELETE') return deleted;
+      if (fail) throw new Error('nope');
+      return { ok: true };
+    },
+    toast: (msg, type) => toasts.push({ msg, type })
+  });
+  TaskBoard.board = { projects: {}, cards: [{ id: 'x', project: 'p', column: 'done', worktree: 'cm-ab12cd34' }] };
+  try {
+    TaskBoard.confirmDelete('x');
+    await modals[0].buttons[0].onClick();
+    assert.strictEqual(modals.length, 2);
+    assert.strictEqual(modals[1].title, 'Worktree kept');
+    assert.match(modals[1].body, /was kept: dirty/);
+    assert.strictEqual(modals[1].buttons[0].label, 'Force remove');
+    assert.strictEqual(toasts.length, 0, 'a dialog, not a toast');
+
+    await modals[1].buttons[0].onClick();
+    assert.deepStrictEqual(plain(calls[1]), { url: '/api/task-board/worktrees/force-remove', opts: { method: 'POST', body: { project: 'p', worktree: 'cm-ab12cd34' } } });
+    fail = true;
+    await modals[1].buttons[0].onClick();
+    assert.deepStrictEqual(plain(toasts), [{ msg: 'nope', type: 'error' }]);
+
+    deleted = { ok: true, warning: '' };
+    TaskBoard.confirmDelete('x');
+    await modals[2].buttons[0].onClick();
+    assert.strictEqual(modals.length, 3, 'removed worktree: no dialog');
+  } finally {
+    TaskBoard.load = load;
+  }
 });
 
 test('a ticket moved back to ToDo opens with a follow-up question and its notes to edit', () => {
