@@ -734,7 +734,8 @@ const wtDir = card => path.join(GIT_ROOT, '.claude', 'worktrees', 'cm-' + card.i
 function workIn(card, file) {
   fs.writeFileSync(path.join(wtDir(card), file), 'ticket\n');
   sh(['add', file], wtDir(card));
-  sh(['commit', '-q', '-m', 'ticket work'], wtDir(card));
+  // Per-ticket message: two tickets committing in the same second must not make the same commit.
+  sh(['commit', '-q', '-m', 'ticket work ' + card.id], wtDir(card));
 }
 
 test('a Parallel git lane runs up to the limit at once, each ticket in a worktree from the current branch', async () => {
@@ -868,6 +869,8 @@ test('a worktree with uncommitted changes is kept on delete and reported; the ti
   const forced = await request(app).post('/api/task-board/worktrees/force-remove').send({ project: del.body.project, worktree: del.body.worktree });
   assert.deepStrictEqual(forced.body, { ok: true });
   assert.ok(!fs.existsSync(wtDir(card)));
+  const again = await request(app).post('/api/task-board/worktrees/force-remove').send({ project: del.body.project, worktree: del.body.worktree });
+  assert.strictEqual(again.body.error, 'No kept worktree with that name');
   assert.match(sh(['branch', '--list', 'feature/dirty'], GIT_ROOT), /feature\/dirty/, 'the branch stays');
 });
 
@@ -881,6 +884,9 @@ test('force-remove accepts only a ticket worktree name and a valid project', asy
   }
   const missing = await forceRemove({ project: 'C--no-such-folder-cm-test', worktree: 'cm-0123abcd' });
   assert.deepStrictEqual([missing.status, missing.body.error], [400, 'Project folder not found']);
+  makeRepo();
+  const unknown = await forceRemove({ project: GIT_SLUG, worktree: 'cm-0123abcd' });
+  assert.deepStrictEqual([unknown.status, unknown.body.error], [400, 'No kept worktree with that name']);
 });
 
 test('force-remove refuses the worktree of a ticket still on the board', async () => {
