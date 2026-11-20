@@ -775,3 +775,43 @@ test('scrolling a preview near its end loads the older messages below, with a lo
   el.onscroll();
   assert.strictEqual(calls.length, 2);
 });
+
+test('new ticket and add lane use the shared project select', () => {
+  const calls = [];
+  let modal = null;
+  Object.assign(context, {
+    openModal: m => { modal = m; },
+    formGroup: (label, input) => `<label>${label}</label>${input}`,
+    setTimeout: () => {},
+    toast: () => {},
+    Projects: {
+      data: [{ slug: 'C--work-zeta' }, { slug: 'C--work-alpha' }, { slug: 'C--work-new' }],
+      selectHtml: (...args) => { calls.push(args); return `<select id="${args[0]}"></select>`; }
+    }
+  });
+  TaskBoard.board = BOARD;
+  TaskBoard.openEditor(null, 'C--work-alpha');
+  assert.match(modal.body, /<select id="tb-project">/);
+  assert.deepStrictEqual(calls[0].slice(0, 2), ['tb-project', 'C--work-alpha']);
+
+  TaskBoard.openAddLane();
+  assert.match(modal.body, /<select id="tb-lane-project">/);
+  const [id, , { filter }] = calls[1];
+  assert.strictEqual(id, 'tb-lane-project');
+  assert.ok(filter('C--work-new'));
+  assert.ok(!filter('C--work-zeta'));
+});
+
+test('add lane says so when every project already has one', () => {
+  const toasts = [];
+  let modal = null;
+  Object.assign(context, {
+    openModal: m => { modal = m; },
+    toast: (...a) => toasts.push(a),
+    Projects: { data: [{ slug: 'C--work-zeta' }], selectHtml: () => '' }
+  });
+  TaskBoard.board = BOARD;
+  TaskBoard.openAddLane();
+  assert.strictEqual(modal, null);
+  assert.strictEqual(toasts[0][0], 'Every project already has a lane');
+});

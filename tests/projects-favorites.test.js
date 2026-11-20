@@ -184,3 +184,37 @@ test('a starred project gets a star on its sidebar folder icon, others do not', 
   assert.ok(row('alpha').includes('fav-folder-star'));
   assert.ok(!row('beta').includes('fav-folder-star'));
 });
+
+test('sidebar groups are collapsed by default and open on toggle or when holding the current project', () => {
+  const members = [
+    project('g-a', { groupId: 'g', groupLabel: 'Grp', groupPrimary: true, groupRelPath: 'a' }),
+    project('g-b', { groupId: 'g', groupLabel: 'Grp', groupRelPath: 'b' })
+  ];
+  render([...members, project('solo')]);
+  let nav = els['project-nav-list'].innerHTML;
+  assert.ok(nav.includes("Projects.toggleGroup('g')"));
+  assert.ok(!nav.includes('data-slug="g-a"'), 'members hidden while the group is collapsed');
+  assert.ok(nav.includes('data-slug="solo"'), 'ungrouped projects after a collapsed group still show');
+
+  context.Projects.toggleGroup('g');
+  nav = els['project-nav-list'].innerHTML;
+  assert.ok(nav.includes('data-slug="g-a"') && nav.includes('data-slug="g-b"'));
+  assert.ok(nav.includes('--tree-indent:0px'), 'members are indented by their tree depth');
+  context.Projects.toggleGroup('g');
+
+  context.App.currentProject = 'g-b';
+  render([...members, project('solo')]);
+  assert.ok(els['project-nav-list'].innerHTML.includes('data-slug="g-a"'), 'the group holding the current project is open');
+});
+
+test('a group under folded Other projects stays hidden until Other projects opens', () => {
+  render([
+    project('fav', { favorite: true }),
+    project('g-a', { groupId: 'g', groupLabel: 'Grp', groupRelPath: 'a' })
+  ]);
+  assert.ok(!els['project-nav-list'].innerHTML.includes("Projects.toggleGroup('g')"));
+  context.Projects.toggleOthers();
+  const nav = els['project-nav-list'].innerHTML;
+  assert.ok(nav.includes("Projects.toggleGroup('g')"));
+  assert.ok(!nav.includes('data-slug="g-a"'));
+});

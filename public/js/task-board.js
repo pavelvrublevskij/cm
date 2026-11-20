@@ -544,10 +544,6 @@ const TaskBoard = {
     return TaskBoard.board.cards.find(c => c.id === id);
   },
 
-  projectOptions() {
-    return (Projects.data || []).map(p => [p.slug, decodeName(p.slug)]);
-  },
-
   /**
    * New card (id null, optionally preset to a lane) or edit an existing one. followUp: the card was
    * just moved back to ToDo, so ask what to change or follow up on, with its notes ready to edit.
@@ -555,8 +551,7 @@ const TaskBoard = {
   openEditor(id, lane, followUp) {
     const card = id ? TaskBoard.findCard(id) : null;
     if (id && !card) return;
-    const options = TaskBoard.projectOptions();
-    if (!card && !options.length) {
+    if (!card && !(Projects.data || []).length) {
       toast('No projects found', 'error');
       return;
     }
@@ -564,7 +559,7 @@ const TaskBoard = {
       ? formGroup('Project', `<div class="tb-editor-project">${escapeHtml(decodeName(card.project))}</div>`)
         + (TaskBoard.gitBranchOf(card) ? formGroup('Branch', `<div class="tb-editor-project tb-card-git">${escapeHtml(TaskBoard.gitBranchOf(card))}${card.baseBranch ? ' &larr; ' + escapeHtml(card.baseBranch) : ''}</div>`) : '')
         + (card.prUrl ? formGroup('Pull request', `<div class="tb-editor-project"><a href="${escapeAttr(card.prUrl)}" target="_blank" rel="noopener">${escapeHtml(card.prUrl)}</a></div>`) : '')
-      : formGroup('Project', frontmatterSelectHtml('tb-project', options, lane || options[0][0]));
+      : formGroup('Project', Projects.selectHtml('tb-project', lane));
     const editable = !card || card.column === 'todo';
     const ro = editable ? '' : ' readonly';
     const question = followUp && editable
@@ -981,14 +976,14 @@ const TaskBoard = {
 
   openAddLane() {
     const taken = Object.keys(TaskBoard.board.projects || {});
-    const options = (Projects.data || []).filter(p => !taken.includes(p.slug)).map(p => [p.slug, decodeName(p.slug)]);
-    if (!options.length) {
+    const free = slug => !taken.includes(slug);
+    if (!(Projects.data || []).some(p => free(p.slug))) {
       toast('Every project already has a lane', 'error');
       return;
     }
     openModal({
       title: 'Add project lane',
-      body: formGroup('Project', frontmatterSelectHtml('tb-lane-project', options, options[0][0])),
+      body: formGroup('Project', Projects.selectHtml('tb-lane-project', null, { filter: free })),
       buttons: [{ label: 'Add', primary: true, onClick: async () => {
         const slug = document.getElementById('tb-lane-project').value;
         try {

@@ -198,10 +198,9 @@ const Usage = {
     Usage.renderDropdownList(key);
   },
 
-  /** Starred on the Projects page, or nested under a starred project. */
-  isFavoriteProject(slug) {
-    const p = typeof Projects !== 'undefined' && (Projects.data || []).find(x => x.slug === slug);
-    return !!p && Projects._inFavorites(p);
+  /** Projects with usage, as Projects.listRows extras — those not registered on the Projects page. */
+  projectExtras() {
+    return Usage.allProjects.map(p => ({ slug: p.slug, label: Usage.basename(p.name), title: p.name }));
   },
 
   renderDropdownList(key) {
@@ -218,18 +217,18 @@ const Usage = {
           checked: Usage.currentModels.has(m)
         }));
     } else {
-      items = Usage.allProjects
-        .map(p => ({ p, base: Usage.basename(p.name), fav: Usage.isFavoriteProject(p.slug) }))
-        .filter(({ p, base }) => !term || base.toLowerCase().includes(term))
-        .sort((a, b) => (b.fav - a.fav) || a.base.localeCompare(b.base))
-        .map(({ p, base, fav }) => ({
-          value: p.slug,
-          extra: p.name,
-          label: base,
-          title: p.name,
-          fav,
-          checked: Usage.currentProjects.has(p.slug)
-        }));
+      const names = new Map(Usage.allProjects.map(p => [p.slug, p.name]));
+      items = Projects.pruneRows(Projects.listRows(Usage.projectExtras())
+        .filter(r => r.kind !== 'project' || (names.has(r.slug) && (!term || Usage.basename(names.get(r.slug)).toLowerCase().includes(term)))))
+        .map(r => r.kind !== 'project' ? { header: true, label: r.key === 'favorites' ? '★ Favorites' : r.label } : {
+          value: r.slug,
+          extra: names.get(r.slug),
+          label: r.label,
+          title: names.get(r.slug),
+          depth: r.depth,
+          fav: r.section === 'favorites',
+          checked: Usage.currentProjects.has(r.slug)
+        });
     }
     if (!items.length) {
       listEl.innerHTML = '<div class="multi-select-empty">No matches</div>';
@@ -237,13 +236,15 @@ const Usage = {
     }
     const jsQuote = s => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
     listEl.innerHTML = items.map(it => {
+      if (it.header) return `<div class="multi-select-group">${escapeHtml(it.label)}</div>`;
       const valAttr = escapeHtml(jsQuote(it.value));
       const extraAttr = it.extra ? escapeHtml(jsQuote(it.extra)) : '';
       const onchange = key === 'models'
         ? `Usage.toggleModel('${valAttr}')`
         : `Usage.toggleProject('${valAttr}', '${extraAttr}')`;
       const titleAttr = it.title ? ` title="${escapeHtml(it.title)}"` : '';
-      return `<label class="multi-select-option"${titleAttr}>
+      const indent = it.depth ? ` style="padding-left:${8 + it.depth * TREE_INDENT_STEP}px"` : '';
+      return `<label class="multi-select-option"${titleAttr}${indent}>
         <input type="checkbox" ${it.checked ? 'checked' : ''} onchange="${onchange}">
         <span>${it.fav ? '<span class="fav-star--on">&#9733;</span> ' : ''}${escapeHtml(it.label)}</span>
       </label>`;
