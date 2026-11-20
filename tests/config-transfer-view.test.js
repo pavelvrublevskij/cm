@@ -8,6 +8,7 @@ const path = require('path');
 // lists without it keep the plain delete button; a project list may copy to Global, the global
 // list only to projects; every request goes to /api/<kind>/<action>/<scope>.
 const src = fs.readFileSync(path.join(__dirname, '../public/js/crud-frontmatter.js'), 'utf-8');
+const projectsSrc = fs.readFileSync(path.join(__dirname, '../public/js/projects.js'), 'utf-8');
 
 const harness = {};
 
@@ -29,18 +30,15 @@ function makeContext() {
     showLoading() {},
     toast: (msg, kind) => harness.toasts.push([msg, kind]),
     formGroup: (label, html) => `<label>${label}</label>${html}`,
-    decodeName: slug => slug,
+    decodeName: slug => 'name-' + slug,
     openModal: m => harness.modals.push(m),
     api: async () => harness.list,
     fetch: async (url, init) => {
       harness.fetches.push([url, init]);
       return harness.response;
-    },
-    Projects: {
-      data: [{ slug: 'p1', path: '/code/p1' }, { slug: 'p2', path: '/code/p2' }],
-      _favoriteLabel: p => 'name-' + p.slug
     }
   });
+  vm.runInContext(projectsSrc + '\nProjects.data = [{ slug: "p1", path: "/code/p1" }, { slug: "p2", path: "/code/p2" }];', context);
   vm.runInContext(src + '\nthis.makeFrontmatterCrud = makeFrontmatterCrud;', context);
   return context;
 }
@@ -122,7 +120,7 @@ test('copy targets: global list offers only projects; project list offers Global
   const gBody = harness.modals[0].body;
   assert.ok(!gBody.includes('value="global"'));
   assert.ok(gBody.includes('value="p1"') && gBody.includes('value="p2"'));
-  assert.ok(gBody.includes('>name-p1</option>'), 'options are labelled with project names');
+  assert.ok(gBody.includes('>name-p1</option>'), 'options are labelled as in the sidebar');
   assert.ok(gBody.includes('title="/code/p1"'), 'full path stays as the tooltip');
 
   const p = crud(makeContext(), { transferKind: 'skills' });

@@ -143,3 +143,31 @@ test('tooltipHtml leaves out the impact block when it is unknown', () => {
   const html = UsageMarks.tooltipHtml([{ date: '2026-03-02', title: 'A', description: '', project: null }]);
   assert.ok(!html.includes('mark-tip-impact'));
 });
+
+test('the mark editor Scope uses the shared project select: Global first, only projects with usage', () => {
+  let call = null;
+  let modal = null;
+  Object.assign(context, {
+    openModal: m => { modal = m; },
+    formRow: (...h) => h.join(''),
+    document: { getElementById: () => ({ addEventListener() {}, value: '' }) },
+    setTimeout: () => {},
+    formGroup: (label, html) => `<label>${label}</label>${html}`,
+    Projects: { selectHtml: (...args) => { call = args; return '<select id="mark-project"></select>'; } }
+  });
+  Object.assign(context.Usage, {
+    currentProjects: new Map([['p1', '/x/p1']]),
+    allProjects: [{ slug: 'p1', name: '/x/p1' }],
+    projectExtras: () => [{ slug: 'p1', label: 'p1', title: '/x/p1' }]
+  });
+  UsageMarks.updateWindowHint = () => {};
+  UsageMarks.openEditor();
+  assert.match(modal.body, /<label>Scope<\/label><select id="mark-project">/);
+  const [id, selected, opts] = call;
+  assert.strictEqual(id, 'mark-project');
+  assert.strictEqual(selected, 'p1');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(opts.leading)), [['', 'Global (all projects)']]);
+  assert.strictEqual(opts.extra.length, 1);
+  assert.ok(opts.filter('p1'));
+  assert.ok(!opts.filter('idle'));
+});

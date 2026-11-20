@@ -318,52 +318,109 @@ const Projects = {
     `;
   },
 
-  _navGroupHtml(g) {
-    const expanded = Projects._expanded.has(g.groupId) || g.members.some(m => m.slug === App.currentProject);
-    const memberHtml = expanded
-      ? Projects._treeRows(Projects._tree(g.members))
-          .map(({ project: p, depth }) => Projects._navItemHtml(p, { label: Projects._memberLabel(p), title: p.path, depth }))
-          .join('')
-      : '';
+  _navGroupHtml(g, expanded) {
     return `
       <div class="nav-item nav-item--group-header" onclick="Projects.toggleGroup('${g.groupId}')" title="${escapeAttr(g.label)} — ${g.members.length} projects">
         <span class="icon project-group-caret">${expanded ? '&#9660;' : '&#9654;'}</span>
         <span class="nav-label">${escapeHtml(g.label)}</span>
         <span class="nav-group-count">${g.members.length}</span>
       </div>
-      ${memberHtml}
     `;
   },
 
-  _navListHtml(list) {
-    const { groups, ungrouped } = Projects._grouped(list);
-    return groups.map(Projects._navGroupHtml).join('')
-      + ungrouped.map(p => Projects._navItemHtml(p, { label: decodeName(p.slug), title: decodeName(p.slug) })).join('');
+  _navOthersHtml(count) {
+    const open = Projects._othersOpen;
+    return `
+      <div class="nav-item nav-item--group-header nav-item--others" onclick="Projects.toggleOthers()" title="Other projects — ${count}">
+        <span class="icon project-group-caret">${open ? '&#9660;' : '&#9654;'}</span>
+        <span class="nav-label">Other projects</span>
+        <span class="nav-group-count">${count}</span>
+      </div>
+    `;
+  },
+
+  /** The project list in sidebar order, flattened into the rows the sidebar and every project
+   *  dropdown render from: 'section' rows (Favorites, Other projects — only when something is
+   *  starred), 'group' rows, and 'project' rows with their depth, label and title. `extra`
+   *  ({ slug, label, title }) are projects known elsewhere but not registered here; they go last,
+   *  ungrouped, with no `project`. */
+  listRows(extra = []) {
+    const { favorites, others } = Projects._split();
+    const extraRows = extra.filter(e => !Projects.data.some(p => p.slug === e.slug));
+    const section = favorites.length ? 'others' : null;
+    const row = (p, fields) => ({ kind: 'project', slug: p.slug, project: p, depth: 0, section, ...fields });
+    const rows = [];
+    if (favorites.length) {
+      rows.push({ kind: 'section', key: 'favorites', label: 'Favorites' });
+      for (const { project: p, children } of Projects._favoriteEntries()) {
+        const label = Projects._favoriteLabel(p);
+        rows.push(row(p, { section: 'favorites', label, title: label }));
+        for (const { project: c, depth } of children) {
+          rows.push(row(c, { section: 'favorites', depth: depth + 1, label: Projects._memberLabel(c), title: c.path }));
+        }
+      }
+      if (others.length + extraRows.length) rows.push({ kind: 'section', key: 'others', label: 'Other projects', count: others.length });
+    }
+    const { groups, ungrouped } = Projects._grouped(favorites.length ? others : Projects.data);
+    for (const g of groups) {
+      rows.push({ kind: 'group', section, groupId: g.groupId, label: g.label, members: g.members });
+      for (const { project: p, depth } of Projects._treeRows(Projects._tree(g.members))) {
+        rows.push(row(p, { groupId: g.groupId, groupLabel: g.label, depth, label: Projects._memberLabel(p), title: p.path }));
+      }
+    }
+    for (const p of ungrouped) rows.push(row(p, { label: decodeName(p.slug), title: decodeName(p.slug) }));
+    for (const e of extraRows) rows.push({ kind: 'project', slug: e.slug, project: null, depth: 0, section, label: e.label, title: e.title });
+    return rows;
+  },
+
+  /** Drop the section and group rows of `rows` left with no project rows under them. */
+  pruneRows(rows) {
+    return rows.filter(r => r.kind === 'project' || rows.some(x => x.kind === 'project'
+      && (r.kind === 'group' ? x.groupId === r.groupId : x.section === r.key)));
+  },
+
+  /** A <select> of projects in sidebar order: favorites, each group and the rest as option groups,
+   *  nested projects indented, full path as the tooltip. `leading` ([value, label, title?]) options go first; `extra` as in
+   *  listRows; `filter(slug)` keeps a project. */
+  selectHtml(id, selected, { leading = [], extra = [], filter = () => true } = {}) {
+    const option = (value, label, title) =>
+      `<option value="${escapeAttr(value)}"${title ? ` title="${escapeAttr(title)}"` : ''}${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+    let html = leading.map(([value, label, title]) => option(value, label, title)).join('');
+    let open = null;
+    for (const r of Projects.listRows(extra)) {
+      if (r.kind !== 'project' || !filter(r.slug)) continue;
+      const key = r.groupId || r.section;
+      if (key !== open) {
+        if (open) html += '</optgroup>';
+        const label = r.groupId ? r.groupLabel : r.section === 'favorites' ? '★ Favorites' : 'Other projects';
+        if (key) html += `<optgroup label="${escapeAttr(label)}">`;
+        open = key;
+      }
+      html += option(r.slug, '  '.repeat(r.depth) + r.label, r.project ? r.project.path : r.title);
+    }
+    if (open) html += '</optgroup>';
+    return `<select id="${escapeAttr(id)}">${html}</select>`;
   },
 
   renderNav() {
     const list = document.getElementById('project-nav-list');
-    const { favorites, others } = Projects._split();
-
-    if (!favorites.length) {
-      list.innerHTML = Projects._navListHtml(Projects.data);
-    } else {
-      const open = Projects._othersOpen;
-      list.innerHTML = Projects._favoriteEntries().map(({ project: p, children }) => {
-        const label = Projects._favoriteLabel(p);
-        return Projects._navItemHtml(p, { label, title: label })
-          + children.map(({ project: c, depth }) => Projects._navItemHtml(c, {
-            label: Projects._memberLabel(c), title: c.path, px: TREE_INDENT_ROOT + (depth + 1) * TREE_INDENT_STEP
-          })).join('');
-      }).join('') + (others.length ? `
-        <div class="nav-item nav-item--group-header nav-item--others" onclick="Projects.toggleOthers()" title="Other projects — ${others.length}">
-          <span class="icon project-group-caret">${open ? '&#9660;' : '&#9654;'}</span>
-          <span class="nav-label">Other projects</span>
-          <span class="nav-group-count">${others.length}</span>
-        </div>
-        ${open ? Projects._navListHtml(others) : ''}
-      ` : '');
-    }
+    let hidden = false;   // inside the folded "Other projects" section
+    let folded = null;    // the collapsed group whose member rows are skipped
+    list.innerHTML = Projects.listRows().map(r => {
+      if (r.kind === 'section') {
+        hidden = r.key === 'others' && !Projects._othersOpen;
+        return r.key === 'others' ? Projects._navOthersHtml(r.count) : '';
+      }
+      if (hidden) return '';
+      if (r.kind === 'group') {
+        const expanded = Projects._expanded.has(r.groupId) || r.members.some(m => m.slug === App.currentProject);
+        folded = expanded ? null : r.groupId;
+        return Projects._navGroupHtml(r, expanded);
+      }
+      if (r.groupId && r.groupId === folded) return '';
+      const indent = r.groupId ? { depth: r.depth } : r.depth ? { px: TREE_INDENT_ROOT + r.depth * TREE_INDENT_STEP } : {};
+      return Projects._navItemHtml(r.project, { label: r.label, title: r.title, ...indent });
+    }).join('');
     const countEl = document.getElementById('project-nav-count');
     if (countEl) countEl.textContent = Projects.data.length;
     if (typeof ActiveCount !== 'undefined') ActiveCount.refresh();
