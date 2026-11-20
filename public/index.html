@@ -751,12 +751,9 @@
               <div id="session-messages" class="chat-container"></div>
             </div>
             <div class="session-input" id="session-input" style="display:none">
-              <div class="session-input-row">
-                <textarea id="session-input-text" class="session-input-text" rows="2"
-                  placeholder="Message Claude — Enter to send, Shift+Enter for a new line"
-                  onkeydown="SessionInput.onKeyDown(event)"></textarea>
-                <button class="btn btn-primary" id="session-input-send" onclick="SessionInput.send()">Send</button>
-              </div>
+              <textarea id="session-input-text" class="session-input-text" rows="2"
+                placeholder="Message Claude — Enter to send, Shift+Enter for a new line"
+                onkeydown="SessionInput.onKeyDown(event)"></textarea>
               <div class="session-input-note" id="session-input-note"></div>
             </div>
             <button class="scroll-to-top" id="scroll-to-top-btn" onclick="Sessions.scrollToTop()" aria-label="Scroll to top" title="Scroll to top">&#8593;</button>

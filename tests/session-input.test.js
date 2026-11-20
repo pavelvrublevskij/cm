@@ -103,16 +103,48 @@ test('an idle prompt clears a tool or question left open by an interrupt, and bu
   assert.strictEqual(await state(), 'ready');
 });
 
-test('sending is refused when there is no pty, Claude is busy, a question is open or the text is empty', async () => {
+test('sending is refused when there is no pty, a question is open or the text is empty', async () => {
   assert.strictEqual((await send('hi')).status, 404);
   const term = fakeTerm();
   terminalServer._injectFakeEntry(SLUG, SID, { hookToken: TOKEN, term });
   assert.strictEqual((await send('   ')).status, 400);
-  await hook({ event: 'UserPromptSubmit' });
-  assert.strictEqual((await send('hi')).status, 409);
   await hook({ event: 'PreToolUse', toolUseId: 'q1', toolName: 'AskUserQuestion' });
   assert.strictEqual((await send('hi')).status, 409);
   assert.deepStrictEqual(term.writes, []);
+});
+
+test('a message sent while Claude works is pasted and gets one Enter, for claude to queue', async () => {
+  const term = fakeTerm();
+  terminalServer._injectFakeEntry(SLUG, SID, { hookToken: TOKEN, term });
+  await hook({ event: 'UserPromptSubmit' });
+  assert.strictEqual((await send('also this')).status, 200);
+  await new Promise(r => setTimeout(r, 1800));
+  assert.deepStrictEqual(term.writes, ['\x1b[200~also this\x1b[201~', '\r']);
+});
+
+test('no Enter is pressed again once a question opens', async () => {
+  const term = fakeTerm();
+  terminalServer._injectFakeEntry(SLUG, SID, { hookToken: TOKEN, term });
+  await send('hi');
+  await new Promise(r => setTimeout(r, 200));
+  await hook({ event: 'PreToolUse', toolUseId: 'q1', toolName: 'AskUserQuestion' });
+  await new Promise(r => setTimeout(r, 1600));
+  assert.deepStrictEqual(term.writes.slice(1), ['\r']);
+});
+
+test('a new session without an id yet sends its message over the terminal WebSocket', async () => {
+  const term = fakeTerm();
+  const entry = { slug: SLUG, sessionId: '', mode: 'claude', hookToken: TOKEN, term, terminated: false };
+  const handlers = {};
+  const sent = [];
+  const ws = { readyState: 1, on(evt, fn) { handlers[evt] = fn; }, send(d) { sent.push(d); }, close() {} };
+  terminalServer._bindWs(entry, ws);
+  handlers.message(JSON.stringify({ t: 'send', text: 'first message' }));
+  assert.deepStrictEqual(term.writes, ['\x1b[200~first message\x1b[201~']);
+  entry.questions = new Set(['q1']);
+  handlers.message(JSON.stringify({ t: 'send', text: 'second' }));
+  assert.deepStrictEqual(sent.map(d => JSON.parse(d)), [{ t: 'send-error', error: 'A question is open' }]);
+  entry.terminated = true;
 });
 
 // --- client: public/js/session-input.js ---
@@ -122,7 +154,6 @@ function loadClient() {
   const els = {
     'session-input': { style: {}, dataset: {} },
     'session-input-text': { value: '', disabled: false },
-    'session-input-send': { disabled: false },
     'session-input-note': { textContent: '' }
   };
   const h = { els, calls: [], response: {}, toasts: [] };
@@ -143,15 +174,18 @@ function loadClient() {
   return h;
 }
 
-test('client: the box is enabled only when ready and says why otherwise', async () => {
+test('client: the box is disabled with a note without a CM pty or while a question is open', async () => {
   const h = loadClient();
-  for (const s of ['none', 'busy', 'question']) {
+  for (const s of ['none', 'question']) {
     h.response = { state: s };
     await h.SessionInput.refresh();
     assert.strictEqual(h.els['session-input-text'].disabled, true, s);
-    assert.strictEqual(h.els['session-input-send'].disabled, true, s);
     assert.ok(h.els['session-input-note'].textContent, s);
   }
+  h.response = { state: 'busy' };
+  await h.SessionInput.refresh();
+  assert.strictEqual(h.els['session-input-text'].disabled, false, 'busy: a message can be queued');
+  assert.ok(h.els['session-input-note'].textContent);
   h.response = { state: 'ready' };
   await h.SessionInput.refresh();
   assert.strictEqual(h.els['session-input-text'].disabled, false);
@@ -159,11 +193,29 @@ test('client: the box is enabled only when ready and says why otherwise', async 
   assert.strictEqual(h.calls[0].url, '/api/projects/proj/sessions/sid/input-state');
 });
 
-test('client: the box is hidden until the session has an id', () => {
+test('client: a new session without an id is ready and sends through the terminal panel', async () => {
   const h = loadClient();
+  const sent = [];
+  let connected = true;
+  h.context.TerminalPanel = { sendMessage: t => { if (connected) sent.push(t); return connected; } };
   h.context.Sessions.detailState = { slug: 'proj', sessionId: null };
-  h.SessionInput.render('none');
-  assert.strictEqual(h.els['session-input'].style.display, 'none');
+  await h.SessionInput.refresh();
+  assert.strictEqual(h.els['session-input'].style.display, '');
+  assert.strictEqual(h.SessionInput.state, 'ready');
+  assert.strictEqual(h.calls.length, 0, 'no input-state request without an id');
+  h.els['session-input-text'].value = 'hello';
+  await h.SessionInput.send();
+  assert.deepStrictEqual(sent, ['hello']);
+  assert.strictEqual(h.els['session-input-text'].value, '');
+  assert.strictEqual(h.SessionInput.state, 'busy');
+  await h.SessionInput.refresh();
+  assert.strictEqual(h.SessionInput.state, 'busy', 'stays busy until the session is found');
+  connected = false;
+  h.els['session-input-text'].value = 'again';
+  await h.SessionInput.send();
+  assert.strictEqual(h.els['session-input-text'].value, 'again');
+  assert.deepStrictEqual(h.toasts, [{ msg: 'The terminal is not connected yet', type: 'error' }]);
+  assert.strictEqual(h.calls.length, 0);
 });
 
 test('client: Enter sends, Shift+Enter does not', async () => {
@@ -185,9 +237,9 @@ test('client: Enter sends, Shift+Enter does not', async () => {
   assert.strictEqual(h.SessionInput.state, 'busy');
 });
 
-test('client: nothing is sent while not ready or when empty; a failed send keeps the text', async () => {
+test('client: nothing is sent while a question is open or when empty; a failed send keeps the text', async () => {
   const h = loadClient();
-  h.SessionInput.render('busy');
+  h.SessionInput.render('question');
   h.els['session-input-text'].value = 'hello';
   await h.SessionInput.send();
   h.SessionInput.render('ready');
@@ -211,7 +263,7 @@ test('client: a read-only view hides the box and sends nothing', async () => {
   assert.strictEqual(h.calls.length, 0);
 });
 
-test('client: a poll started before a send cannot re-enable the box; a double Enter sends once', async () => {
+test('client: a poll started before a send cannot overwrite its state; a double Enter sends once', async () => {
   const h = loadClient();
   h.SessionInput.render('ready');
   let release;
@@ -228,5 +280,17 @@ test('client: a poll started before a send cannot re-enable the box; a double En
   await new Promise(r => setImmediate(r));
   assert.strictEqual(h.calls.filter(c => c.opts).length, 1, 'one POST');
   assert.strictEqual(h.SessionInput.state, 'busy');
-  assert.strictEqual(h.els['session-input-text'].disabled, true);
+});
+
+test('a revealed Task Board session follows the board-forwarded hook events and is not counted for attention', async () => {
+  const entry = terminalServer._injectFakeEntry(SLUG, SID, { boardHooks: true });
+  assert.strictEqual(await state(), 'ready');
+  terminalServer.trackHookEvent(entry, { event: 'UserPromptSubmit' });
+  assert.strictEqual(await state(), 'busy');
+  terminalServer.trackHookEvent(entry, { event: 'PreToolUse', toolUseId: 'q1', toolName: 'AskUserQuestion' });
+  terminalServer.trackHookEvent(entry, { event: 'Notification', notificationType: 'elicitation_dialog' });
+  assert.strictEqual(await state(), 'question');
+  assert.strictEqual((await request(app).get('/api/terminal/attention')).body.waiting, 0);
+  entry.hidden = true;
+  assert.strictEqual(await state(), 'none', 'still hidden on the board');
 });

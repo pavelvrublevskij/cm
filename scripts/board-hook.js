@@ -35,6 +35,8 @@ process.stdin.on('end', () => {
     message: event.message || '',
     notificationType: event.notification_type || '',
     agentId: event.agent_id || '',
+    toolUseId: event.tool_use_id || '',
+    toolName: event.tool_name || '',
     lastAssistantMessage: event.last_assistant_message || ''
   });
 });

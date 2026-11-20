@@ -504,6 +504,18 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
           messages.push(msg);
         }
       }
+      // A message sent while claude works reaches it mid-turn and is logged as a queued_command
+      // attachment, not as a user entry.
+      const att = entry.type === 'attachment' && entry.attachment;
+      if (att && att.type === 'queued_command' && att.commandMode === 'prompt' && typeof att.prompt === 'string' && att.prompt.trim()) {
+        messages.push({
+          role: 'user',
+          timestamp: entry.timestamp || att.timestamp,
+          gitBranch: entry.gitBranch || '',
+          model: '',
+          content: [{ type: 'text', text: att.prompt }]
+        });
+      }
     } catch (_) { /* malformed JSONL line, skip */ }
   }
 

@@ -1213,3 +1213,25 @@ test('a running ticket\'s session tells its stage, and hide keeps it running out
   assert.strictEqual((await request(app).post('/api/task-board/cards/nope/hide')).status, 404);
   assert.deepStrictEqual((await request(app).get('/api/task-board/session/unknown-session')).body, { card: null, stage: null });
 });
+
+test('every hook event of a ticket session is forwarded for the message box; tool events stop there', async () => {
+  runner._reset();
+  const tracked = [];
+  runner.init({
+    spawn: (projectPath, slug, opts) => { const e = fakeEntry(); e.term.owner = e; spawned.push({ opts, entry: e }); return e; },
+    bind: () => {}, trackHook: (entry, body) => tracked.push({ entry, event: body.event, toolName: body.toolName }),
+    url: 'http://127.0.0.1:1', idleMs: 1, maxWaitMs: 10, enterDelayMs: 1, submitCheckMs: 40, readyDelayMs: 0
+  });
+  await setStages(['Plan']);
+  const card = await addTicket({ notes: 'track' });
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  const i = spawned.length - 1;
+  await hook(i, 'SessionStart', { sessionId: SID });
+  await hook(i, 'UserPromptSubmit', {});
+  await hook(i, 'PreToolUse', { toolUseId: 'q1', toolName: 'AskUserQuestion' });
+  assert.deepStrictEqual(tracked.map(t => [t.event, t.toolName]),
+    [['SessionStart', undefined], ['UserPromptSubmit', undefined], ['PreToolUse', 'AskUserQuestion']]);
+  assert.ok(tracked.every(t => t.entry === spawned[i].entry));
+  assert.strictEqual((await cardOf(card.id)).run.status, 'running', 'a tool event does not change the ticket');
+  await request(app).post(`/api/task-board/cards/${card.id}/stop`);
+});
