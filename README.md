@@ -146,7 +146,7 @@ Works on Windows, macOS, and Linux. Path resolution handles all OS conventions a
 
 ### CodeQL
 
-CodeQL runs on every PR and push to `main`. To run it locally:
+CodeQL runs on every PR, push to `main` and weekly (JavaScript and GitHub Actions workflows). To run it locally:
 
 1. Download the [CodeQL bundle](https://github.com/github/codeql-action/releases/latest) for your OS and extract it into `.codeql/` (giving `.codeql/codeql/codeql`), or put `codeql` on `PATH`, or set `CODEQL_PATH`
 2. `npm run codeql` — exits non-zero on findings

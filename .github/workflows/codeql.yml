@@ -5,17 +5,27 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    - cron: '26 12 * * 6'
 
 jobs:
   analyze:
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     permissions:
       security-events: write
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
     steps:
       - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
-          languages: javascript
+          languages: ${{ matrix.language }}
+          build-mode: none
           config-file: ./.github/codeql/codeql-config.yml
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
