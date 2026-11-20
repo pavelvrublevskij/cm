@@ -120,7 +120,7 @@ Hash routing (`#view/slug/sessionId[/readonly]`) — the URL survives refresh.
 
 Also: tab badge (`public/js/tab-badge.js`): while Task Board tickets need input or browser-terminal sessions wait for the user, the tab title shows `(N) CM` and the favicon a red dot, updated at the refresh rate. A browser-terminal session waits after a Notification (not `auth_success`, not `idle_prompt` while a subagent runs) until UserPromptSubmit or Stop, or until no started tool is left unfinished (PreToolUse → PostToolUse/PostToolUseFailure); hidden board sessions are not counted. Sessions started outside CM's terminal are not tracked.
 
-Also: sidebar compact mode (switch in the sidebar footer, `public/js/compact-mode.js`, localStorage; shows only General and Projects), onboarding tour (`public/js/tour.js`, re-triggered by a minor version bump), update check and in-app update, 4 themes.
+Also: sidebar compact mode (switch in the sidebar footer, `public/js/compact-mode.js`, localStorage; shows only General and Projects), onboarding tour (`public/js/tour.js`, re-triggered by a minor version bump), update check and in-app update, 12 themes chosen from the footer dropdown (`Theme` in `public/js/utils.js`).
 
 ## 6. API
 
