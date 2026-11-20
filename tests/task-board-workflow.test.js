@@ -103,6 +103,13 @@ test('validateStages checks titles, types and references, and keeps valid ids', 
   assert.match(stages[2].id, /^s-[0-9a-f]{8}$/);
 });
 
+test('validateStages: a workflow stage needs a prompt and no skill or agent', () => {
+  assert.match(wf.validateStages([{ title: 'A', type: 'workflow', prompt: ' ' }], []).error, /prompt is required/);
+  const { stages } = wf.validateStages([{ title: 'Deep review', type: 'workflow', ref: 'ignored', prompt: 'Review it' }], []);
+  assert.deepStrictEqual([stages[0].type, stages[0].ref, stages[0].prompt], ['workflow', '', 'Review it']);
+  assert.deepStrictEqual(wf.missingRefs(stages, []), []);
+});
+
 test('validateStages checks conditions: text, count and a target that is a stage or Done', () => {
   const stage = (id, branches) => ({ id, title: 'A', type: 'prompt', prompt: 'x', branches });
   const err = branches => wf.validateStages([stage('s-aaaaaaaa', branches), stage('s-bbbbbbbb')], []).error;

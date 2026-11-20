@@ -680,11 +680,26 @@ const TaskBoard = {
           toast(e.message, 'error');
           return;
         }
-        if (res.warning) toast(res.warning, 'warning');
+        if (res.warning) TaskBoard.offerForceRemove(res);
         await TaskBoard.load();
       } }]
     });
     return true;
+  },
+
+  /** The deleted ticket's worktree was kept ({ warning, project, worktree }): offer to force-remove it. */
+  offerForceRemove({ warning, project, worktree }) {
+    openModal({
+      title: 'Worktree kept',
+      body: `<p>${escapeHtml(warning)}</p><p>Force remove discards its uncommitted changes; its branch is kept.</p>`,
+      buttons: [{ label: 'Force remove', danger: true, onClick: async () => {
+        try {
+          await api('/api/task-board/worktrees/force-remove', { method: 'POST', body: { project, worktree } });
+        } catch (e) {
+          toast(e.message, 'error');
+        }
+      } }]
+    });
   },
 
   /** The ticket's own branch once it has a worktree (named when the worktree was created). */
@@ -696,6 +711,7 @@ const TaskBoard = {
   deleteMessageHtml(card) {
     const worktree = card.worktree
       ? ` Its worktree <code>.claude/worktrees/${escapeHtml(card.worktree)}</code> is removed; branch <code>${escapeHtml(TaskBoard.gitBranchOf(card))}</code> is kept.`
+        + ' If the worktree has uncommitted changes, it is kept and you can force-remove it, which discards them.'
       : '';
     return `<p>The ticket is removed from the board.${worktree} Its session, if any, stays in the session history.</p>`;
   },
@@ -741,7 +757,7 @@ const TaskBoard = {
   },
 
   stageLabel(s) {
-    return s.type === 'prompt' ? 'prompt: ' + s.prompt.split('\n')[0] : s.type + ': ' + s.ref;
+    return s.type === 'prompt' || s.type === 'workflow' ? s.type + ': ' + s.prompt.split('\n')[0] : s.type + ': ' + s.ref;
   },
 
   refOptions(available, stage) {

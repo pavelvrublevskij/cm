@@ -9,6 +9,9 @@ const TaskBoardFlow = {
   STEP_X: 190,
   STEP_Y: 80,
   MAX_BRANCHES: 4,
+  WORKFLOW_PROMPT: 'Review the changes made for this ticket. Split the review by dimension: correctness, '
+    + 'cross-platform behavior, and the project\'s own rules (CLAUDE.md, spec). Verify each finding with a separate '
+    + 'agent and keep only confirmed ones. Then fix the confirmed findings and run the tests.',
 
   _drag: null,
 
@@ -291,9 +294,11 @@ const TaskBoardFlow = {
   stagePanelHtml(wf, s) {
     const id = escapeAttr(s.id);
     const missing = (wf.missing || []).includes(s.id);
-    const types = [['skill', 'Skill'], ['agent', 'Agent'], ['prompt', 'Prompt']]
+    const types = [['skill', 'Skill'], ['agent', 'Agent'], ['prompt', 'Prompt'], ['workflow', 'Workflow']]
       .map(([v, label]) => `<option value="${v}"${v === s.type ? ' selected' : ''}>${label}</option>`).join('');
-    const ref = s.type === 'prompt' ? '' : `<label class="tbf-field">${s.type === 'skill' ? 'Skill' : 'Agent'}
+    const promptLabel = s.type === 'prompt' ? 'What Claude should do'
+      : s.type === 'workflow' ? 'What the workflow should do' : 'Extra instructions (optional)';
+    const ref = s.type === 'prompt' || s.type === 'workflow' ? '' : `<label class="tbf-field">${s.type === 'skill' ? 'Skill' : 'Agent'}
         <select class="${missing ? 'tb-wf-ref--missing' : ''}" onchange="TaskBoardFlow.setStage('${id}', 'ref', this.value)">${
           TaskBoard.refOptions(wf.available, s).map(([v, label]) => `<option value="${escapeAttr(v)}"${v === s.ref ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')
         }</select></label>`;
@@ -303,7 +308,7 @@ const TaskBoardFlow = {
         <label class="tbf-field">Type
           <select onchange="TaskBoardFlow.setStage('${id}', 'type', this.value)">${types}</select></label>
         ${ref}
-        <label class="tbf-field">${s.type === 'prompt' ? 'What Claude should do' : 'Extra instructions (optional)'}
+        <label class="tbf-field">${promptLabel}
           <textarea rows="5" oninput="TaskBoardFlow.setStage('${id}', 'prompt', this.value, true)">${escapeHtml(s.prompt)}</textarea></label>
         ${!s.next ? '<div class="tbf-warn">Draw its default arrow: drag from the dot on its right edge.</div>' : ''}
         <button class="btn btn-sm btn-danger" onclick="TaskBoardFlow.act('removeStage', '${id}')">Delete stage</button>
@@ -367,7 +372,8 @@ const TaskBoardFlow = {
     s[field] = value;
     if (field === 'type') {
       const first = wf.available.find(a => a.kind === value);
-      s.ref = value === 'prompt' ? '' : (first ? first.name : '');
+      s.ref = value === 'prompt' || value === 'workflow' ? '' : (first ? first.name : '');
+      if (value === 'workflow' && !s.prompt.trim()) s.prompt = TaskBoardFlow.WORKFLOW_PROMPT;
     }
     if (quiet) TaskBoardFlow.renderSvg();
     else TaskBoardFlow.render();

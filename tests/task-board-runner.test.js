@@ -120,6 +120,11 @@ test('stageMessage leads with the ticket on stage 1 and names skills and agents'
   assert.strictEqual(runner.stageMessage({ title: 'Only title', notes: '' }, stages, 0).split('\n')[0], 'Only title');
 });
 
+test('stageMessage asks a workflow stage to use the Workflow tool and wait for it', () => {
+  const stages = [{ title: 'Deep review', type: 'workflow', ref: '', prompt: 'Review by dimension' }];
+  assert.match(runner.stageMessage({}, stages, 0), /Use a workflow \(the Workflow tool\) for this stage, and wait for it to finish before you end this stage\.\nReview by dimension/);
+});
+
 test('moving a ticket to Ready starts claude with the hooks settings and enters stage 1', async () => {
   const stages = await setStages(['Plan', 'Build']);
   const card = await addTicket({ notes: 'ABC-1 fix login' });
@@ -856,8 +861,38 @@ test('a worktree with uncommitted changes is kept on delete and reported; the ti
   const del = await request(app).delete('/api/task-board/cards/' + card.id);
   assert.strictEqual(del.body.ok, true);
   assert.match(del.body.warning, /^The worktree \.claude\/worktrees\/cm-\w{8} was kept: /);
+  assert.deepStrictEqual([del.body.project, del.body.worktree], [GIT_SLUG, 'cm-' + card.id.slice(0, 8)]);
   assert.ok(fs.existsSync(wtDir(card)));
   assert.strictEqual(await cardOf(card.id), undefined);
+
+  const forced = await request(app).post('/api/task-board/worktrees/force-remove').send({ project: del.body.project, worktree: del.body.worktree });
+  assert.deepStrictEqual(forced.body, { ok: true });
+  assert.ok(!fs.existsSync(wtDir(card)));
+  assert.match(sh(['branch', '--list', 'feature/dirty'], GIT_ROOT), /feature\/dirty/, 'the branch stays');
+});
+
+test('force-remove accepts only a ticket worktree name and a valid project', async () => {
+  const forceRemove = body => request(app).post('/api/task-board/worktrees/force-remove').send(body);
+  for (const worktree of ['../x', 'cm-zz', 'cm-0123456789', 'other', '', 5]) {
+    assert.strictEqual((await forceRemove({ project: GIT_SLUG, worktree })).status, 400, 'worktree ' + worktree);
+  }
+  for (const project of ['', '..', 'a/b', 5]) {
+    assert.strictEqual((await forceRemove({ project, worktree: 'cm-0123abcd' })).status, 400, 'project ' + project);
+  }
+  const missing = await forceRemove({ project: 'C--no-such-folder-cm-test', worktree: 'cm-0123abcd' });
+  assert.deepStrictEqual([missing.status, missing.body.error], [400, 'Project folder not found']);
+});
+
+test('force-remove refuses the worktree of a ticket still on the board', async () => {
+  makeRepo();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await until(async () => !!(await cardOf(card.id)).worktree);
+  const worktree = (await cardOf(card.id)).worktree;
+  const res = await request(app).post('/api/task-board/worktrees/force-remove').send({ project: GIT_SLUG, worktree });
+  assert.deepStrictEqual([res.status, res.body.error], [400, 'The worktree belongs to a ticket on the board']);
+  assert.ok(fs.existsSync(wtDir(card)));
 });
 
 test('three tickets at once end in Finalize on three branches, each from the parent branch', async () => {
