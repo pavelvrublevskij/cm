@@ -685,6 +685,31 @@ body {
   overflow-y: auto;
   padding: 24px;
 }
+.session-input {
+  flex: 0 0 auto;
+  padding: 8px 24px 12px;
+  border-top: 1px solid var(--border);
+}
+.session-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.session-input-text {
+  flex: 1 1 auto;
+  min-height: 40px;
+  max-height: 200px;
+  resize: vertical;
+  font: inherit;
+}
+.session-input-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.session-input-note:empty {
+  display: none;
+}
 /* When conversation is fully collapsed: hide the main panel but keep the splitter
    visible so the user can drag it back. */
 .session-detail-body.conversation-hidden .session-main-panel {

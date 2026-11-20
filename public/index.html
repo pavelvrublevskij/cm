@@ -750,6 +750,15 @@
             <div class="session-messages-pane" id="session-messages-pane">
               <div id="session-messages" class="chat-container"></div>
             </div>
+            <div class="session-input" id="session-input" style="display:none">
+              <div class="session-input-row">
+                <textarea id="session-input-text" class="session-input-text" rows="2"
+                  placeholder="Message Claude — Enter to send, Shift+Enter for a new line"
+                  onkeydown="SessionInput.onKeyDown(event)"></textarea>
+                <button class="btn btn-primary" id="session-input-send" onclick="SessionInput.send()">Send</button>
+              </div>
+              <div class="session-input-note" id="session-input-note"></div>
+            </div>
             <button class="scroll-to-top" id="scroll-to-top-btn" onclick="Sessions.scrollToTop()" aria-label="Scroll to top" title="Scroll to top">&#8593;</button>
             </div><!-- end session-messages-wrap -->
           </div><!-- end session-main-panel -->
@@ -987,6 +996,7 @@
   <script src="/js/claude-md.js"></script>
   <script src="/js/sessions.js"></script>
   <script src="/js/session-messages.js"></script>
+  <script src="/js/session-input.js"></script>
   <script src="/js/session-context.js"></script>
   <script src="/js/session-activity.js"></script>
   <script src="/js/session-scratchpad.js"></script>

@@ -1088,6 +1088,7 @@ const Sessions = {
     Sessions._updateArtifactsTabVisibility(false);
     if (typeof SessionFiles !== 'undefined') SessionFiles.reset(slug);
     container.innerHTML = '';
+    if (typeof SessionInput !== 'undefined') { SessionInput.render('none'); SessionInput.refresh(); }
 
     // Reset search
     Sessions._detailSearchQuery = '';
@@ -1183,6 +1184,7 @@ const Sessions = {
       if (!slug || !sessionId) return;
       Sessions.pollContext(slug, sessionId);
       Sessions.pollScratchpad();
+      if (typeof SessionInput !== 'undefined') SessionInput.refresh();
     }, Sessions.refreshIntervalMs());
   },
 
