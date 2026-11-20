@@ -879,3 +879,17 @@ test('readonly and a real os/browser session on the same id both appear, not ded
 
   activeSessions._reset();
 });
+
+test('GET /api/projects/:slug/sessions/:sessionId shows a message queued mid-turn as a user message, not task notifications', async () => {
+  const id = '66666666-1111-2222-3333-444444444444';
+  writeJsonl(path.join(PROJECT_DIR, id + '.jsonl'), [
+    { type: 'user', timestamp: '2026-01-11T09:00:00.000Z', message: { content: 'do it' } },
+    { type: 'assistant', timestamp: '2026-01-11T09:00:01.000Z', message: { content: [{ type: 'text', text: 'working' }] } },
+    { type: 'attachment', timestamp: '2026-01-11T09:00:02.000Z', attachment: { type: 'queued_command', prompt: 'also this', commandMode: 'prompt', origin: { kind: 'human' } } },
+    { type: 'attachment', timestamp: '2026-01-11T09:00:03.000Z', attachment: { type: 'queued_command', prompt: '<task-notification>', commandMode: 'task-notification' } }
+  ]);
+  const res = await request(app).get(`/api/projects/${SLUG}/sessions/${id}`);
+  assert.strictEqual(res.status, 200);
+  const msgs = res.body.messages.slice().reverse().map(m => [m.role, m.content[0].text]);
+  assert.deepStrictEqual(msgs, [['user', 'do it'], ['assistant', 'working'], ['user', 'also this']]);
+});

@@ -8,14 +8,17 @@ const SessionInput = {
 
   NOTES: {
     none: 'Messages can be sent here only to a session running in CM\'s terminal — use the terminal for this one.',
-    busy: 'Claude is working…',
+    busy: 'Claude is working — a message sent now waits until it finishes.',
     question: 'Answer the open question in the terminal first.',
     ready: ''
   },
 
   async refresh() {
     const { slug, sessionId } = Sessions.detailState;
-    if (!slug || !sessionId) { SessionInput.render('none'); return; }
+    if (!slug) { SessionInput.render('none'); return; }
+    // A new session gets its id with its first JSONL line; until then its first message goes
+    // through the terminal panel, which runs claude idle at its prompt.
+    if (!sessionId) { if (SessionInput.state !== 'busy') SessionInput.render('ready'); return; }
     const seq = SessionInput.seq;
     try {
       const data = await api(`/api/projects/${slug}/sessions/${sessionId}/input-state`);
@@ -31,13 +34,11 @@ const SessionInput = {
     const wrap = document.getElementById('session-input');
     if (!wrap) return;
     const text = document.getElementById('session-input-text');
-    const send = document.getElementById('session-input-send');
     const note = document.getElementById('session-input-note');
-    const { sessionId, readOnly } = Sessions.detailState;
-    wrap.style.display = sessionId && !readOnly ? '' : 'none';
+    const { slug, readOnly } = Sessions.detailState;
+    wrap.style.display = slug && !readOnly ? '' : 'none';
     wrap.dataset.state = state;
-    text.disabled = state !== 'ready';
-    send.disabled = state !== 'ready';
+    text.disabled = state !== 'ready' && state !== 'busy';
     note.textContent = SessionInput.NOTES[state] || '';
   },
 
@@ -51,10 +52,17 @@ const SessionInput = {
     const text = document.getElementById('session-input-text');
     const message = text.value;
     const { slug, sessionId, readOnly } = Sessions.detailState;
-    if (readOnly || SessionInput.sending || SessionInput.state !== 'ready' || !message.trim()) return;
+    if (readOnly || SessionInput.sending || !['ready', 'busy'].includes(SessionInput.state) || !message.trim()) return;
     SessionInput.sending = true;
     SessionInput.seq++;
     SessionInput.render('busy');
+    if (!sessionId) {
+      SessionInput.sending = false;
+      if (typeof TerminalPanel !== 'undefined' && TerminalPanel.sendMessage(message)) { text.value = ''; return; }
+      toast('The terminal is not connected yet', 'error');
+      SessionInput.render('ready');
+      return;
+    }
     try {
       await api(`/api/projects/${slug}/sessions/${sessionId}/input`, { method: 'POST', body: { text: message } });
       text.value = '';

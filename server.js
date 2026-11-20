@@ -347,6 +347,7 @@ if (require.main === module) {
     require('./lib/task-board-runner').init({
       spawn: terminalServer.spawnBackground,
       bind: terminalServer.bindSessionId,
+      trackHook: terminalServer.trackHookEvent,
       reveal: terminalServer.reveal,
       hide: terminalServer.hide,
       url: `http://${HOST}:${PORT}`

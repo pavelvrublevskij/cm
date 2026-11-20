@@ -106,6 +106,10 @@ const TermView = {
             if (opts.onSpawnError) opts.onSpawnError(control.message, control);
             return;
           }
+          if (control && typeof control === 'object' && control.t === 'send-error') {
+            toast(control.error, 'error');
+            return;
+          }
           term.write(raw);
         };
         ws.onclose = () => { TermView._setStatus(opts, 'disconnected', 'error'); };

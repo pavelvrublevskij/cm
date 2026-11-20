@@ -86,6 +86,8 @@ const TerminalPanel = {
   },
 
   killSession()       { this._sendWs({ t: 'close' }); },
+  /** Send the message box text to claude through the pty's WebSocket; false when it is not connected. */
+  sendMessage(text)   { return this.hasAttachedPty() && this._sendWs({ t: 'send', text }); },
   notifySessionId(id) {
     if (!id) return;
     this._sendWs({ t: 'session', id });
