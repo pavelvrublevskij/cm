@@ -31,7 +31,7 @@ CM can be started, stopped or restarted in all of these ways. **Any change to st
 - The run scripts read and save it through `scripts/port.js` (`node scripts/port.js` prints, `node scripts/port.js 3001` saves).
 - The last port chosen in Start is reused by Stop, by autostart (L5) and by any start without `PORT`.
 - Host is always `127.0.0.1` (`HOST` env may override; never bind to the network by default).
-- `/api` and the SPA fallback are rate-limited per client IP: 10000 requests/min, `CM_RATE_LIMIT` env overrides; `/api/task-board/hook` is exempt.
+- `/api` and the SPA fallback are rate-limited per client IP: 10000 requests/min, `CM_RATE_LIMIT` env overrides; `/api/task-board/hook` and `/api/terminal/hook` are exempt.
 
 ### 2.3 Process identity
 
@@ -93,6 +93,7 @@ Written only through `writeDataJson()` / `safeDataWrite()`, which refuse any pat
 | `skill-usage.json` | Skill usage counts |
 | `task-board.json` | Task board: cards (title, notes = description, project, column, closed, sessionId, run = { status, message }, worktree, gitBranch, baseBranch, finalized, prUrl) and project lanes (`parallel`, `stages` = [{ id, title, type skill|agent|prompt|workflow, ref, prompt, next = stage id or done (default arrow), branches = [{ when, to }], pos = { x, y } }], first stage = the one Ready leads to, stored in default-arrow order, `skillsSnapshot`) |
 | `board-hooks.json` | Claude Code hooks (SessionStart, UserPromptSubmit, Stop, Notification, SubagentStart, SubagentStop → `scripts/board-hook.js`), passed only to Task Board sessions with `--settings`; rewritten on each ticket start |
+| `session-hooks.json` | Claude Code hooks (Notification, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, Stop, SubagentStart, SubagentStop → `scripts/session-hook.js`), passed with `--settings` and env `CM_SESSION_URL/TOKEN` to claude sessions started in the browser terminal; written on listen |
 
 **Settings shared by several launch paths or by server and scripts belong in `app-config.json`**, never in script-local files.
 
@@ -117,6 +118,8 @@ Hash routing (`#view/slug/sessionId[/readonly]`) — the URL survives refresh.
 | CM Settings (`manager-settings`) | Pricing URL/history/manual pricing, editor autosave, autostart toggle |
 | Changelog | Renders `CHANGELOG.md` |
 
+Also: tab badge (`public/js/tab-badge.js`): while Task Board tickets need input or browser-terminal sessions wait for the user, the tab title shows `(N) CM` and the favicon a red dot, updated at the refresh rate. A browser-terminal session waits after a Notification (not `auth_success`, not `idle_prompt` while a subagent runs) until UserPromptSubmit or Stop, or until no started tool is left unfinished (PreToolUse → PostToolUse/PostToolUseFailure); hidden board sessions are not counted. Sessions started outside CM's terminal are not tracked.
+
 Also: sidebar compact mode (switch in the sidebar footer, `public/js/compact-mode.js`, localStorage; shows only General and Projects), onboarding tour (`public/js/tour.js`, re-triggered by a minor version bump), update check and in-app update, 4 themes.
 
 ## 6. API
@@ -124,7 +127,7 @@ Also: sidebar compact mode (switch in the sidebar footer, `public/js/compact-mod
 All JSON, all under `/api`. Groups map 1:1 to `routes/*.js`:
 `dashboard`, `settings`, `projects` (projects, sessions, terminal, memory, git, scratchpad, project-files), `claude-md`, `mcp`,
 `keybindings`, `skills`, `agents`, `output-styles`, `plugins`, `project-settings`, `usage`, `health`, `artifacts`, `plans`,
-`file-history`, `autostart`, `task-board`, plus `version`, `changelog`, `update/zip`, `terminal/repair`, `pricing*` in `server.js`.
+`file-history`, `autostart`, `task-board`, plus `version`, `changelog`, `update/zip`, `terminal/repair`, `terminal/hook`, `terminal/attention`, `pricing*` in `server.js`.
 `skills` and `agents` also get `GET /export/{global|project/:slug}[?names=…]`, `POST /import/{scope}` (zip body) and `POST /copy/{scope}/:name` `{ target: 'global' | slug }` from `lib/config-transfer.js`.
 Terminal and shells use WebSocket upgrades on the same server.
 
@@ -136,6 +139,7 @@ Terminal and shells use WebSocket upgrades on the same server.
 - Request values used as object keys go through `isSafeKey()` (no `__proto__`); OS terminals get the project folder as cwd/env, never inside a command line (`lib/terminal-launch.js`).
 - Credentials are read, never written.
 - `/api/task-board/hook` acts only for a running ticket and only with that run's random token.
+- `/api/terminal/hook` acts only for a running browser-terminal session and only with that session's random token.
 - Git runs non-interactive with a timeout; only safe operations are buttons (`pull --ff-only`, `fetch --prune`, no force push).
 - Run scripts never stop a process that isn't this CM (§2.3).
 - Everything works on Windows, macOS and Linux (`process.platform` branches, `path.join`, per-OS process spawning).

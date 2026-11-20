@@ -456,6 +456,35 @@ test('the sidebar shows how many tickets are in workflow progress, hidden at zer
   TaskBoard._progress = null;
 });
 
+test('the tab badge counts waiting tickets plus waiting browser-terminal sessions', async () => {
+  const counts = [];
+  Object.assign(context, {
+    document: { getElementById: () => null },
+    ActiveSessionsBar: { _render() {}, _renderSidebar() {} },
+    App: { currentView: 'task-board' },
+    TabBadge: { set: n => counts.push(n) }
+  });
+  context.api = async url => (url === '/api/terminal/attention'
+    ? { waiting: 2 }
+    : { waiting: [{ id: 'a', sessionId: 's1' }], active: 1, inProgress: 1, done: 0 });
+  await TaskBoard.refreshAttention();
+  context.api = async url => {
+    if (url === '/api/terminal/attention') throw new Error('down');
+    return { waiting: [], active: 0, inProgress: 0, done: 0 };
+  };
+  await TaskBoard.refreshAttention();
+  context.api = async url => {
+    if (url === '/api/terminal/attention') return { waiting: 1 };
+    throw new Error('down');
+  };
+  TaskBoard.attention = [{ id: 'b', sessionId: 's2' }];
+  await TaskBoard.refreshAttention();
+  assert.deepStrictEqual(counts, [3, 0, 2], 'a failed ticket call still updates the sessions count');
+  delete context.TabBadge;
+  TaskBoard.attention = [];
+  TaskBoard._progress = null;
+});
+
 test('a newly waiting ticket raises a 15s toast that opens its session on click', async () => {
   const toasts = [];
   Object.assign(context, {
