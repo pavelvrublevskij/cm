@@ -929,10 +929,14 @@
       <span class="app-footer-status" id="footer-status">Idle</span>
       <span id="footer-host"></span>
       <span>Theme:</span>
-      <button class="theme-toggle" id="theme-toggle" onclick="Theme.toggle()" title="Dark mode">
-        <span id="theme-icon">&#9790;</span>
-        <span id="theme-label">Dark</span>
-      </button>
+      <div class="theme-picker">
+        <button class="theme-toggle" id="theme-toggle" onclick="Theme.toggleMenu(event)" title="Choose theme">
+          <span id="theme-icon">&#9790;</span>
+          <span id="theme-label">Dark</span>
+          <span class="dd-arrow"></span>
+        </button>
+        <div class="action-menu-panel theme-menu-panel" id="theme-menu"></div>
+      </div>
     </div>
   </footer>
 

@@ -42,8 +42,7 @@ const ManagerSettings = {
 
   onThemeChange(name) {
     if (typeof Theme === 'undefined' || !Theme.themes.includes(name)) return;
-    Theme.apply(name);
-    try { localStorage.setItem('claude-manager-theme', name); } catch (_) {}
+    Theme.select(name);
   },
 
   bindNav() {

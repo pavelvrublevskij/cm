@@ -300,6 +300,31 @@ body {
   gap: 4px;
 }
 
+/* Footer theme dropdown: opens upward, above the footer */
+.theme-picker {
+  position: relative;
+}
+.theme-menu-panel {
+  top: auto;
+  bottom: calc(100% + 6px);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.theme-menu-panel .action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.theme-menu-panel .action-menu-item.active {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.theme-menu-icon {
+  width: 14px;
+  text-align: center;
+}
+
 .nav-section {
   padding: 0 8px;
   margin-bottom: 4px;

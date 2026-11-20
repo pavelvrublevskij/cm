@@ -26,7 +26,7 @@ const Tour = {
     {
       element: '#theme-toggle',
       title: 'Themes',
-      text: 'Cycle through 4 built-in themes — Dark, Light, Matrix, and Default. Click to switch.',
+      text: 'Pick from 12 built-in themes — from Dark and Light to easy-on-the-eyes Nord, Gruvbox, Catppuccin, Tokyo Night and Solarized Light. Click to open the list.',
       position: 'top'
     },
     {

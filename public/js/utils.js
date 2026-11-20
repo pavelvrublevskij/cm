@@ -249,21 +249,39 @@ function createTerminalPanelUI(ids, describeError) {
 // --- Theme ---
 
 const Theme = {
-  themes: ['dark', 'light', 'matrix', 'default', 'terminal', 'dracula', 'sepia'],
-  icons: { dark: '&#9790;', light: '&#9728;', matrix: '&#9783;', default: '&#9681;', terminal: '&#9608;', dracula: '&#9760;', sepia: '&#10086;' },
-  labels: { dark: 'Dark', light: 'Light', matrix: 'Matrix', default: 'Default', terminal: 'Terminal', dracula: 'Dracula', sepia: 'Sepia' },
+  themes: ['dark', 'light', 'matrix', 'default', 'terminal', 'dracula', 'sepia', 'nord', 'gruvbox', 'catppuccin', 'tokyo-night', 'solarized-light'],
+  icons: { dark: '&#9790;', light: '&#9728;', matrix: '&#9783;', default: '&#9681;', terminal: '&#9608;', dracula: '&#9760;', sepia: '&#10086;', nord: '&#10052;', gruvbox: '&#9832;', catppuccin: '&#9752;', 'tokyo-night': '&#9733;', 'solarized-light': '&#9788;' },
+  labels: { dark: 'Dark', light: 'Light', matrix: 'Matrix', default: 'Default', terminal: 'Terminal', dracula: 'Dracula', sepia: 'Sepia', nord: 'Nord', gruvbox: 'Gruvbox', catppuccin: 'Catppuccin', 'tokyo-night': 'Tokyo Night', 'solarized-light': 'Solarized Light' },
 
   init() {
     const saved = localStorage.getItem('claude-manager-theme') || 'dark';
     Theme.apply(saved);
   },
 
-  toggle() {
+  // Footer dropdown: lists every theme, the current one marked active.
+  toggleMenu(e) {
+    e.stopPropagation();
+    const panel = document.getElementById('theme-menu');
+    if (!panel) return;
+    if (panel.classList.contains('open')) return Theme.closeMenu();
+    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
     const current = document.documentElement.getAttribute('data-theme') || 'dark';
-    const idx = Theme.themes.indexOf(current);
-    const next = Theme.themes[(idx + 1) % Theme.themes.length];
-    Theme.apply(next);
-    localStorage.setItem('claude-manager-theme', next);
+    panel.innerHTML = Theme.themes.map(t =>
+      `<button class="action-menu-item${t === current ? ' active' : ''}" onclick="Theme.select('${t}')"><span class="theme-menu-icon">${Theme.icons[t]}</span>${Theme.labels[t]}</button>`
+    ).join('');
+    panel.classList.add('open');
+    document.addEventListener('click', Theme.closeMenu, { once: true });
+  },
+
+  closeMenu() {
+    const panel = document.getElementById('theme-menu');
+    if (panel) panel.classList.remove('open');
+  },
+
+  select(theme) {
+    Theme.apply(theme);
+    localStorage.setItem('claude-manager-theme', theme);
+    Theme.closeMenu();
   },
 
   apply(theme) {
@@ -276,7 +294,7 @@ const Theme = {
     const label = document.getElementById('theme-label');
     if (label) label.textContent = Theme.labels[theme];
     const btn = document.getElementById('theme-toggle');
-    if (btn) btn.title = 'Theme: ' + Theme.labels[theme] + ' — click to cycle';
+    if (btn) btn.title = 'Theme: ' + Theme.labels[theme] + ' — click to choose';
   }
 };
 
