@@ -177,6 +177,26 @@ test('the stage panel shows type, reference with missing marker, and delete', ()
   assert.match(Flow.panelHtml(Object.assign({}, WF, { sel: null })), /Drag<\/strong> a stage to move it/);
 });
 
+test('switching a stage to Workflow drops its reference and fills the default prompt once', () => {
+  const wf = { available: WF.available, stages: [{ id: 's-w', title: 'Deep review', type: 'skill', ref: 'writing-plans', prompt: '' }], sel: { node: 's-w' } };
+  TaskBoard._wf = wf;
+  const render = Flow.render;
+  Flow.render = () => {};
+  Flow.setStage('s-w', 'type', 'workflow');
+  const s = wf.stages[0];
+  assert.deepStrictEqual([s.ref, s.prompt], ['', Flow.WORKFLOW_PROMPT]);
+  s.prompt = 'Mine';
+  Flow.setStage('s-w', 'type', 'workflow');
+  assert.strictEqual(s.prompt, 'Mine');
+  const html = Flow.panelHtml(wf);
+  assert.match(html, /<option value="workflow" selected>Workflow<\/option>/);
+  assert.match(html, /What the workflow should do/);
+  assert.ok(!html.includes('writing-plans · project'), 'no skill or agent picker');
+  assert.strictEqual(TaskBoard.stageLabel(s), 'workflow: Mine');
+  Flow.render = render;
+  TaskBoard._wf = null;
+});
+
 test('the diff view shows current and recommended stages side by side', () => {
   const html = TaskBoard.workflowHtml(Object.assign({}, WF, { diff: true }));
   assert.match(html, /<h4>Current<\/h4>/);

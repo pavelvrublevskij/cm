@@ -120,6 +120,11 @@ test('stageMessage leads with the ticket on stage 1 and names skills and agents'
   assert.strictEqual(runner.stageMessage({ title: 'Only title', notes: '' }, stages, 0).split('\n')[0], 'Only title');
 });
 
+test('stageMessage asks a workflow stage to use the Workflow tool and wait for it', () => {
+  const stages = [{ title: 'Deep review', type: 'workflow', ref: '', prompt: 'Review by dimension' }];
+  assert.match(runner.stageMessage({}, stages, 0), /Use a workflow \(the Workflow tool\) for this stage, and wait for it to finish before you end this stage\.\nReview by dimension/);
+});
+
 test('moving a ticket to Ready starts claude with the hooks settings and enters stage 1', async () => {
   const stages = await setStages(['Plan', 'Build']);
   const card = await addTicket({ notes: 'ABC-1 fix login' });

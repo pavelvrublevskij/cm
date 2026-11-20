@@ -762,7 +762,7 @@ const TaskBoard = {
   },
 
   stageLabel(s) {
-    return s.type === 'prompt' ? 'prompt: ' + s.prompt.split('\n')[0] : s.type + ': ' + s.ref;
+    return s.type === 'prompt' || s.type === 'workflow' ? s.type + ': ' + s.prompt.split('\n')[0] : s.type + ': ' + s.ref;
   },
 
   refOptions(available, stage) {
