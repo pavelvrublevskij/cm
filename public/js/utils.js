@@ -27,14 +27,18 @@ async function api(url, opts = {}) {
   return data;
 }
 
-/** Show a toast notification. */
-function toast(message, type = 'success') {
+/** Show a toast notification; `onClick` makes it clickable (a click runs it and closes the toast). */
+function toast(message, type = 'success', { duration = 15000, onClick } = {}) {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
   el.textContent = message;
+  if (onClick) {
+    el.classList.add('toast--clickable');
+    el.addEventListener('click', () => { el.remove(); onClick(); });
+  }
   container.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
+  setTimeout(() => el.remove(), Math.max(duration, 15000));
 }
 
 function stripAnsi(text) {
@@ -56,7 +60,9 @@ function slugifyHeading(text) {
 function addHeadingIds(html) {
   const seen = new Map();
   return html.replace(/<(h[1-6])>([\s\S]*?)<\/\1>/g, (whole, tag, inner) => {
-    const plain = inner.replace(/<[^>]+>/g, '');
+    // Repeat until stable: a single pass leaves a tag behind in input like "<scr<b>ipt>".
+    let plain = inner, prev;
+    do { prev = plain; plain = plain.replace(/<[^>]*>/g, ''); } while (plain !== prev);
     let slug = slugifyHeading(plain) || 'section';
     const n = seen.get(slug) || 0;
     seen.set(slug, n + 1);
@@ -243,21 +249,39 @@ function createTerminalPanelUI(ids, describeError) {
 // --- Theme ---
 
 const Theme = {
-  themes: ['dark', 'light', 'matrix', 'default', 'terminal', 'dracula', 'sepia'],
-  icons: { dark: '&#9790;', light: '&#9728;', matrix: '&#9783;', default: '&#9681;', terminal: '&#9608;', dracula: '&#9760;', sepia: '&#10086;' },
-  labels: { dark: 'Dark', light: 'Light', matrix: 'Matrix', default: 'Default', terminal: 'Terminal', dracula: 'Dracula', sepia: 'Sepia' },
+  themes: ['dark', 'light', 'matrix', 'default', 'terminal', 'dracula', 'sepia', 'nord', 'gruvbox', 'catppuccin', 'tokyo-night', 'solarized-light'],
+  icons: { dark: '&#9790;', light: '&#9728;', matrix: '&#9783;', default: '&#9681;', terminal: '&#9608;', dracula: '&#9760;', sepia: '&#10086;', nord: '&#10052;', gruvbox: '&#9832;', catppuccin: '&#9752;', 'tokyo-night': '&#9733;', 'solarized-light': '&#9788;' },
+  labels: { dark: 'Dark', light: 'Light', matrix: 'Matrix', default: 'Default', terminal: 'Terminal', dracula: 'Dracula', sepia: 'Sepia', nord: 'Nord', gruvbox: 'Gruvbox', catppuccin: 'Catppuccin', 'tokyo-night': 'Tokyo Night', 'solarized-light': 'Solarized Light' },
 
   init() {
     const saved = localStorage.getItem('claude-manager-theme') || 'dark';
     Theme.apply(saved);
   },
 
-  toggle() {
+  // Footer dropdown: lists every theme, the current one marked active.
+  toggleMenu(e) {
+    e.stopPropagation();
+    const panel = document.getElementById('theme-menu');
+    if (!panel) return;
+    if (panel.classList.contains('open')) return Theme.closeMenu();
+    document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
     const current = document.documentElement.getAttribute('data-theme') || 'dark';
-    const idx = Theme.themes.indexOf(current);
-    const next = Theme.themes[(idx + 1) % Theme.themes.length];
-    Theme.apply(next);
-    localStorage.setItem('claude-manager-theme', next);
+    panel.innerHTML = Theme.themes.map(t =>
+      `<button class="action-menu-item${t === current ? ' active' : ''}" onclick="Theme.select('${t}')"><span class="theme-menu-icon">${Theme.icons[t]}</span>${Theme.labels[t]}</button>`
+    ).join('');
+    panel.classList.add('open');
+    document.addEventListener('click', Theme.closeMenu, { once: true });
+  },
+
+  closeMenu() {
+    const panel = document.getElementById('theme-menu');
+    if (panel) panel.classList.remove('open');
+  },
+
+  select(theme) {
+    Theme.apply(theme);
+    localStorage.setItem('claude-manager-theme', theme);
+    Theme.closeMenu();
   },
 
   apply(theme) {
@@ -270,7 +294,7 @@ const Theme = {
     const label = document.getElementById('theme-label');
     if (label) label.textContent = Theme.labels[theme];
     const btn = document.getElementById('theme-toggle');
-    if (btn) btn.title = 'Theme: ' + Theme.labels[theme] + ' — click to cycle';
+    if (btn) btn.title = 'Theme: ' + Theme.labels[theme] + ' — click to choose';
   }
 };
 
@@ -514,6 +538,17 @@ const SessionColors = {
       if (color) card.style.setProperty('--session-color', color);
       else card.style.removeProperty('--session-color');
     });
+    SessionColors.applyToDetailHeader();
+  },
+
+  applyToDetailHeader() {
+    const header = document.getElementById('session-detail-header');
+    if (!header) return;
+    const st = typeof Sessions !== 'undefined' ? Sessions.detailState : null;
+    const color = st ? SessionColors.get(st.slug, st.sessionId) : null;
+    header.classList.toggle('session-header--colored', !!color);
+    if (color) header.style.setProperty('--session-color', color);
+    else header.style.removeProperty('--session-color');
   },
 
   closeMenu() {

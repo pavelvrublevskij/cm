@@ -324,3 +324,11 @@ test('applyColor updates the pill and resetting removes the tint', () => {
   assert.strictEqual(ActiveSessionsBar._sessions[1].color, null);
   assert.strictEqual(elementsById['asb-groups'].innerHTML.includes('asb-pill--colored'), false);
 });
+
+test('a Task Board session waiting for input shows its badge on the pill', () => {
+  context.TaskBoard = { attentionBadgeHtml: sid => (sid === SESSION_A ? '<span class="tb-badge tb-badge--needs_input">needs input</span>' : '') };
+  ActiveSessionsBar._render();
+  const html = elementsById['asb-groups'].innerHTML;
+  assert.strictEqual(html.split('tb-badge--needs_input').length - 1, 1, 'only the waiting session has the badge');
+  delete context.TaskBoard;
+});

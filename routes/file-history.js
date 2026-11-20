@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { CLAUDE_DIR, PROJECTS_DIR } = require('../lib/paths');
-const { wrapRoute } = require('../lib/file-helpers');
+const { safeJoin, wrapRoute } = require('../lib/file-helpers');
 const { openPath, revealInFileManager } = require('../lib/os-open');
 const planCache = require('../lib/plan-cache');
 const { resolveProjectPath } = require('../lib/project-files');
@@ -356,15 +356,12 @@ router.get('/:sessionId/:hash/diff', wrapRoute((req, res) => {
   const from = parseInt(req.query.from, 10);
   const to = parseInt(req.query.to, 10);
 
-  for (const p of [sessionId, hash]) {
-    if (p.includes('..') || p.includes('/') || p.includes('\\')) {
-      return res.status(400).json({ error: 'Invalid parameters' });
-    }
+  const histDir = safeJoin(FILE_HISTORY_DIR, sessionId);
+  const fromFile = histDir && safeJoin(histDir, `${hash}@v${from}`);
+  const toFile = histDir && safeJoin(histDir, `${hash}@v${to}`);
+  if (!fromFile || !toFile || sessionId.includes('..') || hash.includes('..')) {
+    return res.status(400).json({ error: 'Invalid parameters' });
   }
-
-  const histDir = path.join(FILE_HISTORY_DIR, sessionId);
-  const fromFile = path.join(histDir, `${hash}@v${from}`);
-  const toFile = path.join(histDir, `${hash}@v${to}`);
 
   if (!fs.existsSync(fromFile) || !fs.existsSync(toFile)) {
     return res.status(404).json({ error: 'Version not found' });
@@ -377,8 +374,9 @@ router.get('/:sessionId/:hash/diff', wrapRoute((req, res) => {
 
 /** The session's recorded pre-edit text for a shell-edited file, or null when none was captured. */
 function readBaselineText(sessionId, projSlug, filePath) {
-  const file = path.join(PROJECTS_DIR, projSlug, sessionId + '.jsonl');
-  if (!fs.existsSync(file)) return null;
+  const projDir = safeJoin(PROJECTS_DIR, projSlug);
+  const file = projDir && safeJoin(projDir, sessionId + '.jsonl');
+  if (!file || !fs.existsSync(file)) return null;
   const bases = readBaselines(fs.readFileSync(file, 'utf-8'), decodeSlug(projSlug));
   const text = bases.get(filePath.replace(/\\/g, '/'));
   return text === undefined ? null : text;
@@ -391,10 +389,9 @@ router.get('/:sessionId/:hash/diff-current', wrapRoute((req, res) => {
   const isNew = req.query.isNew === 'true';
   const readBase = req.query.readBase === 'true';
 
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid parameters' });
-  }
-  if (!isNew && (hash.includes('..') || hash.includes('/') || hash.includes('\\'))) {
+  const histDir = safeJoin(FILE_HISTORY_DIR, sessionId);
+  const fromFile = histDir && safeJoin(histDir, `${hash}@v${version}`);
+  if (!histDir || sessionId.includes('..') || (!isNew && (!fromFile || hash.includes('..')))) {
     return res.status(400).json({ error: 'Invalid parameters' });
   }
 
@@ -412,8 +409,6 @@ router.get('/:sessionId/:hash/diff-current', wrapRoute((req, res) => {
     return res.json(computeDiff(lf(text), currentExists ? lf(fs.readFileSync(currentFile, 'utf-8')) : ''));
   }
   if (!isNew) {
-    const histDir = path.join(FILE_HISTORY_DIR, sessionId);
-    const fromFile = path.join(histDir, `${hash}@v${version}`);
     if (!fs.existsSync(fromFile)) return res.status(404).json({ error: 'Version not found' });
     oldText = fs.readFileSync(fromFile, 'utf-8');
   }

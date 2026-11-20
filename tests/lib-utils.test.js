@@ -13,7 +13,7 @@ const { scanSession } = require('../lib/session-scan');
 const getCustomTitle = f => scanSession(f)?.customTitle || '';
 const collectBranches = f => scanSession(f)?.gitBranches || [];
 const { readFrontmatterFile, readFrontmatterDir, writeFrontmatter } = require('../lib/frontmatter');
-const { getISOWeek, dayInRange, hourKeyInRange, getFilteredByModel } = require('../lib/usage-filters');
+const { getISOWeek, dayInRange, hourKeyInRange, minuteKeyInRange, getFilteredByModel } = require('../lib/usage-filters');
 
 const TMP = path.join(os.tmpdir(), `cm-lib-utils-${process.pid}`);
 before(() => fs.mkdirSync(TMP, { recursive: true }));
@@ -290,6 +290,40 @@ test('hourKeyInRange: includes hour equal to toTime', () => {
 
 test('hourKeyInRange: excludes day outside date range', () => {
   assert.ok(!hourKeyInRange(buildHourKey(2026, 4, 30, 12), '2026-05-01', null, null, null));
+});
+
+// ── minuteKeyInRange ──────────────────────────────────────────────────────────
+
+function buildMinuteKey(year, month, day, localHour, localMinute) {
+  const d = new Date(year, month - 1, day, localHour, localMinute, 0);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+test('minuteKeyInRange: excludes minute before fromTime in the same hour', () => {
+  assert.ok(!minuteKeyInRange(buildMinuteKey(2026, 11, 16, 23, 38), '2026-11-16', null, '23:45', null));
+});
+
+test('minuteKeyInRange: includes minute equal to fromTime', () => {
+  assert.ok(minuteKeyInRange(buildMinuteKey(2026, 11, 16, 23, 45), '2026-11-16', null, '23:45', null));
+});
+
+test('minuteKeyInRange: includes minute equal to toTime and excludes the next one', () => {
+  assert.ok(minuteKeyInRange(buildMinuteKey(2026, 5, 1, 17, 30), null, null, null, '17:30'));
+  assert.ok(!minuteKeyInRange(buildMinuteKey(2026, 5, 1, 17, 31), null, null, null, '17:30'));
+});
+
+test('getFilteredByModel: time filter uses minute data', () => {
+  const t = n => ({ input_tokens: n, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
+  const session = {
+    byModel: {},
+    minutely: {
+      [buildMinuteKey(2026, 11, 16, 23, 38)]: { 'claude-sonnet-4-6': t(100) },
+      [buildMinuteKey(2026, 11, 16, 23, 50)]: { 'claude-sonnet-4-6': t(7) }
+    }
+  };
+  const result = getFilteredByModel(session, new Set(), '2026-11-16', null, '23:45', null);
+  assert.strictEqual(result['claude-sonnet-4-6'].input_tokens, 7);
 });
 
 // ── getFilteredByModel ────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ const App = {
     });
 
     if (typeof SidebarResize !== 'undefined') SidebarResize.init();
+    if (typeof CompactMode !== 'undefined') CompactMode.init();
 
     // Restore sidebar collapsed state
     if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1') {
@@ -37,6 +38,7 @@ const App = {
     Projects.load().then(() => {
       // Restore route from hash or default to settings
       App.restoreRoute();
+      Projects.startPolling();
     });
 
     if (typeof Autostart !== 'undefined') Autostart.checkFirstRun();
@@ -70,6 +72,7 @@ const App = {
 
     if (typeof ActiveCount !== 'undefined') ActiveCount.start();
     if (typeof ActiveSessionsBar !== 'undefined') ActiveSessionsBar.start();
+    if (typeof TaskBoard !== 'undefined') TaskBoard.watchAttention();
     SessionColors.load();
     if (typeof Artifacts !== 'undefined') Artifacts.checkGlobalVisibility();
 
@@ -117,7 +120,8 @@ const App = {
     }
     const parts = hash.split('/');
     const view = parts[0];
-    const slug = parts[1] || null;
+    // Project slugs are Claude Code's path with every other character turned into '-'.
+    const slug = parts[1] && /^[\w-]+$/.test(parts[1]) ? parts[1] : null;
     const sessionId = parts[2] || null;
     const readOnly = parts[3] === 'readonly';
 
@@ -173,11 +177,13 @@ const App = {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
 
     App.currentView = view;
+    if (typeof TaskBoard !== 'undefined') TaskBoard.hidePreview();
 
     // Simple views with direct ID mapping
     const simpleViews = {
       'dashboard': () => Dashboard.load(),
       'health': () => Health.load(),
+      'task-board': () => TaskBoard.load(),
       'usage': () => Usage.load(),
       'artifacts': () => Artifacts.load(),
       'settings': () => Settings.load(),
@@ -193,11 +199,13 @@ const App = {
       'changelog': () => Changelog.load()
     };
 
-    if (simpleViews[view]) {
+    // Picked from the own keys, so a view name from the URL can't reach an inherited Object property.
+    const simpleView = Object.keys(simpleViews).find(k => k === view);
+    if (simpleView) {
       document.getElementById('view-' + view).classList.add('active');
       if (typeof GitActions !== 'undefined') GitActions.reset();
       if (typeof GitPanel !== 'undefined') GitPanel.unmount();
-      simpleViews[view]();
+      simpleViews[simpleView]();
     } else if (view === 'project-detail') {
       document.getElementById('view-project-detail').classList.add('active');
       App.currentProject = opts.slug;
@@ -217,29 +225,7 @@ const App = {
       document.querySelectorAll('#view-project-detail .tab-btn').forEach(b => b.classList.remove('active'));
       document.getElementById('sessions-tab-btn').classList.add('active');
       Sessions.load(opts.slug);
-      // Show counts on tabs
-      const project = Projects.data.find(p => p.slug === opts.slug);
-      const memoryTabBtn = document.getElementById('memory-tab-btn');
-      if (memoryTabBtn) {
-        const count = project ? project.memoryCount : 0;
-        memoryTabBtn.textContent = count > 0 ? `Memory (${count})` : 'Memory';
-      }
-      const sessionsTabBtn = document.getElementById('sessions-tab-btn');
-      if (sessionsTabBtn) {
-        const count = project ? project.sessionCount : 0;
-        sessionsTabBtn.style.display = count > 0 ? '' : 'none';
-        sessionsTabBtn.textContent = count > 0 ? `Sessions (${count})` : 'Sessions';
-      }
-      const skillsTabBtn = document.getElementById('skills-tab-btn');
-      if (skillsTabBtn) {
-        const count = project ? project.skillsCount : 0;
-        skillsTabBtn.textContent = count > 0 ? `Skills (${count})` : 'Skills';
-      }
-      const stylesTabBtn = document.getElementById('output-styles-tab-btn');
-      if (stylesTabBtn) {
-        const count = project ? project.outputStylesCount : 0;
-        stylesTabBtn.textContent = count > 0 ? `Output Styles (${count})` : 'Output Styles';
-      }
+      Projects.renderTabCounts(opts.slug);
       // Load per-project token usage in header
       ProjectUsage.load(opts.slug);
       if (typeof GitActions !== 'undefined') GitActions.init(opts.slug);
@@ -306,8 +292,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (av) av.textContent = 'v' + data.version;
     const fv = document.getElementById('footer-version');
     if (fv) fv.textContent = 'v' + data.version;
-    const minor = parseInt((data.version || '0.0.0').split('.')[1], 10);
-    if (typeof Tour !== 'undefined' && Tour.shouldShow(minor)) setTimeout(() => Tour.start(minor), 400);
+    if (typeof Tour !== 'undefined') {
+      const key = Tour.versionKey(data.version);
+      if (Tour.shouldShow(key)) setTimeout(() => Tour.start(key), 400);
+    }
     if (data.updateAvailable) {
       const banner = document.getElementById('update-banner');
       banner.innerHTML = `New version <strong>v${escapeHtml(data.latest)}</strong> available! &nbsp;

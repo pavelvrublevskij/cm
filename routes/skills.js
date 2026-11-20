@@ -1,48 +1,34 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { backup, wrapRoute } = require('../lib/file-helpers');
+const { backup, safeJoin, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
 const { readFrontmatterFile, writeFrontmatter } = require('../lib/frontmatter');
 const { SKILLS_DIR } = require('../lib/paths');
+const { mountTransferRoutes } = require('../lib/config-transfer');
 const { readUsage, recordUsage } = require('../lib/skill-usage');
 const { listCommands, commandFile } = require('../lib/project-commands');
+const { listSkills } = require('../lib/skill-list');
 
 const router = express.Router();
-
-function listSkills(dir) {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir, { withFileTypes: true })
-    .filter(d => d.isDirectory())
-    .map(d => {
-      try {
-        const skillFile = path.join(dir, d.name, 'SKILL.md');
-        if (!fs.existsSync(skillFile)) return null;
-        const { frontmatter, content } = readFrontmatterFile(skillFile);
-        return {
-          name: d.name,
-          title: frontmatter.name || d.name,
-          description: String(frontmatter.description || ''),
-          frontmatter,
-          content
-        };
-      } catch (_) { return null; }
-    }).filter(Boolean);
-}
+mountTransferRoutes(router, 'skills');
 
 router.get('/global', wrapRoute((req, res) => {
   res.json(listSkills(SKILLS_DIR));
 }));
 
 router.get('/global/:name', wrapRoute((req, res) => {
-  const skillFile = path.join(SKILLS_DIR, req.params.name, 'SKILL.md');
+  const dir = safeJoin(SKILLS_DIR, req.params.name);
+  if (!dir) return res.status(400).json({ error: 'Invalid name' });
+  const skillFile = path.join(dir, 'SKILL.md');
   if (!fs.existsSync(skillFile)) return res.status(404).json({ error: 'Not found' });
   const { frontmatter, content, raw } = readFrontmatterFile(skillFile);
   res.json({ name: req.params.name, frontmatter, content, raw });
 }));
 
 router.put('/global/:name', wrapRoute((req, res) => {
-  const dir = path.join(SKILLS_DIR, req.params.name);
+  const dir = safeJoin(SKILLS_DIR, req.params.name);
+  if (!dir) return res.status(400).json({ error: 'Invalid name' });
   const skillFile = path.join(dir, 'SKILL.md');
   fs.mkdirSync(dir, { recursive: true });
   backup(skillFile);
@@ -51,7 +37,8 @@ router.put('/global/:name', wrapRoute((req, res) => {
 }));
 
 router.delete('/global/:name', wrapRoute((req, res) => {
-  const dir = path.join(SKILLS_DIR, req.params.name);
+  const dir = safeJoin(SKILLS_DIR, req.params.name);
+  if (!dir) return res.status(400).json({ error: 'Invalid name' });
   if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Not found' });
   const skillFile = path.join(dir, 'SKILL.md');
   backup(skillFile);
@@ -87,18 +74,18 @@ router.get('/palette/:slug', wrapRoute((req, res) => {
 router.post('/usage/:slug/:name', wrapRoute((req, res) => {
   const decodedPath = decodeSlug(req.params.slug);
   const claudeDir = path.join(decodedPath, '.claude');
-  const skillFile = path.join(claudeDir, 'skills', req.params.name, 'SKILL.md');
-  if (!path.resolve(skillFile).startsWith(path.resolve(decodedPath))) {
-    return res.status(400).json({ error: 'Invalid name' });
-  }
-  const known = fs.existsSync(skillFile) || !!commandFile(path.join(claudeDir, 'commands'), req.params.name);
+  const dir = safeJoin(path.join(claudeDir, 'skills'), req.params.name);
+  if (!dir) return res.status(400).json({ error: 'Invalid name' });
+  const known = fs.existsSync(path.join(dir, 'SKILL.md')) || !!commandFile(path.join(claudeDir, 'commands'), req.params.name);
   if (!known) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true, count: recordUsage(req.params.slug, req.params.name) });
 }));
 
 router.get('/project/:slug/:name', wrapRoute((req, res) => {
   const decodedPath = decodeSlug(req.params.slug);
-  const skillFile = path.join(decodedPath, '.claude', 'skills', req.params.name, 'SKILL.md');
+  const dir = safeJoin(path.join(decodedPath, '.claude', 'skills'), req.params.name);
+  if (!dir) return res.status(400).json({ error: 'Invalid name' });
+  const skillFile = path.join(dir, 'SKILL.md');
   if (!fs.existsSync(skillFile)) return res.status(404).json({ error: 'Not found' });
   const { frontmatter, content, raw } = readFrontmatterFile(skillFile);
   res.json({ name: req.params.name, frontmatter, content, raw });
@@ -106,7 +93,8 @@ router.get('/project/:slug/:name', wrapRoute((req, res) => {
 
 router.put('/project/:slug/:name', wrapRoute((req, res) => {
   const decodedPath = decodeSlug(req.params.slug);
-  const dir = path.join(decodedPath, '.claude', 'skills', req.params.name);
+  const dir = safeJoin(path.join(decodedPath, '.claude', 'skills'), req.params.name);
+  if (!dir) return res.status(400).json({ error: 'Invalid name' });
   const skillFile = path.join(dir, 'SKILL.md');
   fs.mkdirSync(dir, { recursive: true });
   backup(skillFile);
@@ -116,7 +104,8 @@ router.put('/project/:slug/:name', wrapRoute((req, res) => {
 
 router.delete('/project/:slug/:name', wrapRoute((req, res) => {
   const decodedPath = decodeSlug(req.params.slug);
-  const dir = path.join(decodedPath, '.claude', 'skills', req.params.name);
+  const dir = safeJoin(path.join(decodedPath, '.claude', 'skills'), req.params.name);
+  if (!dir) return res.status(400).json({ error: 'Invalid name' });
   if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Not found' });
   const skillFile = path.join(dir, 'SKILL.md');
   backup(skillFile);

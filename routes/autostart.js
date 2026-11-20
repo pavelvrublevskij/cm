@@ -11,7 +11,8 @@ router.get('/', wrapRoute((req, res) => {
   res.json({
     supported,
     enabled: supported ? autostart.isEnabled() : false,
-    prompted: !!config.autostartPrompted
+    prompted: !!config.autostartPrompted,
+    manualCommand: autostart.manualCommand()
   });
 }));
 

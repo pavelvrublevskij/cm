@@ -22,6 +22,7 @@ const ManagerSettings = {
       ManagerSettings.renderHistory();
       ManagerSettings.renderTable();
       ManagerSettings.loadRefreshRate();
+      ManagerSettings.loadMaxParallel();
       ManagerSettings.loadAutosave();
       ManagerSettings.loadDefaultReadOnly();
       ManagerSettings.loadAutostart();
@@ -41,8 +42,7 @@ const ManagerSettings = {
 
   onThemeChange(name) {
     if (typeof Theme === 'undefined' || !Theme.themes.includes(name)) return;
-    Theme.apply(name);
-    try { localStorage.setItem('claude-manager-theme', name); } catch (_) {}
+    Theme.select(name);
   },
 
   bindNav() {
@@ -288,6 +288,25 @@ const ManagerSettings = {
     toast('Refresh rate reset to default');
   },
 
+  async loadMaxParallel() {
+    const input = document.getElementById('board-max-parallel');
+    if (!input) return;
+    try { input.value = String((await api('/api/task-board/settings')).maxParallel); }
+    catch (e) { toast('Failed to load Task Board settings: ' + e.message, 'error'); }
+  },
+
+  async saveMaxParallel(value) {
+    const input = document.getElementById('board-max-parallel');
+    if (!input) return;
+    try {
+      const res = await api('/api/task-board/settings', { method: 'PUT', body: { maxParallel: Number(value !== undefined ? value : input.value) } });
+      input.value = String(res.maxParallel);
+      toast('Task Board setting saved');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  },
+
   loadDefaultReadOnly() {
     const toggle = document.getElementById('default-readonly-enabled');
     if (!toggle || typeof Sessions === 'undefined') return;
@@ -307,6 +326,8 @@ const ManagerSettings = {
       const status = await api('/api/autostart');
       toggle.checked = status.enabled;
       toggle.disabled = !status.supported;
+      document.getElementById('autostart-manual-command').textContent = status.manualCommand || '';
+      document.getElementById('autostart-manual-note').style.display = status.manualCommand ? '' : 'none';
     } catch (_) {}
   },
 

@@ -18,9 +18,15 @@ const Tour = {
       position: 'right'
     },
     {
+      element: '.compact-switch',
+      title: 'Compact Mode',
+      text: 'Turn on Compact to show only the General and Projects sections in the sidebar.',
+      position: 'right'
+    },
+    {
       element: '#theme-toggle',
       title: 'Themes',
-      text: 'Cycle through 4 built-in themes — Dark, Light, Matrix, and Default. Click to switch.',
+      text: 'Pick from 12 built-in themes — from Dark and Light to easy-on-the-eyes Nord, Gruvbox, Catppuccin, Tokyo Night and Solarized Light. Click to open the list.',
       position: 'top'
     },
     {
@@ -79,6 +85,12 @@ const Tour = {
       position: 'right'
     },
     {
+      element: '.nav-item[data-view="task-board"]',
+      title: 'Task Board',
+      text: 'Tickets for all your projects on one board. Draw each project\'s workflow from its skills, with arrows between the stages, then drag a ticket to Ready to start it.',
+      position: 'right'
+    },
+    {
       element: '.nav-item[data-view="health"]',
       title: 'Health Check',
       text: 'A read-only check of your setup: settings files that are not valid JSON, MCP servers whose command is missing, skills that will not trigger well, oversized CLAUDE.md files, and stale or duplicate memories. Each finding links to where you can fix it.',
@@ -98,6 +110,15 @@ const Tour = {
       position: 'center'
     },
   ],
+
+  /**
+   * Comparable number for a version's major.minor: 2.0.0 → 2000, above every value stored before
+   * major versions counted (plain minors such as 9).
+   */
+  versionKey(version) {
+    const [major, minor] = String(version || '0.0.0').split('.').map(n => parseInt(n, 10));
+    return major * 1000 + minor;
+  },
 
   shouldShow(minor) {
     if (!Number.isFinite(minor)) return false;

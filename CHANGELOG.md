@@ -1,3 +1,41 @@
+## v2.0.0
+
+### Features
+
+- **Task Board** — tickets for all projects on one board, one lane per project; drag from ToDo to Ready, delete from ToDo/Done only, with a trash icon on the card.
+- **Project workflows** — stages between Ready and Done built from the project's skills and agents; Recommend picks them for you, and you're told when skills change.
+- **Workflow diagram** — draw the workflow: drag stages around and drag arrows between them; extra arrows are conditions ("if it's a bug, go to Bugfix"); loops stop after 3 runs of a stage.
+- **Finalize** — before Done every ticket runs the project's tests; a worktree ticket first commits, merges in the latest of your branch and names its branch after the project's rules, then waits for you to Merge (merge commit, no squash) or Create PR.
+- **Tickets run by themselves** — moving a ticket to Ready starts a background Claude session that works through the stages; click it to open the live terminal, it waits for you when it needs input. A sidebar count and toasts tell you when tickets need your input and when all are done.
+- **Parallel lanes** — a project with Parallel checked runs up to 3 tickets at once (CM Settings); in a git project every ticket gets its own worktree and branch from your current branch. Move it back to ToDo to fix it on the same branch; deleting it removes the worktree; the branch is kept.
+- **Follow up a ticket** — dragging a ticket back to ToDo opens it with its notes, asking what should change or be followed up.
+- **Project branch on the board** — each lane shows the project's current git branch, where worktree tickets merge at Finalize.
+- **Favorite projects** — star a project to pin it on top of the sidebar and All Projects; the rest fold into "Other projects".
+- **Saved workflows** — save a project's workflow under a name and load it again, even after the lane was removed; Export/Import a workflow as a JSON file to reuse it in another project. The Saved menu marks the saved workflow in use.
+- **Fullscreen workflow editor** — a button in the workflow dialog's title bar maximizes it to the full window.
+- **Ticket notes** — on Finalize and Done tickets keep your own note and to-do list (never sent to Claude); the card shows done/total to-dos.
+- **Ticket type icon** — when a ticket starts, Claude recognises it as a bug, feature, question or other, and the card shows a matching icon before its title.
+- **Compact sidebar** — a Compact switch at the bottom of the sidebar shows only General and Projects.
+- **Ticket conversation on hover** — hold the pointer on a ticket for a second to see its latest conversation lines.
+- **Export, import and copy skills and agents** — global and project skills and agents export to a zip and import from one; the card menu copies one to Global or another project.
+- **Easier to spot the open session** — its pill in the active sessions bar and its sidebar row get a full accent border.
+
+### Fixes
+
+- **Security hardening** — API rate limiting, stricter name and path checks, and safer terminal launch; CodeQL now runs in CI and with `npm run codeql`.
+- **Projects sidebar refreshes itself** — new and changed projects show up within 15 seconds, no page reload needed.
+- **Sessions of removed worktrees stay with their project** — after a ticket's worktree is deleted, its sessions show in the project's Sessions list, and the worktree no longer shows as a project.
+- **Worktree usage counts for its project** — Token Usage counts Claude worktree sessions under the project they were made from, also after the worktree is removed.
+- **Terminal Skills filter** — Up/Down move through the matches and Enter types the highlighted one.
+- **Notifications stay longer** — toasts stay visible for at least 15 seconds.
+- **Dialogs stay open on outside clicks** — clicking or releasing the mouse outside a dialog no longer closes it.
+
+## v1.9.1
+
+### Features
+
+- **Choose the port** — `run.sh` / `run.bat` Start asks for the port (default 3000) and remembers it for Stop and autostart; Stop only stops CM, never another app on that port.
+
 ## v1.9.0
 
 ### Features

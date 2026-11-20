@@ -7,3 +7,4 @@ data/
 tests/tmp/
 tests/fixtures/worktree-group-demo/
 bench/tmp/
+.codeql/

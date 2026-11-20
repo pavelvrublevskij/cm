@@ -1,12 +1,13 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
-const { safeSlug, wrapRoute, backup } = require('../lib/file-helpers');
+const { execFile } = require('child_process');
+const { safeSlug, safeJoin, wrapRoute, backup } = require('../lib/file-helpers');
 const { CLAUDE_DIR } = require('../lib/paths');
 const planCache = require('../lib/plan-cache');
 const { getProjectUsageMap, getSessionUsage, calcCost } = require('../lib/usage-index');
-const { decodeSlug } = require('../lib/slug');
+const { decodeSlug, parentSlug } = require('../lib/slug');
+const { listProjectDirs, removedWorktreeSlugs } = require('../lib/project-list');
 const { scanSession, firstMeaningfulPrompt } = require('../lib/session-scan');
 const terminalServer = require('../lib/terminal-server');
 const activeSessions = require('../lib/active-sessions');
@@ -17,6 +18,8 @@ const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/ses
 const { getAllSessionColors, getSessionColors, setSessionColor, isValidColor } = require('../lib/session-colors');
 const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
+const { renameSession } = require('../lib/session-rename');
+const { launchTerminal } = require('../lib/terminal-launch');
 
 const router = express.Router({ mergeParams: true });
 
@@ -62,44 +65,6 @@ function isSkippablePrompt(text) {
   const t = (text || '').trim();
   if (t.includes('Caveat: The messages below were generated')) return true;
   return normalizePrompt(t) === '/clear';
-}
-
-
-function safeSpawn(cmd, args, opts) {
-  const proc = spawn(cmd, args, opts);
-  // Without an 'error' listener, an async spawn failure crashes Node.
-  proc.on('error', () => { /* swallowed; caller decides what to do */ });
-  return proc;
-}
-
-function launchTerminal(projectPath, cmd) {
-  if (process.env.__CLAUDE_MANAGER_TEST_HOME) return;
-  const platform = process.platform;
-  if (platform === 'win32') {
-    const wtArgs = ['-d', projectPath, 'cmd.exe', '/k', cmd];
-    const proc = spawn('wt.exe', wtArgs, { detached: true, stdio: 'ignore' });
-    proc.on('error', () => {
-      safeSpawn('cmd.exe', ['/c', `start "" cmd.exe /k "cd /d ${projectPath} && ${cmd}"`], { shell: true, detached: true, stdio: 'ignore' }).unref();
-    });
-    proc.unref();
-  } else if (platform === 'darwin') {
-    const script = `tell application "Terminal" to do script "cd '${projectPath}' && ${cmd}"`;
-    const proc = safeSpawn('osascript', ['-e', script]);
-    proc.unref();
-  } else {
-    const terminals = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
-    for (const term of terminals) {
-      try {
-        const args = term === 'gnome-terminal'
-          ? ['--', 'bash', '-c', `cd '${projectPath}' && ${cmd}; exec bash`]
-          : ['-e', `bash -c "cd '${projectPath}' && ${cmd}; exec bash"`];
-        const proc = safeSpawn(term, args);
-        proc.unref();
-        return;
-      } catch (_) { continue; }
-    }
-    throw new Error('No supported terminal found');
-  }
 }
 
 router.get('/active', wrapRoute((req, res) => {
@@ -222,11 +187,15 @@ function listProjectSessions(slug, dir, showArchived) {
  * Collects `fn(slug, dir)` across this project alone, or across every project grouped with it when
  * the request asks for scope=group — which folds in sibling worktrees and linked-in repos so their
  * sessions are listed and searched alongside this project's own. Assumes the request's own slug has
- * already been validated; members resolved from the group are validated here.
+ * already been validated; members resolved from the group are validated here. Removed Claude
+ * worktrees of the included projects are always folded in.
  */
 function forProjectScope(req, fn) {
   const ownSlug = req.params.slug;
   const slugs = req.query.scope === 'group' ? groupMemberSlugs(ownSlug) : [ownSlug];
+  for (const removed of removedWorktreeSlugs(listProjectDirs())) {
+    if (slugs.includes(parentSlug(removed))) slugs.push(removed);
+  }
 
   const out = [];
   for (const memberSlug of slugs) {
@@ -633,18 +602,16 @@ router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res)
   const dir = safeSlug(req.params.slug);
   if (!dir) return res.status(400).json({ error: 'Invalid slug' });
 
-  const sessionId = req.params.sessionId;
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
+  const sessionDir = safeJoin(dir, req.params.sessionId);
+  if (!sessionDir) return res.status(400).json({ error: 'Invalid session ID' });
 
   const agentId = req.params.agentId;
   if (!/^[a-zA-Z0-9_-]+$/.test(agentId)) {
     return res.status(400).json({ error: 'Invalid agent ID' });
   }
 
-  const filePath = path.join(dir, sessionId, 'subagents', 'agent-' + agentId + '.jsonl');
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Sub-agent session not found' });
+  const filePath = safeJoin(path.join(sessionDir, 'subagents'), 'agent-' + agentId + '.jsonl');
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ error: 'Sub-agent session not found' });
 
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
   const messages = [];
@@ -715,6 +682,10 @@ router.post('/:slug/sessions/:sessionId/resume', wrapRoute((req, res) => {
   if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
     return res.status(400).json({ error: 'Invalid session ID' });
   }
+  // It also goes into a terminal command line: session IDs are UUIDs, so allow nothing else.
+  if (!/^[\w-]+$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
 
   const filePath = path.join(dir, sessionId + '.jsonl');
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Session not found' });
@@ -757,41 +728,9 @@ router.post('/:slug/sessions/:sessionId/close-readonly', wrapRoute((req, res) =>
 }));
 
 router.post('/:slug/sessions/:sessionId/rename', wrapRoute((req, res) => {
-  const dir = safeSlug(req.params.slug);
-  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
-
-  const sessionId = req.params.sessionId;
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
-
-  const title = (req.body?.title || '').trim();
-  if (!title) return res.status(400).json({ error: 'Title is required' });
-  if (title.length > 500) return res.status(400).json({ error: 'Title too long' });
-
-  const filePath = path.join(dir, sessionId + '.jsonl');
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Session not found' });
-
-  backup(filePath);
-  const line = JSON.stringify({ type: 'custom-title', customTitle: title, sessionId }) + '\n';
-  const existing = fs.readFileSync(filePath, 'utf-8');
-  const needsNewline = existing.length > 0 && !existing.endsWith('\n');
-  fs.appendFileSync(filePath, (needsNewline ? '\n' : '') + line);
-
-  const indexFile = path.join(dir, 'sessions-index.json');
-  if (fs.existsSync(indexFile)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(indexFile, 'utf-8'));
-      const entry = (data.entries || []).find(e => e.sessionId === sessionId);
-      if (entry) {
-        backup(indexFile);
-        entry.summary = title;
-        fs.writeFileSync(indexFile, JSON.stringify(data, null, 2), 'utf-8');
-      }
-    } catch (_) { /* malformed index, skip */ }
-  }
-
-  res.json({ ok: true, title });
+  const result = renameSession(req.params.slug, req.params.sessionId, req.body?.title);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, title: result.title });
 }));
 
 router.post('/:slug/sessions/:sessionId/color', wrapRoute((req, res) => {

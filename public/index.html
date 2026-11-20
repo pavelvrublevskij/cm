@@ -33,6 +33,11 @@
             <span class="icon">&#9673;</span><span class="nav-label"> Dashboard</span>
             <span class="badge badge-active" id="nav-dashboard-active" style="display:none"></span>
           </div>
+          <div class="nav-item" data-view="task-board" title="Task Board">
+            <span class="icon">&#9638;</span><span class="nav-label"> Task Board</span>
+            <span class="badge badge-active" id="nav-task-board-progress" title="Tickets in workflow progress" style="display:none"></span>
+            <span class="badge badge-active badge-attention" id="nav-task-board-attention" title="Tickets waiting for your input" style="display:none"></span>
+          </div>
           <div class="nav-item" data-view="health" title="Health Check">
             <span class="icon">&#9877;</span><span class="nav-label"> Health Check</span>
           </div>
@@ -41,7 +46,7 @@
             <span class="badge nav-label" id="nav-artifacts-count"></span>
           </div>
         </div>
-        <div class="nav-section">
+        <div class="nav-section nav-section-optional">
           <div class="nav-section-title"><span class="nav-label">Claude Code</span></div>
           <div class="nav-item" data-view="settings" title="Settings">
             <span class="icon">&#9881;</span><span class="nav-label"> Settings</span>
@@ -80,7 +85,7 @@
             <div class="project-list" id="project-nav-list"></div>
           </div>
         </div>
-        <div class="nav-section">
+        <div class="nav-section nav-section-optional">
           <div class="nav-section-title"><span class="nav-label">CM</span></div>
           <div class="nav-item" data-view="manager-settings" title="Settings">
             <span class="icon">&#9878;</span><span class="nav-label"> Settings</span>
@@ -90,6 +95,13 @@
           </div>
         </div>
       </nav>
+      <div class="sidebar-footer">
+        <label class="compact-switch" title="Compact mode">
+          <input type="checkbox" id="compact-mode-switch" onchange="CompactMode.toggle()">
+          <span class="compact-switch-slider"></span>
+          <span class="nav-label">Compact</span>
+        </label>
+      </div>
     </aside>
 
     <!-- Sidebar collapse toggle -->
@@ -99,6 +111,24 @@
     <main class="main">
       <div class="update-banner" id="update-banner" style="display:none"></div>
       <!-- Dashboard View -->
+      <!-- Task Board View -->
+      <div class="view" id="view-task-board">
+        <div class="view-header">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <h2>Task Board</h2>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" id="task-board-compact-btn" onclick="TaskBoard.toggleCompact()" title="Fold workflow stages into one In progress column">Compact</button>
+              <button class="btn btn-sm" id="task-board-add-lane-btn" onclick="TaskBoard.openAddLane()">Add project lane</button>
+              <button class="btn btn-sm btn-primary" id="task-board-new-btn" onclick="TaskBoard.openEditor(null)">New ticket</button>
+            </div>
+          </div>
+          <div class="subtitle">Tickets by project, from ToDo to Done — everything stays on this machine</div>
+        </div>
+        <div class="view-body">
+          <div id="task-board-body" onmouseover="TaskBoard.onCardOver(event)" onmouseout="TaskBoard.onCardOut(event)" onmousemove="TaskBoard.onPointerMove(event)"></div>
+        </div>
+      </div>
+
       <!-- Health Check View -->
       <div class="view" id="view-health">
         <div class="view-header">
@@ -628,9 +658,10 @@
 
       <!-- Session Detail View -->
       <div class="view" id="view-session-detail">
-        <div class="view-header">
+        <div class="view-header" id="session-detail-header">
           <div class="session-branch-warning" id="session-branch-warning" style="display:none"></div>
           <div class="session-branch-warning" id="session-archived-warning" style="display:none"></div>
+          <div class="session-board-info" id="session-board-info" style="display:none"></div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
             <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
               <button class="btn btn-sm" onclick="Sessions.goBack()">&#8592; Back</button>
@@ -775,6 +806,10 @@
                 <input type="checkbox" id="autostart-enabled" onchange="ManagerSettings.saveAutostart(this.checked)">
                 Start automatically at login
               </label>
+              <div class="info-note" id="autostart-manual-note" style="margin-top:12px;display:none">
+                If enabling autostart fails, create the startup shortcut manually by running this in PowerShell:
+                <pre style="white-space:pre-wrap;word-break:break-all;margin:8px 0 0"><code id="autostart-manual-command"></code></pre>
+              </div>
 
               <h3 style="margin-top:24px">Theme</h3>
               <div class="subtitle" style="margin:0 0 12px">Choose a color scheme for the UI.</div>
@@ -792,12 +827,21 @@
               </label>
 
               <h3 style="margin-top:24px">Conversation Refresh Rate</h3>
-              <div class="subtitle" style="margin:0 0 12px">How often the open session view polls for new messages. Minimum 1 second.</div>
+              <div class="subtitle" style="margin:0 0 12px">How often the open session view polls for new messages and the Task Board updates its tickets. Minimum 1 second.</div>
               <div style="display:flex;gap:8px;align-items:center">
                 <input type="number" id="conversation-refresh-rate" min="1" step="1" style="width:120px">
                 <span style="color:var(--text-muted)">seconds</span>
                 <button class="btn btn-sm" onclick="ManagerSettings.saveRefreshRate()">Save</button>
                 <button class="btn btn-sm" onclick="ManagerSettings.resetRefreshRate()">Reset Default (5s)</button>
+              </div>
+
+              <h3 style="margin-top:24px">Task Board</h3>
+              <div class="subtitle" style="margin:0 0 12px">How many tickets a project with Parallel checked runs at once. Other projects run one ticket at a time.</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="number" id="board-max-parallel" min="1" max="10" step="1" style="width:120px">
+                <span style="color:var(--text-muted)">tickets per project</span>
+                <button class="btn btn-sm" onclick="ManagerSettings.saveMaxParallel()">Save</button>
+                <button class="btn btn-sm" onclick="ManagerSettings.saveMaxParallel(3)">Reset Default (3)</button>
               </div>
             </section>
 
@@ -885,10 +929,14 @@
       <span class="app-footer-status" id="footer-status">Idle</span>
       <span id="footer-host"></span>
       <span>Theme:</span>
-      <button class="theme-toggle" id="theme-toggle" onclick="Theme.toggle()" title="Dark mode">
-        <span id="theme-icon">&#9790;</span>
-        <span id="theme-label">Dark</span>
-      </button>
+      <div class="theme-picker">
+        <button class="theme-toggle" id="theme-toggle" onclick="Theme.toggleMenu(event)" title="Choose theme">
+          <span id="theme-icon">&#9790;</span>
+          <span id="theme-label">Dark</span>
+          <span class="dd-arrow"></span>
+        </button>
+        <div class="action-menu-panel theme-menu-panel" id="theme-menu"></div>
+      </div>
     </div>
   </footer>
 
@@ -898,6 +946,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-unicode11@0.6.0/lib/xterm-addon-unicode11.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/css/css.min.js"></script>
@@ -960,6 +1009,9 @@
   <script src="/js/usage-insights.js"></script>
   <script src="/js/usage-hints.js"></script>
   <script src="/js/health.js"></script>
+  <script src="/js/task-board-flow.js"></script>
+  <script src="/js/tab-badge.js"></script>
+  <script src="/js/task-board.js"></script>
   <script src="/js/agents.js"></script>
   <script src="/js/term-view.js"></script>
   <script src="/js/terminal.js"></script>
@@ -976,6 +1028,7 @@
   <script src="/js/git-branch-picker.js"></script>
   <script src="/js/active-sessions-bar.js"></script>
   <script src="/js/sidebar-resize.js"></script>
+  <script src="/js/compact-mode.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

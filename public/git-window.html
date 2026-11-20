@@ -35,10 +35,14 @@
       <span class="app-footer-status" id="footer-status">Idle</span>
       <span id="footer-host"></span>
       <span>Theme:</span>
-      <button class="theme-toggle" id="theme-toggle" onclick="Theme.toggle()" title="Dark mode">
-        <span id="theme-icon">&#9790;</span>
-        <span id="theme-label">Dark</span>
-      </button>
+      <div class="theme-picker">
+        <button class="theme-toggle" id="theme-toggle" onclick="Theme.toggleMenu(event)" title="Choose theme">
+          <span id="theme-icon">&#9790;</span>
+          <span id="theme-label">Dark</span>
+          <span class="dd-arrow"></span>
+        </button>
+        <div class="action-menu-panel theme-menu-panel" id="theme-menu"></div>
+      </div>
     </div>
   </footer>
 
@@ -46,6 +50,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-unicode11@0.6.0/lib/xterm-addon-unicode11.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/css/css.min.js"></script>
