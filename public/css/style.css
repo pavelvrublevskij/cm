@@ -304,7 +304,7 @@ body {
 .theme-picker {
   position: relative;
 }
-.theme-menu-panel {
+.action-menu-panel.theme-menu-panel {
   top: auto;
   bottom: calc(100% + 6px);
   max-height: 70vh;

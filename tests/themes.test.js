@@ -102,3 +102,8 @@ test('opening the theme menu closes other open action menus', () => {
   Theme.toggleMenu({ stopPropagation() {} });
   assert.ok(!other.classList.contains('open'));
 });
+
+test('theme menu upward positioning outranks the generic .action-menu-panel top rule', () => {
+  const css = fs.readFileSync(path.join(PUBLIC, 'css/style.css'), 'utf-8');
+  assert.match(css, /\.action-menu-panel\.theme-menu-panel\s*\{[^}]*top:\s*auto;[^}]*bottom:/);
+});
