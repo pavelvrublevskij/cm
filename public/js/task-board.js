@@ -20,6 +20,8 @@ const TaskBoard = {
   PREVIEW_DELAY_MS: 1000,
   PREVIEW_MESSAGES: 20,
   PREVIEW_HIDE_MS: 600,
+  PREVIEW_SENT_RETRY_MS: 500,
+  PREVIEW_SENT_TRIES: 10,
   _preview: { id: null },
   _pointer: null,
 
@@ -225,6 +227,7 @@ const TaskBoard = {
     const p = TaskBoard._preview;
     clearTimeout(p.timer);
     clearTimeout(p.hide);
+    clearInterval(p.refresh);
     if (p.el) p.el.remove();
     TaskBoard._preview = { id: null };
   },
@@ -262,6 +265,7 @@ const TaskBoard = {
     p.card = card;
     p.offset = 0;
     TaskBoard.loadPreviewInput(p);
+    p.refresh = setInterval(() => TaskBoard.refreshPreview(p), Sessions.refreshIntervalMs());
     await TaskBoard.loadPreviewPage(p);
   },
 
@@ -312,6 +316,7 @@ const TaskBoard = {
     try {
       await api(TaskBoard.previewSessionUrl(p.card) + '/input', { method: 'POST', body: { text: message } });
       text.value = '';
+      TaskBoard.followSent(p, p.total || 0, TaskBoard.PREVIEW_SENT_TRIES);
     } catch (e) {
       toast(e.message, 'error');
     }
@@ -349,13 +354,46 @@ const TaskBoard = {
       if (first) list.innerHTML = failed; else list.insertAdjacentHTML('beforeend', failed);
       return;
     }
+    p.total = data.total;
     if (first && !data.total) { list.innerHTML = '<div class="empty-state"><p>No messages in this session</p></div>'; return; }
     const html = data.messages.map(m => Sessions.renderMessage(m)).join('');
     if (first) list.innerHTML = html; else list.insertAdjacentHTML('beforeend', html);
+    p.shown = (first ? [] : p.shown).concat(data.messages);
     addCodeCopyButtons(list);
     p.offset += data.messages.length;
     p.hasMore = data.hasMore;
     el.onscroll(); // hidden tool lines can leave too little to scroll
+  },
+
+  /** Reload the newest messages already shown, so a sent message and Claude's replies appear while the preview is open. */
+  async refreshPreview(p) {
+    if (p.loading) return;
+    p.loading = true;
+    let data = null;
+    try {
+      data = await api(`${TaskBoard.previewSessionUrl(p.card)}?offset=0&limit=${Math.max(p.offset, TaskBoard.PREVIEW_MESSAGES)}`);
+    } catch (_) { /* the next tick tries again */ }
+    if (TaskBoard._preview !== p) return;
+    p.loading = false;
+    if (!data || !data.total) return;
+    p.total = data.total;
+    // Compared as data: rendered tool blocks carry random ids, and redrawing would collapse what the user opened.
+    if (JSON.stringify(data.messages) !== JSON.stringify(p.shown)) {
+      p.list.innerHTML = data.messages.map(m => Sessions.renderMessage(m)).join('');
+      addCodeCopyButtons(p.list);
+      p.shown = data.messages;
+    }
+    p.offset = data.messages.length;
+    p.hasMore = data.hasMore;
+    p.el.onscroll(); // a scroll to the end during the refresh was ignored
+  },
+
+  /** Claude Code logs a sent message a moment after it gets it: refresh shortly until it shows (or the tries run out). */
+  followSent(p, before, tries) {
+    TaskBoard.refreshPreview(p).then(() => {
+      if (TaskBoard._preview !== p || p.total > before || tries <= 1) return;
+      setTimeout(() => TaskBoard.followSent(p, before, tries - 1), TaskBoard.PREVIEW_SENT_RETRY_MS);
+    });
   },
 
   /** A ticket's session runs hidden; opening it lists it like any running session from then on. */

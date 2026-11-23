@@ -793,11 +793,14 @@ function fakeList() {
 
 function previewEnv({ cards, api }) {
   const timers = [];
+  const intervals = [];
   const appended = [];
   const anchor = { getBoundingClientRect: () => ({ top: 100, left: 50, right: 250 }) };
   Object.assign(context, {
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     clearTimeout: id => { if (id) timers[id - 1].cleared = true; },
+    setInterval: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length; },
+    clearInterval: id => { if (id) intervals[id - 1].cleared = true; },
     CSS: { escape: s => s },
     window: { innerWidth: 1600, innerHeight: 900 },
     document: {
@@ -820,7 +823,7 @@ function previewEnv({ cards, api }) {
     },
     showLoading: (el, text) => { el.innerHTML = 'LOADING ' + text; },
     addCodeCopyButtons: () => {},
-    Sessions: { renderMessage: m => `<msg>${m.text}</msg>` },
+    Sessions: { renderMessage: m => `<msg>${m.text}</msg>`, refreshIntervalMs: () => 5000 },
     SessionInput: { NOTES: { none: 'no pty', busy: 'working', question: 'answer first', ready: '' } },
     toast: () => {},
     api: (url, opts) => (url.endsWith('/input-state') || url.endsWith('/input') ? Promise.resolve({ state: 'none' }) : api(url, opts))
@@ -828,7 +831,7 @@ function previewEnv({ cards, api }) {
   TaskBoard.board = { cards, projects: {} };
   TaskBoard._drag = null;
   TaskBoard._preview = { id: null };
-  return { timers, appended };
+  return { timers, intervals, appended };
 }
 
 test('hovering a ticket with a session shows its last messages after a second, loading first', async () => {
@@ -1114,6 +1117,146 @@ test('the preview message box sends to the ticket session, also while Claude wor
   await TaskBoard.loadPreviewInput(TaskBoard._preview);
   assert.strictEqual(el.text.disabled, true);
   assert.strictEqual(el.note.textContent, 'answer first');
+});
+
+test('a sent preview message shows in the conversation right away', async () => {
+  const { timers, appended } = previewEnv({ cards: [{ id: 'a', project: 'p', sessionId: 's1' }], api: async () => ({}) });
+  let messages = [{ text: 'old' }];
+  context.api = async url => {
+    if (url.endsWith('/input-state')) return { state: 'ready' };
+    if (url.endsWith('/input')) { messages = [{ text: 'mine' }, ...messages]; return { ok: true }; }
+    return { total: messages.length, hasMore: false, messages };
+  };
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  await new Promise(r => setImmediate(r));
+  const el = appended[0];
+  assert.strictEqual(el.list.innerHTML, '<msg>old</msg>');
+  el.text.value = 'hi';
+  await TaskBoard.sendPreviewInput(TaskBoard._preview);
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(el.list.innerHTML, '<msg>mine</msg><msg>old</msg>');
+});
+
+test('an open preview refreshes its conversation at the refresh rate and stops once closed', async () => {
+  let messages = [{ text: 'a' }];
+  const calls = [];
+  const { timers, intervals, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1' }],
+    api: async url => { calls.push(url); return { total: messages.length, hasMore: false, messages }; }
+  });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  const el = appended[0];
+  assert.strictEqual(intervals.length, 1);
+  assert.strictEqual(intervals[0].ms, 5000);
+  messages = [{ text: 'reply' }, { text: 'a' }];
+  await intervals[0].fn();
+  assert.strictEqual(el.list.innerHTML, '<msg>reply</msg><msg>a</msg>');
+  assert.strictEqual(calls[1], '/api/projects/p/sessions/s1?offset=0&limit=20');
+  TaskBoard.hidePreview();
+  assert.ok(intervals[0].cleared);
+});
+
+test('a sent preview message logged a moment later still shows: short refreshes until it does', async () => {
+  const { timers, appended } = previewEnv({ cards: [{ id: 'a', project: 'p', sessionId: 's1' }], api: async () => ({}) });
+  let messages = [{ text: 'old' }];
+  context.api = async url => {
+    if (url.endsWith('/input-state')) return { state: 'ready' };
+    if (url.endsWith('/input')) return { ok: true };
+    return { total: messages.length, hasMore: false, messages };
+  };
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  await new Promise(r => setImmediate(r));
+  const el = appended[0];
+  el.text.value = 'hi';
+  await TaskBoard.sendPreviewInput(TaskBoard._preview);
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(el.list.innerHTML, '<msg>old</msg>');
+  const retry = timers[timers.length - 1];
+  assert.strictEqual(retry.ms, 500);
+  messages = [{ text: 'hi' }, { text: 'old' }];
+  retry.fn();
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(el.list.innerHTML, '<msg>hi</msg><msg>old</msg>');
+  const count = timers.length;
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(timers.length, count, 'no more retries once it shows');
+});
+
+test('a preview refresh with unchanged messages leaves the list as is, though rendering differs each time', async () => {
+  const { timers, intervals, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1' }],
+    api: async () => ({ total: 1, hasMore: false, messages: [{ text: 'tool' }] })
+  });
+  let n = 0;
+  context.Sessions.renderMessage = m => `<msg id="${++n}">${m.text}</msg>`;
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  const el = appended[0];
+  const before = el.list.innerHTML;
+  await intervals[0].fn();
+  assert.strictEqual(el.list.innerHTML, before);
+});
+
+test('a preview refresh waits out a page load, keeps the paging place, and fills nothing once the preview closed', async () => {
+  const calls = [];
+  let release;
+  const page = i => ({ text: 'm' + i });
+  const { timers, intervals, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1' }],
+    api: async url => {
+      calls.push(url);
+      if (url.includes('offset=20&')) { await new Promise(r => { release = r; }); return { total: 30, hasMore: false, messages: [page(20)] }; }
+      if (url.includes('limit=21')) { await new Promise(r => { release = r; }); return { total: 31, hasMore: true, messages: [page('new')] }; }
+      return { total: 30, hasMore: true, messages: Array.from({ length: 20 }, (_, i) => page(i)) };
+    }
+  });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  const p = TaskBoard._preview, el = appended[0];
+  const more = TaskBoard.loadPreviewPage(p);
+  await intervals[0].fn();
+  assert.strictEqual(calls.length, 2, 'no refresh while a page loads');
+  release();
+  await more;
+  assert.strictEqual(p.offset, 21);
+  const refresh = intervals[0].fn();
+  el.scrollTop = 1600;
+  el.onscroll();
+  assert.strictEqual(calls.length, 3, 'no page load while a refresh runs');
+  assert.match(calls[2], /offset=0&limit=21$/);
+  TaskBoard.hidePreview();
+  const html = el.list.innerHTML;
+  release();
+  await refresh;
+  assert.strictEqual(el.list.innerHTML, html);
+});
+
+test('a preview refresh after paging reloads all shown messages and pages on from there', async () => {
+  const calls = [];
+  const { timers, intervals, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1' }],
+    api: async url => {
+      calls.push(url);
+      if (url.includes('limit=25')) return { total: 40, hasMore: true, messages: Array.from({ length: 25 }, (_, i) => ({ text: 'r' + i })) };
+      if (url.includes('offset=20&')) return { total: 40, hasMore: true, messages: Array.from({ length: 5 }, (_, i) => ({ text: 'o' + i })) };
+      return { total: 40, hasMore: true, messages: Array.from({ length: 20 }, (_, i) => ({ text: 'n' + i })) };
+    }
+  });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  const el = appended[0];
+  el.scrollTop = 0;
+  await TaskBoard.loadPreviewPage(TaskBoard._preview);
+  el.scrollTop = 0;
+  await intervals[0].fn();
+  assert.match(calls[2], /offset=0&limit=25$/);
+  assert.strictEqual(TaskBoard._preview.offset, 25);
+  el.scrollTop = 1600;
+  el.onscroll();
+  assert.match(calls[3], /offset=25&limit=20$/);
 });
 
 test('the preview stays open while its message box has focus', async () => {
