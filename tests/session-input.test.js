@@ -25,11 +25,8 @@ function fakeTerm() {
 
 afterEach(() => terminalServer._clearAll());
 
-test('a session with no CM pty, a hidden one or a shell cannot take input', async () => {
+test('a session with no CM pty or a shell cannot take input', async () => {
   assert.strictEqual(await state(), 'none');
-  terminalServer._injectFakeEntry(SLUG, SID, { hookToken: TOKEN, hidden: true });
-  assert.strictEqual(await state(), 'none');
-  terminalServer._clearAll();
   terminalServer._injectFakeEntry(SLUG, SID, { mode: 'shell' });
   assert.strictEqual(await state(), 'none');
 });
@@ -291,6 +288,13 @@ test('a revealed Task Board session follows the board-forwarded hook events and 
   terminalServer.trackHookEvent(entry, { event: 'Notification', notificationType: 'elicitation_dialog' });
   assert.strictEqual(await state(), 'question');
   assert.strictEqual((await request(app).get('/api/terminal/attention')).body.waiting, 0);
+  terminalServer.trackHookEvent(entry, { event: 'PostToolUse', toolUseId: 'q1' });
   entry.hidden = true;
-  assert.strictEqual(await state(), 'none', 'still hidden on the board');
+  assert.strictEqual(await state(), 'busy', 'hidden on the board, it still takes messages');
+  const term = fakeTerm();
+  entry.term = term;
+  assert.strictEqual((await send('go on')).status, 200);
+  assert.deepStrictEqual(term.writes, ['\x1b[200~go on\x1b[201~']);
+  assert.strictEqual(entry.hidden, true, 'sending does not reveal it');
+  await new Promise(r => setTimeout(r, 200));
 });

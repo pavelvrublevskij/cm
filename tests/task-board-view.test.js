@@ -672,6 +672,15 @@ test('dropping a ticket back into ToDo opens the follow-up dialog, other drops d
   assert.deepStrictEqual(plain(opened), [['d', null, true], ['r', null, true]]);
 });
 
+/** The preview's message list: its innerHTML is the shown conversation. */
+function fakeList() {
+  return {
+    innerHTML: '',
+    insertAdjacentHTML(pos, h) { this.innerHTML += h; },
+    querySelector() { const el = this; return el.innerHTML.includes('tb-preview-loader') ? { remove() { el.innerHTML = el.innerHTML.replace(/<div class="loading tb-preview-loader">.*?Loading\.\.\.<\/div>/, ''); } } : null; }
+  };
+}
+
 function previewEnv({ cards, api }) {
   const timers = [];
   const appended = [];
@@ -682,19 +691,29 @@ function previewEnv({ cards, api }) {
     CSS: { escape: s => s },
     window: { innerWidth: 1600, innerHeight: 900 },
     document: {
+      activeElement: null,
       querySelector: () => anchor,
-      createElement: () => ({
-        style: {}, offsetWidth: 520, offsetHeight: 480, scrollTop: 0, clientHeight: 480, scrollHeight: 2000,
-        remove() { this.removed = true; },
-        insertAdjacentHTML(pos, h) { this.innerHTML += h; },
-        querySelector() { const el = this; return el.innerHTML.includes('tb-preview-loader') ? { remove() { el.innerHTML = el.innerHTML.replace(/<div class="loading tb-preview-loader">.*?Loading\.\.\.<\/div>/, ''); } } : null; }
-      }),
+      createElement: () => {
+        const text = { value: '', disabled: true };
+        const note = { textContent: '' };
+        const list = fakeList();
+        const input = { querySelector: s => (s === 'textarea' ? text : note) };
+        return {
+          style: {}, offsetWidth: 520, offsetHeight: 480, scrollTop: 0, clientHeight: 480, scrollHeight: 2000,
+          list, text, note,
+          contains: () => false,
+          remove() { this.removed = true; },
+          querySelector: s => (s === '.tb-preview-list' ? list : s === '.tb-preview-input textarea' ? text : s === '.tb-preview-input' ? input : null)
+        };
+      },
       body: { appendChild: el => appended.push(el) }
     },
     showLoading: (el, text) => { el.innerHTML = 'LOADING ' + text; },
     addCodeCopyButtons: () => {},
     Sessions: { renderMessage: m => `<msg>${m.text}</msg>` },
-    api
+    SessionInput: { NOTES: { none: 'no pty', busy: 'working', question: 'answer first', ready: '' } },
+    toast: () => {},
+    api: (url, opts) => (url.endsWith('/input-state') || url.endsWith('/input') ? Promise.resolve({ state: 'none' }) : api(url, opts))
   });
   TaskBoard.board = { cards, projects: {} };
   TaskBoard._drag = null;
@@ -719,12 +738,12 @@ test('hovering a ticket with a session shows its last messages after a second, l
   assert.strictEqual(timers[0].ms, 1000);
   assert.strictEqual(appended.length, 0);
   const shown = timers[0].fn();
-  assert.match(appended[0].innerHTML, /LOADING/);
+  assert.match(appended[0].list.innerHTML, /LOADING/);
   assert.strictEqual(appended[0].style.left, '258px');
   release();
   await shown;
   assert.deepStrictEqual(calls, ['/api/projects/C--p-wt/sessions/s1?offset=0&limit=20']);
-  assert.strictEqual(appended[0].innerHTML, '<msg>newest</msg><msg>older</msg>');
+  assert.strictEqual(appended[0].list.innerHTML, '<msg>newest</msg><msg>older</msg>');
 });
 
 test('leaving a ticket before a second shows no preview; tickets without a session get none', () => {
@@ -747,7 +766,7 @@ test('a preview whose ticket was left before it loaded is not filled', async () 
   TaskBoard.hidePreview();
   await shown;
   assert.ok(appended[0].removed);
-  assert.match(appended[0].innerHTML, /LOADING/);
+  assert.match(appended[0].list.innerHTML, /LOADING/);
 });
 
 test('a shown preview stays while the pointer moves into it and closes after leaving it', async () => {
@@ -757,7 +776,7 @@ test('a shown preview stays while the pointer moves into it and closes after lea
   });
   TaskBoard.hoverCard('a');
   await timers[0].fn();
-  assert.match(appended[0].innerHTML, /No messages/);
+  assert.match(appended[0].list.innerHTML, /No messages/);
   TaskBoard.leavePreview();
   appended[0].onmouseenter();
   assert.ok(timers[1].cleared);
@@ -854,17 +873,17 @@ test('scrolling a preview near its end loads the older messages below, with a lo
   TaskBoard.hoverCard('a');
   await timers[0].fn();
   const el = appended[0];
-  assert.strictEqual(el.innerHTML, '<msg>new</msg><msg>mid</msg>');
+  assert.strictEqual(el.list.innerHTML, '<msg>new</msg><msg>mid</msg>');
   el.onscroll();
   assert.strictEqual(calls.length, 1);
   el.scrollTop = 1300;
   const more = TaskBoard.loadPreviewPage(TaskBoard._preview);
   el.onscroll();
-  assert.match(el.innerHTML, /tb-preview-loader/);
+  assert.match(el.list.innerHTML, /tb-preview-loader/);
   release();
   await more;
   assert.deepStrictEqual(calls, ['/api/projects/p/sessions/s1?offset=0&limit=20', '/api/projects/p/sessions/s1?offset=2&limit=20']);
-  assert.strictEqual(el.innerHTML, '<msg>new</msg><msg>mid</msg><msg>old</msg>');
+  assert.strictEqual(el.list.innerHTML, '<msg>new</msg><msg>mid</msg><msg>old</msg>');
   el.onscroll();
   assert.strictEqual(calls.length, 2);
 });
@@ -907,4 +926,52 @@ test('add lane says so when every project already has one', () => {
   TaskBoard.openAddLane();
   assert.strictEqual(modal, null);
   assert.strictEqual(toasts[0][0], 'Every project already has a lane');
+});
+
+test('the preview message box sends to the ticket session, also while Claude works; Shift+Enter does not send', async () => {
+  const { timers, appended } = previewEnv({ cards: [{ id: 'a', project: 'C--p', sessionSlug: 'C--p-wt', sessionId: 's1' }], api: async () => ({}) });
+  const calls = [];
+  let state = 'busy';
+  context.api = async (url, opts) => {
+    calls.push([url, opts && opts.body && opts.body.text]);
+    if (url.endsWith('/input-state')) return { state };
+    if (url.endsWith('/input')) return { ok: true };
+    return { total: 0, messages: [] };
+  };
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  await new Promise(r => setImmediate(r));
+  const el = appended[0];
+  assert.strictEqual(el.text.disabled, false, 'busy: a message can still be sent');
+  assert.strictEqual(el.note.textContent, 'working');
+  el.text.value = 'line\nmore';
+  let prevented = 0;
+  el.text.onkeydown({ key: 'Enter', shiftKey: true, preventDefault: () => prevented++ });
+  assert.strictEqual(prevented, 0);
+  el.text.onkeydown({ key: 'Enter', shiftKey: false, preventDefault: () => prevented++ });
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(prevented, 1);
+  assert.deepStrictEqual(calls.filter(c => c[1]), [['/api/projects/C--p-wt/sessions/s1/input', 'line\nmore']]);
+  assert.strictEqual(el.text.value, '');
+  state = 'question';
+  await TaskBoard.loadPreviewInput(TaskBoard._preview);
+  assert.strictEqual(el.text.disabled, true);
+  assert.strictEqual(el.note.textContent, 'answer first');
+});
+
+test('the preview stays open while its message box has focus', async () => {
+  const { timers, appended } = previewEnv({ cards: [{ id: 'a', project: 'p', sessionId: 's1' }], api: async () => ({ total: 0, messages: [] }) });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  const el = appended[0];
+  context.document.activeElement = el.text;
+  el.contains = n => n === el.text;
+  context.document.elementFromPoint = () => null;
+  TaskBoard.leavePreview();
+  TaskBoard.checkPreview();
+  assert.strictEqual(TaskBoard._preview.id, 'a');
+  assert.ok(!el.removed);
+  context.document.activeElement = null;
+  el.text.onblur();
+  assert.ok(el.removed, 'closes once the box loses focus with the pointer outside');
 });
