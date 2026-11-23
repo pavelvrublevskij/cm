@@ -266,7 +266,7 @@ const ManagerSettings = {
   loadRefreshRate() {
     const input = document.getElementById('conversation-refresh-rate');
     if (!input) return;
-    const ms = (typeof Sessions !== 'undefined') ? Sessions.refreshIntervalMs() : 5000;
+    const ms = (typeof Sessions !== 'undefined') ? Sessions.refreshIntervalMs() : 3000;
     input.value = String(Math.round(ms / 1000));
   },
 
@@ -284,7 +284,7 @@ const ManagerSettings = {
     const input = document.getElementById('conversation-refresh-rate');
     if (!input) return;
     if (typeof Sessions !== 'undefined') Sessions.setRefreshIntervalMs(Sessions.REFRESH_INTERVAL_DEFAULT_MS);
-    input.value = String(Math.round((typeof Sessions !== 'undefined' ? Sessions.REFRESH_INTERVAL_DEFAULT_MS : 5000) / 1000));
+    input.value = String(Math.round((typeof Sessions !== 'undefined' ? Sessions.REFRESH_INTERVAL_DEFAULT_MS : 3000) / 1000));
     toast('Refresh rate reset to default');
   },
 
