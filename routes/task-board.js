@@ -67,7 +67,7 @@ router.put('/cards/:id', wrapRoute((req, res) => {
   send(res, board.updateCard(req.params.id, req.body || {}));
 }));
 
-/** PUT /api/task-board/cards/:id/memo — { memo, todos: [{ text, done }] }: the user's own notes in Finalize or Done */
+/** PUT /api/task-board/cards/:id/memo — { todos: [{ text, done }] }: the user's own to-dos in Finalize or Done */
 router.put('/cards/:id/memo', wrapRoute((req, res) => {
   send(res, board.updateMemo(req.params.id, req.body || {}));
 }));

@@ -6859,6 +6859,16 @@ body.git-split-dragging {
 .tb-card-memo--open {
   color: var(--accent);
 }
+.tb-memo-count--open {
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
 .tb-todo-row {
   display: flex;
   align-items: center;
