@@ -514,7 +514,7 @@ test('a newly waiting ticket raises a 15s toast that opens its session on click'
 });
 
 test('a re-render keeps each lane\'s horizontal scroll position', () => {
-  const lanes = keys => keys.map(k => { const cols = { scrollLeft: 0 }; return { dataset: { lane: k }, cols, querySelector: () => cols }; });
+  const lanes = keys => keys.map(k => { const cols = { scrollLeft: 0 }; return { dataset: { lane: k }, cols, querySelector: s => (s === '.tb-cols' ? cols : null) }; });
   let current = lanes(['C--work-alpha', 'C--work-zeta']);
   const body = {
     querySelectorAll: () => current,
@@ -530,6 +530,67 @@ test('a re-render keeps each lane\'s horizontal scroll position', () => {
   assert.strictEqual(current[1].cols.scrollLeft, 240);
   delete context.localStorage;
   TaskBoard.board = board;
+});
+
+test('each lane has a top scrollbar above its columns', () => {
+  const html = TaskBoard.html(BOARD, []);
+  assert.strictEqual((html.match(/class="tb-cols-top"/g) || []).length, 2);
+  assert.match(html, /tb-cols-top"[^>]*onscroll="TaskBoard\.onColsScroll\(this\)"><div class="tb-cols-top-inner"><\/div><\/div><div class="tb-cols"[^>]*onscroll="TaskBoard\.onColsScroll\(this\)"/);
+});
+
+const scrollLane = (scrollWidth, clientWidth) => {
+  const cols = { scrollLeft: 0, scrollWidth, clientWidth, classList: { contains: c => c === 'tb-cols' } };
+  const top = { scrollLeft: 0, style: {}, firstElementChild: { style: {} }, classList: { contains: c => c === 'tb-cols-top' } };
+  const lane = { querySelector: s => (s === '.tb-cols' ? cols : s === '.tb-cols-top' ? top : null) };
+  cols.closest = top.closest = () => lane;
+  return { lane, cols, top };
+};
+
+test('the top scrollbar matches the columns width and shows only when they overflow', () => {
+  const wide = scrollLane(1200, 600);
+  wide.cols.scrollLeft = 80;
+  TaskBoard.syncTopScroll(wide.lane);
+  assert.strictEqual(wide.top.firstElementChild.style.width, '1200px');
+  assert.strictEqual(wide.top.style.display, '');
+  assert.strictEqual(wide.top.scrollLeft, 80);
+  const narrow = scrollLane(600, 600);
+  TaskBoard.syncTopScroll(narrow.lane);
+  assert.strictEqual(narrow.top.style.display, 'none');
+});
+
+test('the top scrollbar and the columns scroll together', () => {
+  const { cols, top } = scrollLane(1200, 600);
+  top.scrollLeft = 150;
+  TaskBoard.onColsScroll(top);
+  assert.strictEqual(cols.scrollLeft, 150);
+  cols.scrollLeft = 40;
+  TaskBoard.onColsScroll(cols);
+  assert.strictEqual(top.scrollLeft, 40);
+});
+
+test('a sub-pixel difference between the bars is not echoed back', () => {
+  const { cols, top } = scrollLane(1200, 600);
+  cols.scrollLeft = 600.5;
+  top.scrollLeft = 600;
+  TaskBoard.onColsScroll(top);
+  assert.strictEqual(cols.scrollLeft, 600.5);
+});
+
+test('the top scrollbar is re-measured when a lane\'s columns change width', () => {
+  const { lane, cols, top } = scrollLane(600, 600);
+  let callback;
+  const observed = [];
+  context.ResizeObserver = class { constructor(cb) { callback = cb; } observe(t) { observed.push(t); } disconnect() { observed.length = 0; } };
+  const saved = TaskBoard._laneResize;
+  TaskBoard._laneResize = null;
+  TaskBoard.observeLaneSizes({ querySelectorAll: () => [cols] });
+  assert.deepStrictEqual(observed, [cols]);
+  cols.clientWidth = 400;
+  callback([{ target: cols }]);
+  assert.strictEqual(top.style.display, '');
+  assert.strictEqual(lane.querySelector('.tb-cols-top'), top);
+  TaskBoard._laneResize = saved;
+  delete context.ResizeObserver;
 });
 
 test('a ticket that took a condition shows it on its card', () => {
