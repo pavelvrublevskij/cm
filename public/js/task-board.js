@@ -161,7 +161,7 @@ const TaskBoard = {
     TaskBoard.openEditor(id);
   },
 
-  /** Hovering a ticket with a session for a second shows its latest conversation lines. */
+  /** Hovering a ticket for a second shows its heading and branch, and its latest conversation lines when it has a session. */
   onCardOver(e) {
     const el = e.target.closest('.tb-card');
     if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
@@ -178,7 +178,11 @@ const TaskBoard = {
     if (!p.id) return;
     const under = at && document.elementFromPoint(at.x, at.y);
     const card = under && under.closest('.tb-card');
-    if ((card && card.dataset.id === p.id) || (p.el && p.el.contains(under))) return;
+    if ((card && card.dataset.id === p.id) || (p.el && p.el.contains(under))) {
+      const now = p.headOnly && TaskBoard.findCard(p.id);
+      if (now && now.sessionId) { TaskBoard.hidePreview(); TaskBoard._preview = { id: now.id }; TaskBoard.showPreview(now); }
+      return;
+    }
     if (p.el && p.el.contains(document.activeElement)) return; // a message is being typed
     TaskBoard.hidePreview();
   },
@@ -195,7 +199,7 @@ const TaskBoard = {
     if (p.el) return; // passing over other cards on the way to the open preview
     TaskBoard.hidePreview();
     const card = TaskBoard.findCard(id);
-    if (!card || !card.sessionId || TaskBoard._drag) return;
+    if (!card || TaskBoard._drag) return;
     TaskBoard._preview = { id, timer: setTimeout(() => TaskBoard.showPreview(card), TaskBoard.PREVIEW_DELAY_MS) };
   },
 
@@ -237,7 +241,15 @@ const TaskBoard = {
     document.body.appendChild(el);
     p.timer = null;
     p.el = el;
-    el.innerHTML = TaskBoard.previewInputHtml() + '<div class="tb-preview-list"></div>';
+    const head = TaskBoard.previewHeadHtml(card);
+    if (!card.sessionId) {
+      p.headOnly = true;
+      el.className += ' tb-preview--head';
+      el.innerHTML = `<div class="tb-preview-top">${head}</div>`;
+      TaskBoard.placePreview(el, anchor.getBoundingClientRect());
+      return;
+    }
+    el.innerHTML = `<div class="tb-preview-top">${head}${TaskBoard.previewInputHtml()}</div><div class="tb-preview-list"></div>`;
     p.list = el.querySelector('.tb-preview-list');
     const text = el.querySelector('.tb-preview-input textarea');
     text.onkeydown = e => TaskBoard.onPreviewKeyDown(p, e);
@@ -251,6 +263,14 @@ const TaskBoard = {
     p.offset = 0;
     TaskBoard.loadPreviewInput(p);
     await TaskBoard.loadPreviewPage(p);
+  },
+
+  /** The preview's top: the ticket's heading and its git branch. */
+  previewHeadHtml(card) {
+    const heading = card.title || (card.notes || '').trim().split('\n')[0];
+    const gitBranch = TaskBoard.gitBranchOf(card);
+    return `<div class="tb-preview-head"><div class="tb-preview-title">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</div>${
+      gitBranch ? `<div class="tb-preview-branch">Branch: ${escapeHtml(gitBranch)}</div>` : ''}</div>`;
   },
 
   /** The preview's message box: sends to the ticket's session as it runs, hidden or not. */
@@ -379,10 +399,43 @@ const TaskBoard = {
       el.querySelectorAll('.tb-lane[data-lane]').forEach(lane => {
         const cols = lane.querySelector('.tb-cols');
         if (cols && scroll[lane.dataset.lane]) cols.scrollLeft = scroll[lane.dataset.lane];
+        TaskBoard.syncTopScroll(lane);
       });
+      TaskBoard.observeLaneSizes(el);
     }
     const btn = document.getElementById('task-board-compact-btn');
     if (btn) btn.classList.toggle('btn-active', TaskBoard.compact());
+  },
+
+  /** Size the lane's top scrollbar to its columns, show it only when they overflow, and match their position. */
+  syncTopScroll(lane) {
+    const cols = lane.querySelector('.tb-cols');
+    const top = lane.querySelector('.tb-cols-top');
+    if (!cols || !top) return;
+    top.firstElementChild.style.width = cols.scrollWidth + 'px';
+    top.style.display = cols.scrollWidth > cols.clientWidth ? '' : 'none';
+    top.scrollLeft = cols.scrollLeft;
+  },
+
+  /** The top scrollbar and the columns scroll together. */
+  onColsScroll(el) {
+    const lane = el.closest('.tb-lane');
+    const other = lane && lane.querySelector(el.classList.contains('tb-cols-top') ? '.tb-cols' : '.tb-cols-top');
+    // Tolerance: the two can differ by a fractional pixel, and echoing that back would clamp or jitter
+    if (other && Math.abs(other.scrollLeft - el.scrollLeft) > 1) other.scrollLeft = el.scrollLeft;
+  },
+
+  /** Re-measure a lane's top scrollbar whenever its columns change width (window, sidebar, any layout change). */
+  observeLaneSizes(el) {
+    if (typeof ResizeObserver === 'undefined') return;
+    if (!TaskBoard._laneResize) {
+      TaskBoard._laneResize = new ResizeObserver(entries => entries.forEach(e => {
+        const lane = e.target.closest('.tb-lane');
+        if (lane) TaskBoard.syncTopScroll(lane);
+      }));
+    }
+    TaskBoard._laneResize.disconnect();
+    el.querySelectorAll('.tb-cols').forEach(cols => TaskBoard._laneResize.observe(cols));
   },
 
   compact() {
@@ -452,9 +505,7 @@ const TaskBoard = {
     const dots = at === -1 ? '' : `<span class="tb-line-steps" title="${escapeAttr(`${stages[at].title} (${at + 1}/${stages.length})`)}">${
       stages.map((s, i) => `<span class="tb-dot${i < at ? ' tb-step--done' : i === at ? ' tb-step--current' : ''}"></span>`).join('')
     }</span>`;
-    const gitBranch = TaskBoard.gitBranchOf(card);
-    const tip = heading + (gitBranch ? '\nBranch: ' + gitBranch : '');
-    return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}" title="${escapeAttr(tip)}"
+    return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}"
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         <span class="tb-line-text">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</span>
         ${TaskBoard.badgeHtml(card)}
@@ -632,7 +683,9 @@ const TaskBoard = {
           ${add}
         </div>`;
     }).join('');
-    return `<section class="tb-lane" data-lane="${escapeAttr(key)}">${head}<div class="tb-cols" style="--tb-cols:${columns.length}">${cols}</div></section>`;
+    return `<section class="tb-lane" data-lane="${escapeAttr(key)}">${head}`
+      + '<div class="tb-cols-top" style="display:none" onscroll="TaskBoard.onColsScroll(this)"><div class="tb-cols-top-inner"></div></div>'
+      + `<div class="tb-cols" style="--tb-cols:${columns.length}" onscroll="TaskBoard.onColsScroll(this)">${cols}</div></section>`;
   },
 
   /** The whole board: lane filter chips, then each visible lane. Pure, for tests. */

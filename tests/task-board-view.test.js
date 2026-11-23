@@ -259,7 +259,7 @@ test('an empty workflow invites Recommend', () => {
 
 test('compact cards are one line: heading, closed badge and stage dots', () => {
   const html = TaskBoard.html(STAGED, [], true);
-  assert.match(html, /tb-card tb-card--line" draggable="true" data-id="w" title="Working"/);
+  assert.match(html, /tb-card tb-card--line" draggable="true" data-id="w"\s/);
   assert.match(html, /tb-line-text">Working</);
   assert.match(html, /tb-line-steps" title="Build \(2\/3\)"/);
   assert.strictEqual((html.match(/class="tb-dot/g) || []).length, 3);
@@ -523,7 +523,7 @@ test('a newly waiting ticket raises a 15s toast that opens its session on click'
 });
 
 test('a re-render keeps each lane\'s horizontal scroll position', () => {
-  const lanes = keys => keys.map(k => { const cols = { scrollLeft: 0 }; return { dataset: { lane: k }, cols, querySelector: () => cols }; });
+  const lanes = keys => keys.map(k => { const cols = { scrollLeft: 0 }; return { dataset: { lane: k }, cols, querySelector: s => (s === '.tb-cols' ? cols : null) }; });
   let current = lanes(['C--work-alpha', 'C--work-zeta']);
   const body = {
     querySelectorAll: () => current,
@@ -541,6 +541,67 @@ test('a re-render keeps each lane\'s horizontal scroll position', () => {
   TaskBoard.board = board;
 });
 
+test('each lane has a top scrollbar above its columns', () => {
+  const html = TaskBoard.html(BOARD, []);
+  assert.strictEqual((html.match(/class="tb-cols-top"/g) || []).length, 2);
+  assert.match(html, /tb-cols-top"[^>]*onscroll="TaskBoard\.onColsScroll\(this\)"><div class="tb-cols-top-inner"><\/div><\/div><div class="tb-cols"[^>]*onscroll="TaskBoard\.onColsScroll\(this\)"/);
+});
+
+const scrollLane = (scrollWidth, clientWidth) => {
+  const cols = { scrollLeft: 0, scrollWidth, clientWidth, classList: { contains: c => c === 'tb-cols' } };
+  const top = { scrollLeft: 0, style: {}, firstElementChild: { style: {} }, classList: { contains: c => c === 'tb-cols-top' } };
+  const lane = { querySelector: s => (s === '.tb-cols' ? cols : s === '.tb-cols-top' ? top : null) };
+  cols.closest = top.closest = () => lane;
+  return { lane, cols, top };
+};
+
+test('the top scrollbar matches the columns width and shows only when they overflow', () => {
+  const wide = scrollLane(1200, 600);
+  wide.cols.scrollLeft = 80;
+  TaskBoard.syncTopScroll(wide.lane);
+  assert.strictEqual(wide.top.firstElementChild.style.width, '1200px');
+  assert.strictEqual(wide.top.style.display, '');
+  assert.strictEqual(wide.top.scrollLeft, 80);
+  const narrow = scrollLane(600, 600);
+  TaskBoard.syncTopScroll(narrow.lane);
+  assert.strictEqual(narrow.top.style.display, 'none');
+});
+
+test('the top scrollbar and the columns scroll together', () => {
+  const { cols, top } = scrollLane(1200, 600);
+  top.scrollLeft = 150;
+  TaskBoard.onColsScroll(top);
+  assert.strictEqual(cols.scrollLeft, 150);
+  cols.scrollLeft = 40;
+  TaskBoard.onColsScroll(cols);
+  assert.strictEqual(top.scrollLeft, 40);
+});
+
+test('a sub-pixel difference between the bars is not echoed back', () => {
+  const { cols, top } = scrollLane(1200, 600);
+  cols.scrollLeft = 600.5;
+  top.scrollLeft = 600;
+  TaskBoard.onColsScroll(top);
+  assert.strictEqual(cols.scrollLeft, 600.5);
+});
+
+test('the top scrollbar is re-measured when a lane\'s columns change width', () => {
+  const { lane, cols, top } = scrollLane(600, 600);
+  let callback;
+  const observed = [];
+  context.ResizeObserver = class { constructor(cb) { callback = cb; } observe(t) { observed.push(t); } disconnect() { observed.length = 0; } };
+  const saved = TaskBoard._laneResize;
+  TaskBoard._laneResize = null;
+  TaskBoard.observeLaneSizes({ querySelectorAll: () => [cols] });
+  assert.deepStrictEqual(observed, [cols]);
+  cols.clientWidth = 400;
+  callback([{ target: cols }]);
+  assert.strictEqual(top.style.display, '');
+  assert.strictEqual(lane.querySelector('.tb-cols-top'), top);
+  TaskBoard._laneResize = saved;
+  delete context.ResizeObserver;
+});
+
 test('a ticket that took a condition shows it on its card', () => {
   const card = { id: 'r', title: 'T', notes: '', project: 'p', column: 's-b', closed: false, run: { status: 'running' }, branch: { from: 'Triage', when: 'a <bug>' } };
   assert.match(TaskBoard.cardHtml(card, null, false), /tb-card-branch" title="Condition taken after Triage">If a &lt;bug&gt;</);
@@ -556,10 +617,11 @@ test('a recognised ticket type shows its icon before the heading, in both card m
   assert.strictEqual(TaskBoard.kindIconHtml({ kind: 'chore' }), '');
 });
 
-test('a ticket with a worktree shows its branch on the card, in compact mode on hover, and in the session banner', () => {
+test('a ticket with a worktree shows its branch on the card, in the hover preview header, and in the session banner', () => {
   const card = { id: 'g', title: 'Fix login', notes: '', project: 'p', column: 'done', worktree: 'cm-ab12', gitBranch: 'worktree-cm-ab12' };
   assert.match(TaskBoard.cardHtml(card, null, false), /class="tb-card-git" title="Ticket branch">&#5833; worktree-cm-ab12</);
-  assert.match(TaskBoard.cardHtml(card, null, true), /title="Fix login\nBranch: worktree-cm-ab12"/);
+  assert.ok(!/data-id="g" title=/.test(TaskBoard.cardHtml(card, null, true)), 'no card tooltip in compact mode');
+  assert.strictEqual(TaskBoard.previewHeadHtml(card), '<div class="tb-preview-head"><div class="tb-preview-title">Fix login</div><div class="tb-preview-branch">Branch: worktree-cm-ab12</div></div>');
   assert.match(TaskBoard.sessionInfoHtml(card, null), /on branch <code>worktree-cm-ab12<\/code>/);
   assert.strictEqual(TaskBoard.gitBranchOf({ worktree: 'cm-old' }), 'worktree-cm-old', 'tickets from before gitBranch was stored');
   assert.ok(!TaskBoard.cardHtml({ id: 'n', title: 'x', notes: '', column: 'todo' }, null, false).includes('tb-card-git'));
@@ -794,14 +856,61 @@ test('hovering a ticket with a session shows its last messages after a second, l
   assert.strictEqual(appended[0].list.innerHTML, '<msg>newest</msg><msg>older</msg>');
 });
 
-test('leaving a ticket before a second shows no preview; tickets without a session get none', () => {
-  const { timers } = previewEnv({ cards: [{ id: 'a', project: 'p', sessionId: 's1' }, { id: 'b', project: 'p' }], api: async () => ({}) });
+test('leaving a ticket before a second shows no preview', () => {
+  const { timers } = previewEnv({ cards: [{ id: 'a', project: 'p', sessionId: 's1' }], api: async () => ({}) });
   TaskBoard.hoverCard('a');
   TaskBoard.leavePreview();
   assert.ok(timers[0].cleared);
   assert.strictEqual(TaskBoard._preview.id, null);
+});
+
+test('a ticket without a session shows a header-only preview and loads nothing', async () => {
+  const calls = [];
+  const { timers, appended } = previewEnv({
+    cards: [{ id: 'b', project: 'p', title: 'Plan <x>', notes: '', worktree: 'cm-1', gitBranch: 'worktree-cm-1' }],
+    api: async url => { calls.push(url); return {}; }
+  });
   TaskBoard.hoverCard('b');
-  assert.strictEqual(timers.length, 1);
+  assert.strictEqual(timers[0].ms, 1000);
+  await timers[0].fn();
+  const el = appended[0];
+  assert.strictEqual(el.className, 'tb-preview tb-preview--head');
+  assert.strictEqual(el.innerHTML, '<div class="tb-preview-top"><div class="tb-preview-head"><div class="tb-preview-title">Plan &lt;x&gt;</div><div class="tb-preview-branch">Branch: worktree-cm-1</div></div></div>');
+  assert.strictEqual(el.style.left, '258px');
+  assert.deepStrictEqual(calls, []);
+});
+
+test('a header-only preview becomes a full one when its ticket gets a session while hovered', async () => {
+  const calls = [];
+  const { timers, appended } = previewEnv({
+    cards: [{ id: 'b', project: 'p', title: 'T', notes: '' }],
+    api: async url => { calls.push(url); return { total: 0, messages: [] }; }
+  });
+  context.document.elementFromPoint = () => ({ closest: () => ({ dataset: { id: 'b' } }) });
+  TaskBoard.onPointerMove({ clientX: 1, clientY: 2 });
+  TaskBoard.hoverCard('b');
+  await timers[0].fn();
+  TaskBoard.checkPreview();
+  assert.strictEqual(appended.length, 1, 'no session yet: preview kept as is');
+  TaskBoard.board.cards[0].sessionId = 's9';
+  await TaskBoard.checkPreview();
+  assert.ok(appended[0].removed);
+  assert.strictEqual(appended.length, 2);
+  assert.strictEqual(appended[1].className, 'tb-preview');
+  assert.strictEqual(TaskBoard._preview.id, 'b');
+  assert.ok(!TaskBoard._preview.headOnly);
+});
+
+test('a ticket with a session shows the header above the message box', async () => {
+  const { timers, appended } = previewEnv({
+    cards: [{ id: 'a', project: 'p', sessionId: 's1', title: '', notes: 'First line\nsecond' }],
+    api: async () => ({ total: 0, messages: [] })
+  });
+  TaskBoard.hoverCard('a');
+  await timers[0].fn();
+  assert.match(appended[0].innerHTML, /^<div class="tb-preview-top"><div class="tb-preview-head"><div class="tb-preview-title">First line<\/div><\/div><div class="tb-preview-input">/);
+  assert.ok(!appended[0].innerHTML.includes('tb-preview-branch'));
+  assert.strictEqual(appended[0].className, 'tb-preview');
 });
 
 test('a preview whose ticket was left before it loaded is not filled', async () => {

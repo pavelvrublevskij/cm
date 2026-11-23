@@ -6728,6 +6728,13 @@ body.git-split-dragging {
 .tb-lane-remove {
   padding: 0 7px;
 }
+.tb-cols-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tb-cols-top-inner {
+  height: 1px;
+}
 .tb-cols {
   display: grid;
   grid-template-columns: repeat(var(--tb-cols), minmax(180px, 1fr));
@@ -6802,7 +6809,7 @@ body.git-split-dragging {
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
-.tb-preview-input {
+.tb-preview-top {
   position: sticky;
   top: -10px;
   z-index: 1;
@@ -6810,6 +6817,34 @@ body.git-split-dragging {
   padding: 10px 12px 8px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
+}
+.tb-preview--head {
+  height: auto;
+}
+.tb-preview--head .tb-preview-top {
+  margin-bottom: -10px;
+  padding-bottom: 10px;
+  border-bottom: none;
+}
+.tb-preview-head {
+  margin-bottom: 8px;
+}
+.tb-preview--head .tb-preview-head {
+  margin-bottom: 0;
+}
+.tb-preview-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.tb-preview-branch {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .tb-card--closed {
   opacity: 0.75;
