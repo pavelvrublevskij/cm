@@ -7239,6 +7239,43 @@ body.git-split-dragging {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
+.tb-card-wt {
+  margin-top: 4px;
+  font-size: 11px;
+}
+.wt-changes {
+  overflow-wrap: anywhere;
+}
+.wt-changes[role="button"] {
+  cursor: pointer;
+}
+.wt-changes[role="button"]:hover {
+  text-decoration: underline;
+}
+.wt-changes--pending {
+  color: var(--warning);
+}
+.wt-changes--clean {
+  color: var(--success);
+}
+.wt-changes--missing {
+  color: var(--text-muted);
+}
+.asb-worktree-icon {
+  color: var(--warning);
+  font-size: 10px;
+  margin-right: 2px;
+}
+.session-worktree-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.session-worktree-info .session-worktree-label {
+  color: var(--text-muted);
+}
 .tb-lane-git {
   margin-top: 0;
 }

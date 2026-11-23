@@ -12,7 +12,8 @@ const path = require('path');
 // collapsed-sidebar rule's padding shorthand can still flatten it; an inline padding would win over
 // the stylesheet and leave icons indented while collapsed.
 
-const src = fs.readFileSync(path.join(__dirname, '../public/js/active-sessions-bar.js'), 'utf-8');
+const src = fs.readFileSync(path.join(__dirname, '../public/js/worktree-changes.js'), 'utf-8') + '\n'
+  + fs.readFileSync(path.join(__dirname, '../public/js/active-sessions-bar.js'), 'utf-8');
 
 function makeEl(treeIndent) {
   const el = {

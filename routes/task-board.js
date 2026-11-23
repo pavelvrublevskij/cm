@@ -2,7 +2,9 @@ const router = require('express').Router();
 const { wrapRoute } = require('../lib/file-helpers');
 const board = require('../lib/task-board');
 const runner = require('../lib/task-board-runner');
-const { headInfo } = require('../lib/git');
+const fs = require('fs');
+const path = require('path');
+const { headInfo, cachedWorktreeStatus, clearWorktreeStatusCache } = require('../lib/git');
 const { decodeSlug } = require('../lib/slug');
 
 function send(res, result) {
@@ -23,10 +25,31 @@ async function projectBranches(data) {
   return Object.fromEntries(slugs.map((slug, i) => [slug, branches[i]]));
 }
 
-/** GET /api/task-board — all cards, project lanes, per-lane workflow status and current git branch */
+/**
+ * Each worktree ticket's uncommitted files and commits not yet in its base branch, by card id:
+ * { missing: true } when the worktree folder is gone.
+ */
+async function worktreeStatuses(data) {
+  const cards = (data.cards || []).filter(c => c.worktree);
+  const entries = await Promise.all(cards.map(async card => {
+    const projectPath = decodeSlug(card.project);
+    if (!projectPath) return [card.id, { missing: true }];
+    const dir = path.join(projectPath, '.claude', 'worktrees', card.worktree);
+    if (!fs.existsSync(dir)) return [card.id, { missing: true }];
+    try {
+      return [card.id, await cachedWorktreeStatus(dir, card.baseBranch)];
+    } catch (_) {
+      return [card.id, null];
+    }
+  }));
+  return Object.fromEntries(entries.filter(([, s]) => s));
+}
+
+/** GET /api/task-board — all cards, project lanes, per-lane workflow status, current git branch and worktree changes */
 router.get('/', wrapRoute(async (req, res) => {
   const data = board.readBoard();
-  res.json({ ...data, status: board.laneStatus(data), projectBranches: await projectBranches(data), readyDelayMs: runner.readyDelayMs() });
+  const [branches, worktrees] = await Promise.all([projectBranches(data), worktreeStatuses(data)]);
+  res.json({ ...data, status: board.laneStatus(data), projectBranches: branches, worktreeStatus: worktrees, readyDelayMs: runner.readyDelayMs() });
 }));
 
 /** GET /api/task-board/attention — { waiting: tickets that need the user, active: tickets in Ready or a stage, inProgress: tickets in a stage, done } */
@@ -87,12 +110,16 @@ router.post('/hook', wrapRoute((req, res) => {
 
 /** POST /api/task-board/cards/:id/merge — merge a Finalize ticket's branch into its base (no squash); it goes to Done */
 router.post('/cards/:id/merge', wrapRoute(async (req, res) => {
-  send(res, await runner.merge(req.params.id));
+  const result = await runner.merge(req.params.id);
+  clearWorktreeStatusCache();
+  send(res, result);
 }));
 
 /** POST /api/task-board/cards/:id/pr — push a Finalize ticket's branch and create a PR into its base; it goes to Done */
 router.post('/cards/:id/pr', wrapRoute(async (req, res) => {
-  send(res, await runner.createPr(req.params.id));
+  const result = await runner.createPr(req.params.id);
+  clearWorktreeStatusCache();
+  send(res, result);
 }));
 
 /**

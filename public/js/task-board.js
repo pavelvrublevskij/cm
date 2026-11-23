@@ -541,6 +541,7 @@ const TaskBoard = {
         ${heading ? `<div class="tb-card-title">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</div>` : ''}
         ${notes ? `<div class="tb-card-notes">${escapeHtml(notes)}</div>` : ''}
         ${gitBranch ? `<div class="tb-card-git" title="Ticket branch${card.baseBranch ? ', branched from ' + escapeAttr(card.baseBranch) : ''}">&#5833; ${escapeHtml(gitBranch)}${card.baseBranch ? ' &larr; ' + escapeHtml(card.baseBranch) : ''}</div>` : ''}
+        ${TaskBoard.worktreeHtml(card)}
         ${branch}
         ${message ? `<div class="tb-card-run">${escapeHtml(message)}</div>` : ''}
         ${TaskBoard.memoIconHtml(card)}
@@ -759,6 +760,14 @@ const TaskBoard = {
         }
       } }]
     });
+  },
+
+  /** The worktree ticket's uncommitted files and commits not yet in its base; a click opens the worktree's git panel. */
+  worktreeHtml(card) {
+    if (!card.worktree) return '';
+    const st = (TaskBoard.board.worktreeStatus || {})[card.id];
+    const html = worktreeChangesHtml(st, { slug: card.project + '--claude-worktrees-' + card.worktree });
+    return html ? `<div class="tb-card-wt">${html}</div>` : '';
   },
 
   /** The ticket's own branch once it has a worktree (named when the worktree was created). */

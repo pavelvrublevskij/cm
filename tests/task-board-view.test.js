@@ -8,7 +8,7 @@ const escapeHtml = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').r
 const decodeName = slug => slug.replace(/^[A-Za-z]--/, '').split('-').filter(Boolean).slice(-2).join('/');
 const read = name => fs.readFileSync(path.join(__dirname, '..', 'public', 'js', name), 'utf-8');
 const context = vm.createContext({ escapeHtml, escapeAttr: escapeHtml, decodeName });
-vm.runInContext(read('task-board-flow.js') + '\n' + read('task-board.js') + '\nglobalThis._TaskBoard = TaskBoard; globalThis._Flow = TaskBoardFlow;', context);
+vm.runInContext(read('worktree-changes.js') + '\n' + read('task-board-flow.js') + '\n' + read('task-board.js') + '\nglobalThis._TaskBoard = TaskBoard; globalThis._Flow = TaskBoardFlow;', context);
 const TaskBoard = context._TaskBoard;
 const Flow = context._Flow;
 const plain = v => JSON.parse(JSON.stringify(v));
@@ -554,6 +554,26 @@ test('a ticket with a worktree shows its branch on the card, in compact mode on 
   assert.match(TaskBoard.sessionInfoHtml(card, null), /on branch <code>worktree-cm-ab12<\/code>/);
   assert.strictEqual(TaskBoard.gitBranchOf({ worktree: 'cm-old' }), 'worktree-cm-old', 'tickets from before gitBranch was stored');
   assert.ok(!TaskBoard.cardHtml({ id: 'n', title: 'x', notes: '', column: 'todo' }, null, false).includes('tb-card-git'));
+});
+
+test('a worktree ticket shows its uncommitted and unmerged changes on the card, in every column', () => {
+  const saved = TaskBoard.board;
+  try {
+    TaskBoard.board = { cards: [], projects: {}, worktreeStatus: {
+      w: { base: 'main', files: [{ path: 'a.txt', label: 'modified' }], unmerged: [], unmergedCount: 0 },
+      gone: { missing: true }
+    } };
+    const card = { id: 'w', title: 'Fix', notes: '', project: 'C--p', column: 'done', worktree: 'cm-ab12' };
+    const out = TaskBoard.cardHtml(card, null, false);
+    assert.match(out, /<div class="tb-card-wt"><span class="wt-changes wt-changes--pending"/);
+    assert.match(out, /1 uncommitted/);
+    assert.match(out, /data-slug="C--p--claude-worktrees-cm-ab12"/);
+    assert.match(TaskBoard.cardHtml({ ...card, id: 'gone', column: 'todo' }, null, false), /worktree removed/);
+    assert.ok(!TaskBoard.cardHtml({ ...card, id: 'unknown' }, null, false).includes('tb-card-wt'), 'no status yet');
+    assert.ok(!TaskBoard.cardHtml({ id: 'n', title: 'x', notes: '', column: 'done' }, null, false).includes('tb-card-wt'), 'no worktree');
+  } finally {
+    TaskBoard.board = saved;
+  }
 });
 
 test('a ticket in Finalize is still in the workflow and says so in the session banner', () => {
