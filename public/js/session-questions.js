@@ -2,6 +2,7 @@
 // preview). A card is drawn from the session JSONL; its answer comes from the matching tool_result.
 // While CM's question hook holds the question (a session CM runs in its terminal), the card takes the
 // answer itself; otherwise it only shows that the question waits for an answer in the terminal.
+// Attribute values go through escapeAttr(): escapeHtml() leaves quotes as they are.
 const SessionQuestions = {
   held: new Map(),      // session url -> Map(toolUseId -> questions) held by CM's question hook
   answered: new Map(),  // toolUseId -> answers given here, until the JSONL logs them
@@ -13,15 +14,15 @@ const SessionQuestions = {
     const questions = (block.input && Array.isArray(block.input.questions)) ? block.input.questions : [];
     const id = block.id || '';
     const answers = SessionQuestions.answered.get(id);
-    return `<div class="chat-question${live ? ' chat-question--live' : ''}" data-tool-use-id="${escapeHtml(id)}" ` +
-      `data-questions="${escapeHtml(JSON.stringify(questions))}">` +
+    return `<div class="chat-question${live ? ' chat-question--live' : ''}" data-tool-use-id="${escapeAttr(id)}" ` +
+      `data-questions="${escapeAttr(JSON.stringify(questions))}">` +
       (answers ? SessionQuestions.answeredHtml(questions, answers) : SessionQuestions.openHtml(questions)) + '</div>';
   },
 
   /** A hidden marker inside a question's tool_result carrying its answers, for apply() to find. */
   resultMarkerHtml(block) {
-    return `<div class="chat-question-answer" hidden data-tool-use-id="${escapeHtml(block.toolUseId || '')}" ` +
-      `data-answers="${escapeHtml(JSON.stringify(block.answers || {}))}"></div>`;
+    return `<div class="chat-question-answer" hidden data-tool-use-id="${escapeAttr(block.toolUseId || '')}" ` +
+      `data-answers="${escapeAttr(JSON.stringify(block.answers || {}))}"></div>`;
   },
 
   headHtml(q) {
@@ -71,7 +72,7 @@ const SessionQuestions = {
       const type = q.multiSelect ? 'checkbox' : 'radio';
       const name = `${uid}-${i}`;
       return `<div class="cq-q" data-index="${i}">${SessionQuestions.headHtml(q)}` +
-        (q.options || []).map(o => `<label class="cq-opt cq-pick"><input type="${type}" name="${name}" value="${escapeHtml(o.label || '')}">` +
+        (q.options || []).map(o => `<label class="cq-opt cq-pick"><input type="${type}" name="${name}" value="${escapeAttr(o.label || '')}">` +
           `${SessionQuestions.optionText(o)}</label>`).join('') +
         `<label class="cq-opt cq-pick cq-other"><input type="${type}" name="${name}" value="" data-other="1">` +
         `<span class="cq-label">Other</span><input type="text" class="cq-other-text" placeholder="Your own answer" ` +
@@ -112,7 +113,7 @@ const SessionQuestions = {
     }
     for (const [id, questions] of held) {
       if (logged.has(id) || root.querySelector(`.chat-question-live[data-tool-use-id="${CSS.escape(id)}"]`)) continue;
-      root.insertAdjacentHTML('afterbegin', `<div class="chat-msg assistant chat-question-live" data-tool-use-id="${escapeHtml(id)}">` +
+      root.insertAdjacentHTML('afterbegin', `<div class="chat-msg assistant chat-question-live" data-tool-use-id="${escapeAttr(id)}">` +
         '<div class="chat-role assistant"><span class="chat-role-label">Claude</span></div>' +
         SessionQuestions.cardHtml({ id, input: { questions } }, true) + '</div>');
     }

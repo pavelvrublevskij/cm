@@ -216,7 +216,9 @@ test('the conversation keeps the tool call id and an AskUserQuestion result\'s a
 
 function loadClient() {
   const ctx = vm.createContext({
-    escapeHtml: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    // As in public/js/utils.js: escapeHtml() leaves quotes alone, escapeAttr() escapes them.
+    escapeHtml: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+    escapeAttr: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'),
     CSS: { escape: s => s },
     JSON,
     toast: (msg, kind) => ctx.toasts.push([msg, kind]),
@@ -228,7 +230,7 @@ function loadClient() {
   return ctx;
 }
 
-const unescape = s => s.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const unescape = s => s.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 /** A card element as apply() and the form handlers use it. */
 function fakeCard(html, live) {
@@ -273,6 +275,16 @@ test('a question card shows the header chip, question, options with descriptions
   assert.match(html, /<span class="cq-label">Postgres<\/span><span class="cq-desc">SQL<\/span>/);
   assert.strictEqual((html.match(/cq-multi/g) || []).length, 1, 'only the multi-select question is marked');
   assert.match(html, /Waiting for an answer in the terminal/);
+});
+
+test('the questions survive in the card attribute: quotes in them do not cut it short', () => {
+  const { SQ } = loadClient();
+  const questions = [{ question: 'Which "option" do you want?', header: "It's", multiSelect: false, options: [{ label: 'Option "A"', description: 'x' }] }];
+  const html = SQ.cardHtml({ id: 'q1', input: { questions } });
+  assert.deepStrictEqual(JSON.parse(unescape(/data-questions="([^"]*)"/.exec(html)[1])), questions);
+  const marker = SQ.resultMarkerHtml({ toolUseId: 'q1', answers: { 'Which "option" do you want?': 'Option "A"' } });
+  assert.deepStrictEqual(JSON.parse(unescape(/data-answers="([^"]*)"/.exec(marker)[1])), { 'Which "option" do you want?': 'Option "A"' });
+  assert.match(SQ.formHtml(questions), /value="Option &quot;A&quot;"/);
 });
 
 test('an answer is split into the picked options and the own text', () => {
