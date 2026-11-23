@@ -379,10 +379,43 @@ const TaskBoard = {
       el.querySelectorAll('.tb-lane[data-lane]').forEach(lane => {
         const cols = lane.querySelector('.tb-cols');
         if (cols && scroll[lane.dataset.lane]) cols.scrollLeft = scroll[lane.dataset.lane];
+        TaskBoard.syncTopScroll(lane);
       });
+      TaskBoard.observeLaneSizes(el);
     }
     const btn = document.getElementById('task-board-compact-btn');
     if (btn) btn.classList.toggle('btn-active', TaskBoard.compact());
+  },
+
+  /** Size the lane's top scrollbar to its columns, show it only when they overflow, and match their position. */
+  syncTopScroll(lane) {
+    const cols = lane.querySelector('.tb-cols');
+    const top = lane.querySelector('.tb-cols-top');
+    if (!cols || !top) return;
+    top.firstElementChild.style.width = cols.scrollWidth + 'px';
+    top.style.display = cols.scrollWidth > cols.clientWidth ? '' : 'none';
+    top.scrollLeft = cols.scrollLeft;
+  },
+
+  /** The top scrollbar and the columns scroll together. */
+  onColsScroll(el) {
+    const lane = el.closest('.tb-lane');
+    const other = lane && lane.querySelector(el.classList.contains('tb-cols-top') ? '.tb-cols' : '.tb-cols-top');
+    // Tolerance: the two can differ by a fractional pixel, and echoing that back would clamp or jitter
+    if (other && Math.abs(other.scrollLeft - el.scrollLeft) > 1) other.scrollLeft = el.scrollLeft;
+  },
+
+  /** Re-measure a lane's top scrollbar whenever its columns change width (window, sidebar, any layout change). */
+  observeLaneSizes(el) {
+    if (typeof ResizeObserver === 'undefined') return;
+    if (!TaskBoard._laneResize) {
+      TaskBoard._laneResize = new ResizeObserver(entries => entries.forEach(e => {
+        const lane = e.target.closest('.tb-lane');
+        if (lane) TaskBoard.syncTopScroll(lane);
+      }));
+    }
+    TaskBoard._laneResize.disconnect();
+    el.querySelectorAll('.tb-cols').forEach(cols => TaskBoard._laneResize.observe(cols));
   },
 
   compact() {
@@ -632,7 +665,9 @@ const TaskBoard = {
           ${add}
         </div>`;
     }).join('');
-    return `<section class="tb-lane" data-lane="${escapeAttr(key)}">${head}<div class="tb-cols" style="--tb-cols:${columns.length}">${cols}</div></section>`;
+    return `<section class="tb-lane" data-lane="${escapeAttr(key)}">${head}`
+      + '<div class="tb-cols-top" style="display:none" onscroll="TaskBoard.onColsScroll(this)"><div class="tb-cols-top-inner"></div></div>'
+      + `<div class="tb-cols" style="--tb-cols:${columns.length}" onscroll="TaskBoard.onColsScroll(this)">${cols}</div></section>`;
   },
 
   /** The whole board: lane filter chips, then each visible lane. Pure, for tests. */
