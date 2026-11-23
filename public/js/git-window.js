@@ -6,7 +6,7 @@ const GitWindow = {
   // Same key/defaults as Sessions' "Live refresh rate" setting (manager-settings.js) — one setting
   // for how often anything in the app polls, rather than a second one just for this page.
   REFRESH_INTERVAL_KEY: 'claude-manager-conversation-refresh-ms',
-  REFRESH_INTERVAL_DEFAULT_MS: 5000,
+  REFRESH_INTERVAL_DEFAULT_MS: 3000,
   REFRESH_INTERVAL_MIN_MS: 1000,
   _refreshTimer: null,
 

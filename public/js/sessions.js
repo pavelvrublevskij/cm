@@ -821,7 +821,7 @@ const Sessions = {
   detailState: { slug: null, sessionId: null, offset: 0, loading: false, hasMore: false, total: 0 },
   _detailHasPlan: false,
   REFRESH_INTERVAL_KEY: 'claude-manager-conversation-refresh-ms',
-  REFRESH_INTERVAL_DEFAULT_MS: 5000,
+  REFRESH_INTERVAL_DEFAULT_MS: 3000,
   REFRESH_INTERVAL_MIN_MS: 1000,
   CONVERSATION_HIDDEN_KEY: 'claude-manager-conversation-hidden',
   SHOW_TOOL_DETAILS_KEY: 'claude-manager-show-tool-details',
