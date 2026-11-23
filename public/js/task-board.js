@@ -177,6 +177,7 @@ const TaskBoard = {
     const under = at && document.elementFromPoint(at.x, at.y);
     const card = under && under.closest('.tb-card');
     if ((card && card.dataset.id === p.id) || (p.el && p.el.contains(under))) return;
+    if (p.el && p.el.contains(document.activeElement)) return; // a message is being typed
     TaskBoard.hidePreview();
   },
 
@@ -200,6 +201,7 @@ const TaskBoard = {
   leavePreview() {
     const p = TaskBoard._preview;
     if (!p.el) { TaskBoard.hidePreview(); return; }
+    if (p.el.contains(document.activeElement)) return; // a message is being typed
     clearTimeout(p.hide);
     p.hide = setTimeout(() => TaskBoard.previewGraceEnd(), TaskBoard.PREVIEW_HIDE_MS);
   },
@@ -233,14 +235,66 @@ const TaskBoard = {
     document.body.appendChild(el);
     p.timer = null;
     p.el = el;
-    showLoading(el, 'Loading conversation...');
+    el.innerHTML = TaskBoard.previewInputHtml() + '<div class="tb-preview-list"></div>';
+    p.list = el.querySelector('.tb-preview-list');
+    const text = el.querySelector('.tb-preview-input textarea');
+    text.onkeydown = e => TaskBoard.onPreviewKeyDown(p, e);
+    text.onblur = () => TaskBoard.checkPreview();
+    showLoading(p.list, 'Loading conversation...');
     TaskBoard.placePreview(el, anchor.getBoundingClientRect());
     el.onscroll = () => {
       if (!p.loading && p.hasMore && el.scrollTop + el.clientHeight >= el.scrollHeight - 300) TaskBoard.loadPreviewPage(p);
     };
     p.card = card;
     p.offset = 0;
+    TaskBoard.loadPreviewInput(p);
     await TaskBoard.loadPreviewPage(p);
+  },
+
+  /** The preview's message box: sends to the ticket's session as it runs, hidden or not. */
+  previewInputHtml() {
+    return '<div class="tb-preview-input"><textarea class="session-input-text" rows="2" disabled ' +
+      'placeholder="Message Claude — Enter to send, Shift+Enter for a new line"></textarea>' +
+      '<div class="session-input-note"></div></div>';
+  },
+
+  previewSessionUrl(card) {
+    return `/api/projects/${encodeURIComponent(card.sessionSlug || card.project)}/sessions/${encodeURIComponent(card.sessionId)}`;
+  },
+
+  async loadPreviewInput(p) {
+    let state = 'none';
+    try { state = (await api(TaskBoard.previewSessionUrl(p.card) + '/input-state')).state; } catch (_) {}
+    if (TaskBoard._preview !== p || p.sending) return;
+    TaskBoard.renderPreviewInput(p, state);
+  },
+
+  renderPreviewInput(p, state) {
+    p.inputState = state;
+    const box = p.el.querySelector('.tb-preview-input');
+    box.querySelector('textarea').disabled = state !== 'ready' && state !== 'busy';
+    box.querySelector('.session-input-note').textContent = SessionInput.NOTES[state] || '';
+  },
+
+  onPreviewKeyDown(p, e) {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    TaskBoard.sendPreviewInput(p);
+  },
+
+  async sendPreviewInput(p) {
+    const text = p.el.querySelector('.tb-preview-input textarea');
+    const message = text.value;
+    if (p.sending || (p.inputState !== 'ready' && p.inputState !== 'busy') || !message.trim()) return;
+    p.sending = true;
+    try {
+      await api(TaskBoard.previewSessionUrl(p.card) + '/input', { method: 'POST', body: { text: message } });
+      text.value = '';
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    p.sending = false;
+    TaskBoard.loadPreviewInput(p);
   },
 
   /** Beside the card: on its right when it fits, else on its left; kept inside the window. */
@@ -255,28 +309,28 @@ const TaskBoard = {
 
   /** The next page of the ticket session's messages, newest first as in Session Details: older ones load while scrolling down. */
   async loadPreviewPage(p) {
-    const { card, el } = p;
+    const { card, el, list } = p;
     const first = !p.offset;
     p.loading = true;
-    if (!first) el.insertAdjacentHTML('beforeend', '<div class="loading tb-preview-loader"><div class="spinner"></div> Loading...</div>');
+    if (!first) list.insertAdjacentHTML('beforeend', '<div class="loading tb-preview-loader"><div class="spinner"></div> Loading...</div>');
     let data = null;
     try {
-      data = await api(`/api/projects/${encodeURIComponent(card.sessionSlug || card.project)}/sessions/${encodeURIComponent(card.sessionId)}?offset=${p.offset}&limit=${TaskBoard.PREVIEW_MESSAGES}`);
+      data = await api(`${TaskBoard.previewSessionUrl(card)}?offset=${p.offset}&limit=${TaskBoard.PREVIEW_MESSAGES}`);
     } catch (_) { /* shown below */ }
     if (TaskBoard._preview !== p) return;
     p.loading = false;
-    const loader = el.querySelector('.tb-preview-loader');
+    const loader = list.querySelector('.tb-preview-loader');
     if (loader) loader.remove();
     if (!data) {
       p.hasMore = false;
       const failed = '<div class="empty-state"><p>Failed to load messages</p></div>';
-      if (first) el.innerHTML = failed; else el.insertAdjacentHTML('beforeend', failed);
+      if (first) list.innerHTML = failed; else list.insertAdjacentHTML('beforeend', failed);
       return;
     }
-    if (first && !data.total) { el.innerHTML = '<div class="empty-state"><p>No messages in this session</p></div>'; return; }
+    if (first && !data.total) { list.innerHTML = '<div class="empty-state"><p>No messages in this session</p></div>'; return; }
     const html = data.messages.map(m => Sessions.renderMessage(m)).join('');
-    if (first) el.innerHTML = html; else el.insertAdjacentHTML('beforeend', html);
-    addCodeCopyButtons(el);
+    if (first) list.innerHTML = html; else list.insertAdjacentHTML('beforeend', html);
+    addCodeCopyButtons(list);
     p.offset += data.messages.length;
     p.hasMore = data.hasMore;
     el.onscroll(); // hidden tool lines can leave too little to scroll
