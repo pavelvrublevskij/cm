@@ -3249,6 +3249,33 @@ mark.search-highlight {
   line-height: 1;
 }
 
+.modal-header h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 2px;
+  transition: color 0.15s;
+}
+
+.modal-close:hover {
+  color: var(--text-primary);
+}
+
 .modal--fullscreen {
   width: 100vw !important;
   height: 100vh;

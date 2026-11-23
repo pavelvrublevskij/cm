@@ -24,10 +24,12 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
 
   const h3 = document.createElement('h3');
   h3.textContent = title;
+  const header = document.createElement('div');
+  header.className = 'modal-header';
+  header.appendChild(h3);
+  const actions = document.createElement('div');
+  actions.className = 'modal-header-actions';
   if (maximizable) {
-    const header = document.createElement('div');
-    header.className = 'modal-header';
-    header.appendChild(h3);
     const maxBtn = document.createElement('button');
     maxBtn.className = 'btn btn-sm modal-maximize';
     const setMaxState = full => {
@@ -36,11 +38,16 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
     };
     setMaxState(false);
     maxBtn.onclick = () => setMaxState(modal.classList.toggle('modal--fullscreen'));
-    header.appendChild(maxBtn);
-    modal.appendChild(header);
-  } else {
-    modal.appendChild(h3);
+    actions.appendChild(maxBtn);
   }
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'modal-close';
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Close';
+  closeBtn.onclick = close;
+  actions.appendChild(closeBtn);
+  header.appendChild(actions);
+  modal.appendChild(header);
 
   const content = document.createElement('div');
   content.className = 'modal-body';
