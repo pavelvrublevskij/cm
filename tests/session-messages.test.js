@@ -22,6 +22,7 @@ const context = vm.createContext({
   Sessions,
   api,
   escapeHtml: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+  escapeAttr: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   decodeHtmlEntities: s => String(s).replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'),
   renderMarkdown: s => String(s),
   renderChatMarkdown: s => String(s),
