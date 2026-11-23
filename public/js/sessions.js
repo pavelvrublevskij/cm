@@ -1009,10 +1009,33 @@ const Sessions = {
     if (merged.lastGitBranch) Sessions.detailState.lastGitBranch = merged.lastGitBranch;
     Sessions.updateBranchWarning(Sessions.detailState.lastGitBranch || merged.lastGitBranch);
     if (typeof TaskBoard !== 'undefined') TaskBoard.renderSessionInfo(Sessions.detailState.sessionId);
+    Sessions.renderWorktreeInfo(Sessions.detailState.slug, Sessions.detailState.sessionId);
 
     if (stats && typeof stats.archived !== 'undefined' && stats.archived) {
       Sessions._setDetailArchivedUI(stats.active);
     }
+  },
+
+  /** A session run in a git worktree: its uncommitted files and commits not yet in the main checkout's branch. */
+  async renderWorktreeInfo(slug, sessionId) {
+    const el = document.getElementById('session-worktree-info');
+    if (!el || !slug) return;
+    // Another session's line must not stay up while this one loads.
+    if (el.dataset.session !== sessionId) { el.style.display = 'none'; el.dataset.session = sessionId; }
+    // Polls and loadMore can overlap: only the latest request may draw, so an older answer never wins.
+    const seq = Sessions._worktreeInfoSeq = (Sessions._worktreeInfoSeq || 0) + 1;
+    let st = { worktree: false };
+    try { st = await api(`/api/projects/${encodeURIComponent(slug)}/git/worktree`); } catch (_) { /* no line */ }
+    if (seq !== Sessions._worktreeInfoSeq) return;
+    if (Sessions.detailState.slug !== slug || Sessions.detailState.sessionId !== sessionId) return;
+    if (!st.worktree) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    const branch = st.branch ? ` on <code>${escapeHtml(st.branch)}</code>` : '';
+    el.innerHTML = `<span class="session-worktree-label">Worktree:</span> <code>${escapeHtml(st.name)}</code>${branch} ${worktreeChangesHtml(st, { slug })}`;
+    el.style.display = 'flex';
   },
 
   updateBranchWarning(lastGitBranch) {

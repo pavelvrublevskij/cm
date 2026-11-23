@@ -5,6 +5,7 @@ const ActiveSessionsBar = {
   _sessions: [],
   _lastSidebarKey: null,
   _projectBranches: {},
+  _worktreeStatus: {},
   COLORS: ['#f85149', '#f0883e', '#d29922', '#3fb950', '#2bb5a8', '#388bfd', '#a371f7', '#db61a2'],
 
   start() {
@@ -82,7 +83,7 @@ const ActiveSessionsBar = {
     try {
       const sessions = await api('/api/projects/active');
       ActiveSessionsBar._sessions = sessions || [];
-      await ActiveSessionsBar._fetchProjectBranches();
+      await Promise.all([ActiveSessionsBar._fetchProjectBranches(), ActiveSessionsBar._fetchWorktreeStatus()]);
       ActiveSessionsBar._render();
       ActiveSessionsBar._renderSidebar();
       if (typeof Sessions !== 'undefined') Sessions.syncCloseButton();
@@ -99,6 +100,29 @@ const ActiveSessionsBar = {
         ActiveSessionsBar._projectBranches[slug] = '';
       }
     }));
+  },
+
+  /** Uncommitted files and unmerged commits of the worktree sessions (slugs of .claude/worktrees folders). */
+  async _fetchWorktreeStatus() {
+    const slugs = [...new Set(ActiveSessionsBar._sessions.map(s => s.slug))].filter(slug => slug.includes('--claude-worktrees-'));
+    const next = {};
+    await Promise.all(slugs.map(async slug => {
+      try {
+        const st = await api(`/api/projects/${encodeURIComponent(slug)}/git/worktree`);
+        if (st.worktree) next[slug] = st;
+      } catch (_) { /* no icon */ }
+    }));
+    ActiveSessionsBar._worktreeStatus = next;
+  },
+
+  /** A dot on sessions whose worktree holds changes not yet in its base branch. */
+  _worktreeIconHtml(s) {
+    const st = ActiveSessionsBar._worktreeStatus[s.slug];
+    if (!worktreeHasChanges(st)) return '';
+    const parts = [];
+    if (st.files.length) parts.push(`${st.files.length} uncommitted`);
+    if (st.unmergedCount) parts.push(`${st.unmergedCount} unmerged into ${st.base}`);
+    return `<span class="asb-worktree-icon" title="Worktree changes: ${escapeAttr(parts.join(', '))}">&#9679;</span>`;
   },
 
   _hasBranchMismatch(s) {
@@ -150,7 +174,7 @@ const ActiveSessionsBar = {
         const instanceAttr = s.instanceId ? ` data-asb-instance="${escapeHtml(s.instanceId)}"` : '';
         return `<div class="asb-pill${isCurrent ? ' asb-pill--current' : ''}${warn ? ' asb-pill--branch-warn' : ''}${s.color ? ' asb-pill--colored' : ''}" style="${ActiveSessionsBar._colorStyle(s)}" data-asb-session="${escapeHtml(s.sessionId)}" data-asb-slug="${escapeHtml(s.slug)}" data-asb-kind="${escapeHtml(s.kind)}"${instanceAttr} title="${escapeHtml(s.title || s.sessionId)}${roTitle}">
           <span class="session-active-dot session-active-dot--${s.kind}"></span>
-          ${warnIcon}${archiveIcon}
+          ${warnIcon}${archiveIcon}${ActiveSessionsBar._worktreeIconHtml(s)}
           <span class="asb-session">${escapeHtml(label)}</span>${ActiveSessionsBar._attentionHtml(s)}
           <button class="asb-close" data-asb-close-session="${escapeHtml(s.sessionId)}" data-asb-close-slug="${escapeHtml(s.slug)}"${instanceAttr} title="Close session" aria-label="Close">&#215;</button>
         </div>`;
@@ -202,7 +226,7 @@ const ActiveSessionsBar = {
 
   _renderSidebar() {
     const { currentSessionId, currentReadOnly, currentInstanceId } = ActiveSessionsBar._currentSelector();
-    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived + '|' + (s.color || '') + '|' + ActiveSessionsBar._attentionHtml(s)).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
+    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived + '|' + (s.color || '') + '|' + ActiveSessionsBar._attentionHtml(s) + '|' + ActiveSessionsBar._worktreeIconHtml(s)).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
     if (key === ActiveSessionsBar._lastSidebarKey) return;
     ActiveSessionsBar._lastSidebarKey = key;
 
@@ -248,7 +272,7 @@ const ActiveSessionsBar = {
         const warn = ActiveSessionsBar._hasBranchMismatch(s);
         const warnIcon = warn ? `<span class="asb-branch-warn-icon" title="Branch mismatch: session on &quot;${escapeHtml(s.lastGitBranch)}&quot;, project on &quot;${escapeHtml(ActiveSessionsBar._projectBranches[s.slug])}&quot;">&#9888;</span>` : '';
         const archiveIcon = s.archived ? `<span class="asb-archive-icon" title="Session is archived">${ActiveSessionsBar._archiveIconSvg}</span>` : '';
-        div.innerHTML = `<span class="session-active-dot session-active-dot--${s.kind}"></span>${warnIcon}${archiveIcon}<span class="nav-label">${escapeHtml(label)}</span>${ActiveSessionsBar._attentionHtml(s)}`;
+        div.innerHTML = `<span class="session-active-dot session-active-dot--${s.kind}"></span>${warnIcon}${archiveIcon}${ActiveSessionsBar._worktreeIconHtml(s)}<span class="nav-label">${escapeHtml(label)}</span>${ActiveSessionsBar._attentionHtml(s)}`;
         div.appendChild(closeBtn);
         div.addEventListener('click', (function(slug, sessionId, kind) {
           return () => ActiveSessionsBar.open(slug, sessionId, kind === 'readonly');
