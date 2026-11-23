@@ -606,7 +606,7 @@ const TaskBoard = {
 
   /**
    * New card (id null, optionally preset to a lane) or edit an existing one. followUp: the card was
-   * just moved back to ToDo, so ask what to change or follow up on, with its notes ready to edit.
+   * just moved back from Done to ToDo, so ask what to change or follow up on, with its notes ready to edit.
    */
   openEditor(id, lane, followUp) {
     const card = id ? TaskBoard.findCard(id) : null;
@@ -1148,6 +1148,6 @@ const TaskBoard = {
       toast(err.message, 'error');
     }
     await TaskBoard.load();
-    if (moved && from !== 'todo' && col.dataset.column === 'todo') TaskBoard.openEditor(card.id, null, true);
+    if (moved && from === 'done' && col.dataset.column === 'todo') TaskBoard.openEditor(card.id, null, true);
   }
 };
