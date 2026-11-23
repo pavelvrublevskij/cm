@@ -582,7 +582,7 @@ const TaskBoard = {
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         ${TaskBoard.deleteIconHtml(card)}
         ${badge ? `<div class="tb-card-head">${badge}</div>` : ''}
-        ${heading ? `<div class="tb-card-title">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</div>` : ''}
+        ${heading ? `<div class="tb-card-title" title="${escapeAttr(heading)}">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</div>` : ''}
         ${notes ? `<div class="tb-card-notes">${escapeHtml(notes)}</div>` : ''}
         ${gitBranch ? `<div class="tb-card-git" title="Ticket branch${card.baseBranch ? ', branched from ' + escapeAttr(card.baseBranch) : ''}">&#5833; ${escapeHtml(gitBranch)}${card.baseBranch ? ' &larr; ' + escapeHtml(card.baseBranch) : ''}</div>` : ''}
         ${TaskBoard.worktreeHtml(card)}
