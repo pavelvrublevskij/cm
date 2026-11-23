@@ -8,7 +8,7 @@
 - **Finalize** — before Done every ticket runs the project's tests; a worktree ticket first commits, merges in the latest of your branch and names its branch after the project's rules, then waits for you to Merge (merge commit, no squash) or Create PR.
 - **Tickets run by themselves** — moving a ticket to Ready starts a background Claude session that works through the stages; click it to open the live terminal, it waits for you when it needs input. A sidebar count and toasts tell you when tickets need your input and when all are done.
 - **Parallel lanes** — a project with Parallel checked runs up to 3 tickets at once (CM Settings); in a git project every ticket gets its own worktree and branch from your current branch. Move it back to ToDo to fix it on the same branch; deleting it removes the worktree; the branch is kept.
-- **Follow up a ticket** — dragging a ticket back to ToDo opens it with its notes, asking what should change or be followed up.
+- **Follow up a ticket** — dragging a ticket from Done back to ToDo opens it with its notes, asking what should change or be followed up.
 - **Worktree changes in view** — worktree tickets, sessions and their active-bar pills show uncommitted files and commits not yet merged into the base branch; click to open the worktree's git panel.
 - **Project branch on the board** — each lane shows the project's current git branch, where worktree tickets merge at Finalize.
 - **Favorite projects** — star a project to pin it on top of the sidebar and All Projects; the rest fold into "Other projects".

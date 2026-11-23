@@ -681,7 +681,7 @@ test('a ticket moved back to ToDo opens with a follow-up question and its notes 
   assert.doesNotMatch(modal.body, /tb-editor-question/);
 });
 
-test('dropping a ticket back into ToDo opens the follow-up dialog, other drops do not', async () => {
+test('dropping a ticket from Done into ToDo opens the follow-up dialog, other drops (Ready to ToDo too) do not', async () => {
   const load = TaskBoard.load;
   const openEditor = TaskBoard.openEditor;
   const opened = [];
@@ -708,7 +708,7 @@ test('dropping a ticket back into ToDo opens the follow-up dialog, other drops d
     TaskBoard.load = load;
     TaskBoard.openEditor = openEditor;
   }
-  assert.deepStrictEqual(plain(opened), [['d', null, true], ['r', null, true]]);
+  assert.deepStrictEqual(plain(opened), [['d', null, true]]);
 });
 
 /** The preview's message list: its innerHTML is the shown conversation. */
