@@ -98,6 +98,21 @@ router.get('/session-colors', wrapRoute((req, res) => {
 }));
 
 /** Newest first, tolerating entries whose timestamp never got recorded. */
+/**
+ * A tool_result block for the conversation view: the tool call it answers and, for an AskUserQuestion,
+ * the answers Claude Code logged with it ({ "<question text>": "<answer>" }; none when it was declined).
+ */
+function toolResultBlock(block, text, toolUseResult, questionIds) {
+  const tr = { type: 'tool_result', toolUseId: block.tool_use_id || '', text };
+  if (toolUseResult && typeof toolUseResult === 'object' && Array.isArray(toolUseResult.questions)) {
+    tr.answers = toolUseResult.answers && typeof toolUseResult.answers === 'object' ? toolUseResult.answers : {};
+  } else if (questionIds.has(tr.toolUseId)) {
+    // Cancelled (Esc, interrupt): claude logs an error string instead of the questions and answers.
+    tr.answers = {};
+  }
+  return tr;
+}
+
 function byNewestFirst(a, b) {
   return new Date(b.modified || 0) - new Date(a.modified || 0);
 }
@@ -423,6 +438,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
   let indexSummary = '';
   let created = null;
   let hasPlan = planCache.get(sessionId) === true;
+  const questionIds = new Set();   // AskUserQuestion calls, so a cancelled one's result reads as declined
 
   for (const line of lines) {
     try {
@@ -472,8 +488,10 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
             if (block.type === 'text') {
               msg.content.push({ type: 'text', text: block.text });
             } else if (block.type === 'tool_use') {
+              if (block.name === 'AskUserQuestion') questionIds.add(block.id);
               msg.content.push({
                 type: 'tool_use',
+                id: block.id,
                 name: block.name,
                 input: block.input
               });
@@ -488,7 +506,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
                   .join('\n')
                   .slice(0, 2000);
               }
-              const tr = { type: 'tool_result', text: resultText };
+              const tr = toolResultBlock(block, resultText, entry.toolUseResult, questionIds);
               if (entry.toolUseResult?.agentId) {
                 tr.agentId = entry.toolUseResult.agentId;
                 tr.agentType = entry.toolUseResult.agentType || '';
@@ -627,6 +645,7 @@ router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res)
 
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
   const messages = [];
+  const questionIds = new Set();
 
   for (const line of lines) {
     try {
@@ -646,7 +665,8 @@ router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res)
           if (block.type === 'text') {
             msg.content.push({ type: 'text', text: block.text });
           } else if (block.type === 'tool_use') {
-            msg.content.push({ type: 'tool_use', name: block.name, input: block.input });
+            if (block.name === 'AskUserQuestion') questionIds.add(block.id);
+            msg.content.push({ type: 'tool_use', id: block.id, name: block.name, input: block.input });
           } else if (block.type === 'tool_result') {
             let resultText = '';
             if (typeof block.content === 'string') {
@@ -654,7 +674,7 @@ router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res)
             } else if (Array.isArray(block.content)) {
               resultText = block.content.filter(c => c.type === 'text').map(c => c.text).join('\n').slice(0, 2000);
             }
-            const tr = { type: 'tool_result', text: resultText };
+            const tr = toolResultBlock(block, resultText, entry.toolUseResult, questionIds);
             if (entry.toolUseResult?.agentId) {
               tr.agentId = entry.toolUseResult.agentId;
               tr.agentType = entry.toolUseResult.agentType || '';
@@ -724,7 +744,29 @@ router.post('/:slug/sessions/:sessionId/deactivate', wrapRoute((req, res) => {
 router.get('/:slug/sessions/:sessionId/input-state', wrapRoute((req, res) => {
   const p = validateSessionParams(req, res);
   if (!p) return;
-  res.json({ state: terminalServer.inputState(p.slug, p.sessionId) });
+  res.json({
+    state: terminalServer.inputState(p.slug, p.sessionId),
+    questions: terminalServer.heldQuestions(p.slug, p.sessionId)
+  });
+}));
+
+/** POST …/question/answer { toolUseId, answers } — answer an AskUserQuestion held by CM's question hook */
+router.post('/:slug/sessions/:sessionId/question/answer', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const { toolUseId, answers } = req.body || {};
+  const result = terminalServer.answerQuestion(p.slug, p.sessionId, toolUseId, answers);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true });
+}));
+
+/** POST …/question/release { toolUseId } — let claude show the held question in the terminal instead */
+router.post('/:slug/sessions/:sessionId/question/release', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const result = terminalServer.releaseQuestion(p.slug, p.sessionId, (req.body || {}).toolUseId);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true });
 }));
 
 router.post('/:slug/sessions/:sessionId/input', wrapRoute((req, res) => {

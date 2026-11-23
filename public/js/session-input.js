@@ -9,7 +9,7 @@ const SessionInput = {
   NOTES: {
     none: 'Messages can be sent here only to a session running in CM\'s terminal — use the terminal for this one.',
     busy: 'Claude is working — a message sent now waits until it finishes.',
-    question: 'Answer the open question in the terminal first.',
+    question: 'Answer the open question first — in its card above or in the terminal.',
     ready: ''
   },
 
@@ -24,6 +24,10 @@ const SessionInput = {
       const data = await api(`/api/projects/${slug}/sessions/${sessionId}/input-state`);
       const now = Sessions.detailState;
       if (now.slug !== slug || now.sessionId !== sessionId) return;
+      if (typeof SessionQuestions !== 'undefined') {
+        SessionQuestions.setHeld(Sessions.detailSessionUrl(), data.questions);
+        Sessions.applyQuestions();
+      }
       if (SessionInput.sending || seq !== SessionInput.seq) return;
       SessionInput.render(data.state);
     } catch (_) {}

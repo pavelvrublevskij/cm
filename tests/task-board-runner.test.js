@@ -137,6 +137,8 @@ test('moving a ticket to Ready starts claude with the hooks settings and enters 
   const hooks = JSON.parse(fs.readFileSync(runner.HOOKS_FILE, 'utf-8')).hooks;
   assert.deepStrictEqual(Object.keys(hooks), runner.HOOK_EVENTS);
   assert.match(hooks.Stop[0].hooks[0].command, /board-hook\.js"$/);
+  assert.strictEqual(hooks.PreToolUse[1].matcher, 'AskUserQuestion');
+  assert.match(hooks.PreToolUse[1].hooks[0].command, /question-hook\.js"$/);
   const c = await cardOf(card.id);
   assert.strictEqual(c.column, stages[0].id);
   assert.strictEqual(c.run.status, 'starting');
@@ -1214,7 +1216,7 @@ test('a running ticket\'s session tells its stage, and hide keeps it running out
   assert.deepStrictEqual((await request(app).get('/api/task-board/session/unknown-session')).body, { card: null, stage: null });
 });
 
-test('every hook event of a ticket session is forwarded for the message box; tool events stop there', async () => {
+test('every hook event of a ticket session is forwarded for the message box; only a question changes the ticket', async () => {
   runner._reset();
   const tracked = [];
   runner.init({
@@ -1232,6 +1234,13 @@ test('every hook event of a ticket session is forwarded for the message box; too
   assert.deepStrictEqual(tracked.map(t => [t.event, t.toolName]),
     [['SessionStart', undefined], ['UserPromptSubmit', undefined], ['PreToolUse', 'AskUserQuestion']]);
   assert.ok(tracked.every(t => t.entry === spawned[i].entry));
-  assert.strictEqual((await cardOf(card.id)).run.status, 'running', 'a tool event does not change the ticket');
+  const run = (await cardOf(card.id)).run;
+  assert.deepStrictEqual([run.status, run.message], ['needs_input', 'Claude asks a question']);
+  await hook(i, 'PostToolUse', { toolUseId: 'q1', toolName: 'AskUserQuestion' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'running', 'answered');
+  await hook(i, 'PreToolUse', { toolUseId: 'b1', toolName: 'Bash' });
+  await hook(i, 'PostToolUse', { toolUseId: 'b1', toolName: 'Bash' });
+  assert.strictEqual((await cardOf(card.id)).run.status, 'running', 'another tool does not change the ticket');
+  assert.match(spawned[i].entry.boardToken, /^[0-9a-f]{32}$/, 'its question hook reaches CM with the run token');
   await request(app).post(`/api/task-board/cards/${card.id}/stop`);
 });

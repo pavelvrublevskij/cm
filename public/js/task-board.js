@@ -265,7 +265,8 @@ const TaskBoard = {
     p.card = card;
     p.offset = 0;
     TaskBoard.loadPreviewInput(p);
-    p.refresh = setInterval(() => TaskBoard.refreshPreview(p), Sessions.refreshIntervalMs());
+    // The message box state comes with the held questions, so a question card turns answerable while the preview is open.
+    p.refresh = setInterval(() => { const done = TaskBoard.refreshPreview(p); TaskBoard.loadPreviewInput(p); return done; }, Sessions.refreshIntervalMs());
     await TaskBoard.loadPreviewPage(p);
   },
 
@@ -289,10 +290,18 @@ const TaskBoard = {
   },
 
   async loadPreviewInput(p) {
-    let state = 'none';
-    try { state = (await api(TaskBoard.previewSessionUrl(p.card) + '/input-state')).state; } catch (_) {}
-    if (TaskBoard._preview !== p || p.sending) return;
-    TaskBoard.renderPreviewInput(p, state);
+    let data = { state: 'none', questions: [] };
+    try { data = await api(TaskBoard.previewSessionUrl(p.card) + '/input-state'); } catch (_) {}
+    if (TaskBoard._preview !== p) return;
+    SessionQuestions.setHeld(TaskBoard.previewSessionUrl(p.card), data.questions);
+    TaskBoard.applyPreviewQuestions(p);
+    if (p.sending) return;
+    TaskBoard.renderPreviewInput(p, data.state);
+  },
+
+  /** The preview's AskUserQuestion cards: answerable here while CM's question hook holds them. */
+  applyPreviewQuestions(p) {
+    if (p.list) SessionQuestions.apply(p.list, TaskBoard.previewSessionUrl(p.card), true);
   },
 
   renderPreviewInput(p, state) {
@@ -360,6 +369,7 @@ const TaskBoard = {
     if (first) list.innerHTML = html; else list.insertAdjacentHTML('beforeend', html);
     p.shown = (first ? [] : p.shown).concat(data.messages);
     addCodeCopyButtons(list);
+    TaskBoard.applyPreviewQuestions(p);
     p.offset += data.messages.length;
     p.hasMore = data.hasMore;
     el.onscroll(); // hidden tool lines can leave too little to scroll
@@ -381,6 +391,7 @@ const TaskBoard = {
     if (JSON.stringify(data.messages) !== JSON.stringify(p.shown)) {
       p.list.innerHTML = data.messages.map(m => Sessions.renderMessage(m)).join('');
       addCodeCopyButtons(p.list);
+      TaskBoard.applyPreviewQuestions(p);
       p.shown = data.messages;
     }
     p.offset = data.messages.length;

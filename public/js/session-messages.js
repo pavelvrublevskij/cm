@@ -16,6 +16,7 @@ Object.assign(Sessions, {
       (b.type === 'tool_use' && b.name === 'Agent') ||
       (b.type === 'tool_result' && b.agentId)
     );
+    const hasQuestion = msg.content.some(b => b.type === 'tool_use' && b.name === 'AskUserQuestion');
 
     for (const block of msg.content) {
       if (block.type === 'text') {
@@ -23,6 +24,8 @@ Object.assign(Sessions, {
       } else if (block.type === 'tool_use') {
         if (block.name === 'Agent') {
           bodyHtml += Sessions._renderAgentLaunchBlock(block);
+        } else if (block.name === 'AskUserQuestion') {
+          bodyHtml += SessionQuestions.cardHtml(block);
         } else {
           const toolId = 'tool-' + Math.random().toString(36).slice(2, 8);
           const { headerSuffix, bodyContent } = Sessions.formatToolUse(block.name, block.input);
@@ -36,6 +39,8 @@ Object.assign(Sessions, {
           `;
         }
       } else if (block.type === 'tool_result') {
+        // An answered AskUserQuestion: its card (in an earlier message) picks the answers up from here.
+        if (block.answers) bodyHtml += SessionQuestions.resultMarkerHtml(block);
         if (block.agentId) {
           bodyHtml += Sessions._renderAgentResultBlock(block);
         } else if (block.text) {
@@ -53,7 +58,7 @@ Object.assign(Sessions, {
     }
 
     return `
-      <div class="chat-msg ${msg.role}${(hasText || hasAgentBlock) ? '' : ' chat-msg-tools-only'}">
+      <div class="chat-msg ${msg.role}${(hasText || hasAgentBlock || hasQuestion) ? '' : ' chat-msg-tools-only'}">
         <div class="chat-role ${msg.role}">
           <span class="chat-role-label">${msg.role === 'user' ? 'You' : 'Claude'}</span>
           ${msg.model && msg.role === 'assistant' ? `<span class="chat-model">${escapeHtml(shortModel(msg.model))}</span>` : ''}
