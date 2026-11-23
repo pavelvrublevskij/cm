@@ -2749,6 +2749,33 @@ mark.search-highlight {
   overflow: hidden;
 }
 
+.chat-task-notif {
+  margin: 4px 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  font-size: 12px;
+}
+.task-notif-header { display: flex; align-items: center; gap: 8px; }
+.task-notif-status {
+  border: 1px solid var(--text-muted);
+  color: var(--text-secondary);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.task-notif-status.ok { border-color: var(--success); color: var(--success); }
+.task-notif-status.err { border-color: var(--danger); color: var(--danger); }
+.task-notif-summary { color: var(--text-primary); font-weight: 500; }
+.task-notif-result { margin-top: 6px; }
+.task-notif-usage { margin-top: 6px; color: var(--text-muted); font-size: 11px; }
+.task-notif-details-toggle { margin-top: 6px; color: var(--text-muted); font-size: 11px; cursor: pointer; }
+.task-notif-details { display: none; margin-top: 4px; color: var(--text-secondary); font-size: 11px; font-family: var(--font-mono); word-break: break-all; }
+.task-notif-details.open { display: block; }
+.task-notif-key { color: var(--text-muted); font-family: var(--font); }
+
 .chat-agent-result-header {
   display: flex;
   align-items: center;

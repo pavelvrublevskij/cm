@@ -1,5 +1,7 @@
 Object.assign(Sessions, {
   _detailSearchQuery: '',
+  // Text searched when tool details are hidden: message text plus task-notification cards (whose result is itself a .chat-text).
+  _SEARCHABLE_TEXT: '.chat-text:not(.chat-task-notif .chat-text), .chat-task-notif',
 
   renderMessage(msg) {
     const time = msg.timestamp ? (() => {
@@ -19,7 +21,10 @@ Object.assign(Sessions, {
 
     for (const block of msg.content) {
       if (block.type === 'text') {
-        bodyHtml += `<div class="chat-text">${renderChatMarkdown(block.text)}</div>`;
+        for (const seg of Sessions._splitTaskNotifications(block.text)) {
+          if (seg.type === 'notification') bodyHtml += Sessions._renderTaskNotification(seg.fields);
+          else if (seg.text.trim()) bodyHtml += `<div class="chat-text">${renderChatMarkdown(seg.text)}</div>`;
+        }
       } else if (block.type === 'tool_use') {
         if (block.name === 'Agent') {
           bodyHtml += Sessions._renderAgentLaunchBlock(block);
@@ -80,6 +85,76 @@ Object.assign(Sessions, {
         ${hasPrompt ? `<span class="agent-launch-expand" id="${id}-btn">&#9654; prompt</span>` : ''}
       </div>
       ${hasPrompt ? `<div class="agent-launch-prompt" id="${id}" style="display:none"><pre>${promptPreview}${prompt.length > 400 ? '\n…' : ''}</pre></div>` : ''}
+    </div>`;
+  },
+
+  /** Split text into ordered plain-text and <task-notification> segments. Only notifications that open
+   *  the text (or directly follow another one) count, and each ends at a closing tag that ends its line,
+   *  so tags quoted inline by the user or mentioned inside a <result> are left alone. */
+  _splitTaskNotifications(text) {
+    const segments = [];
+    const OPEN = '<task-notification>';
+    const closeRe = /<\/task-notification>[ \t]*(?:\r?\n|$)/g;
+    let pos = 0;
+    while (true) {
+      const lead = text.slice(pos).match(/^\s*/)[0].length;
+      const start = pos + lead;
+      if (!text.startsWith(OPEN, start)) break;
+      closeRe.lastIndex = start + OPEN.length;
+      const close = closeRe.exec(text);
+      if (!close) break;
+      const body = text.slice(start + OPEN.length, close.index);
+      const tag = (name, greedy) => {
+        const o = body.indexOf(`<${name}>`);
+        if (o < 0) return '';
+        const c = greedy ? body.lastIndexOf(`</${name}>`) : body.indexOf(`</${name}>`, o);
+        return c > o ? body.slice(o + name.length + 2, c).trim() : '';
+      };
+      segments.push({
+        type: 'notification',
+        fields: {
+          taskId: tag('task-id'),
+          toolUseId: tag('tool-use-id'),
+          outputFile: tag('output-file'),
+          status: tag('status'),
+          summary: tag('summary'),
+          note: tag('note'),
+          result: tag('result', true),
+          tokens: tag('subagent_tokens'),
+          toolUses: tag('tool_uses'),
+          durationMs: tag('duration_ms'),
+        }
+      });
+      pos = closeRe.lastIndex;
+    }
+    if (pos < text.length) segments.push({ type: 'text', text: text.slice(pos) });
+    return segments;
+  },
+
+  _renderTaskNotification(f) {
+    const usage = [];
+    if (f.tokens) usage.push(`${Number(f.tokens).toLocaleString()} tokens`);
+    if (f.toolUses) usage.push(`${f.toolUses} tool use${f.toolUses === '1' ? '' : 's'}`);
+    if (f.durationMs) usage.push(`${Math.round(Number(f.durationMs) / 1000)}s`);
+    const details = [
+      ['Task ID', f.taskId],
+      ['Tool use ID', f.toolUseId],
+      ['Output file', f.outputFile],
+      ['Note', f.note],
+    ].filter(([, v]) => v);
+    const plain = v => escapeHtml(decodeHtmlEntities(v));
+    const id = 'tn-' + Math.random().toString(36).slice(2, 8);
+    const statusCls = /^(completed|success)$/i.test(f.status) ? 'ok' : /fail|error|kill|cancel/i.test(f.status) ? 'err' : '';
+
+    return `<div class="chat-task-notif">
+      <div class="task-notif-header">
+        ${f.status ? `<span class="task-notif-status ${statusCls}">${plain(f.status)}</span>` : ''}
+        <span class="task-notif-summary">${f.summary ? plain(f.summary) : 'Background task notification'}</span>
+      </div>
+      ${f.result ? `<div class="task-notif-result chat-text">${renderChatMarkdown(f.result)}</div>` : ''}
+      ${usage.length ? `<div class="task-notif-usage">${escapeHtml(usage.join(' · '))}</div>` : ''}
+      ${details.length ? `<div class="task-notif-details-toggle" onclick="document.getElementById('${id}').classList.toggle('open')">&#9654; details</div>
+      <div class="task-notif-details" id="${id}">${details.map(([k, v]) => `<div><span class="task-notif-key">${k}</span> ${plain(v)}</div>`).join('')}</div>` : ''}
     </div>`;
   },
 
@@ -199,13 +274,13 @@ Object.assign(Sessions, {
       if (showTools) {
         text = msg.textContent.toLowerCase();
       } else {
-        text = Array.from(msg.querySelectorAll('.chat-text'))
+        text = Array.from(msg.querySelectorAll(Sessions._SEARCHABLE_TEXT))
           .map(n => n.textContent).join(' ').toLowerCase();
       }
       if (text.includes(qLower)) {
         msg.style.display = '';
         matchedMessages++;
-        const scope = showTools ? msg : msg.querySelectorAll('.chat-text');
+        const scope = showTools ? msg : msg.querySelectorAll(Sessions._SEARCHABLE_TEXT);
         if (showTools) {
           totalMatches += Sessions.highlightInNode(msg, query);
         } else {
