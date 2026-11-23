@@ -159,7 +159,7 @@ const TaskBoard = {
     TaskBoard.openEditor(id);
   },
 
-  /** Hovering a ticket with a session for a second shows its latest conversation lines. */
+  /** Hovering a ticket for a second shows its heading and branch, and its latest conversation lines when it has a session. */
   onCardOver(e) {
     const el = e.target.closest('.tb-card');
     if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
@@ -176,7 +176,11 @@ const TaskBoard = {
     if (!p.id) return;
     const under = at && document.elementFromPoint(at.x, at.y);
     const card = under && under.closest('.tb-card');
-    if ((card && card.dataset.id === p.id) || (p.el && p.el.contains(under))) return;
+    if ((card && card.dataset.id === p.id) || (p.el && p.el.contains(under))) {
+      const now = p.headOnly && TaskBoard.findCard(p.id);
+      if (now && now.sessionId) { TaskBoard.hidePreview(); TaskBoard._preview = { id: now.id }; TaskBoard.showPreview(now); }
+      return;
+    }
     if (p.el && p.el.contains(document.activeElement)) return; // a message is being typed
     TaskBoard.hidePreview();
   },
@@ -193,7 +197,7 @@ const TaskBoard = {
     if (p.el) return; // passing over other cards on the way to the open preview
     TaskBoard.hidePreview();
     const card = TaskBoard.findCard(id);
-    if (!card || !card.sessionId || TaskBoard._drag) return;
+    if (!card || TaskBoard._drag) return;
     TaskBoard._preview = { id, timer: setTimeout(() => TaskBoard.showPreview(card), TaskBoard.PREVIEW_DELAY_MS) };
   },
 
@@ -235,7 +239,15 @@ const TaskBoard = {
     document.body.appendChild(el);
     p.timer = null;
     p.el = el;
-    el.innerHTML = TaskBoard.previewInputHtml() + '<div class="tb-preview-list"></div>';
+    const head = TaskBoard.previewHeadHtml(card);
+    if (!card.sessionId) {
+      p.headOnly = true;
+      el.className += ' tb-preview--head';
+      el.innerHTML = `<div class="tb-preview-top">${head}</div>`;
+      TaskBoard.placePreview(el, anchor.getBoundingClientRect());
+      return;
+    }
+    el.innerHTML = `<div class="tb-preview-top">${head}${TaskBoard.previewInputHtml()}</div><div class="tb-preview-list"></div>`;
     p.list = el.querySelector('.tb-preview-list');
     const text = el.querySelector('.tb-preview-input textarea');
     text.onkeydown = e => TaskBoard.onPreviewKeyDown(p, e);
@@ -249,6 +261,14 @@ const TaskBoard = {
     p.offset = 0;
     TaskBoard.loadPreviewInput(p);
     await TaskBoard.loadPreviewPage(p);
+  },
+
+  /** The preview's top: the ticket's heading and its git branch. */
+  previewHeadHtml(card) {
+    const heading = card.title || (card.notes || '').trim().split('\n')[0];
+    const gitBranch = TaskBoard.gitBranchOf(card);
+    return `<div class="tb-preview-head"><div class="tb-preview-title">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</div>${
+      gitBranch ? `<div class="tb-preview-branch">Branch: ${escapeHtml(gitBranch)}</div>` : ''}</div>`;
   },
 
   /** The preview's message box: sends to the ticket's session as it runs, hidden or not. */
@@ -450,9 +470,7 @@ const TaskBoard = {
     const dots = at === -1 ? '' : `<span class="tb-line-steps" title="${escapeAttr(`${stages[at].title} (${at + 1}/${stages.length})`)}">${
       stages.map((s, i) => `<span class="tb-dot${i < at ? ' tb-step--done' : i === at ? ' tb-step--current' : ''}"></span>`).join('')
     }</span>`;
-    const gitBranch = TaskBoard.gitBranchOf(card);
-    const tip = heading + (gitBranch ? '\nBranch: ' + gitBranch : '');
-    return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}" title="${escapeAttr(tip)}"
+    return `<div class="tb-card tb-card--line${card.closed ? ' tb-card--closed' : ''}" draggable="true" data-id="${escapeAttr(card.id)}"
         ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         <span class="tb-line-text">${TaskBoard.kindIconHtml(card)}${escapeHtml(heading)}</span>
         ${TaskBoard.badgeHtml(card)}
