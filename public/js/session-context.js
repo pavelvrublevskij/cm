@@ -100,8 +100,8 @@ Object.assign(Sessions, {
     }
   },
 
-  /** Loading "Changed in this session" failed outright -- say so instead of silently falling back
-   *  to the Conversation tab, which reads identically to "nothing changed" and hides a real bug. */
+  /** Loading "Changed in this session" failed outright -- say so instead of showing an empty
+   *  list, which reads identically to "nothing changed" and hides a real bug. */
   renderContextError(el, err) {
     Sessions._ctx = null;
     const message = (err && err.message) || 'Unknown error';
@@ -119,7 +119,6 @@ Object.assign(Sessions, {
       Sessions._ctx = { sessionId, projSlug: data.projSlug || '', files: [], plans: [], sort: 'default' };
       el.innerHTML = '';
       Sessions._syncFilesTree();
-      Sessions.switchTab('conversation');
       return;
     }
 

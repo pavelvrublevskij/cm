@@ -707,17 +707,17 @@ body {
 .session-input-note:empty {
   display: none;
 }
-/* When conversation is fully collapsed: hide the main panel but keep the splitter
+/* When the left panel is fully collapsed: hide it but keep the splitter
    visible so the user can drag it back. */
-.session-detail-body.conversation-hidden .session-main-panel {
+.session-detail-body.main-panel-hidden .session-main-panel {
   display: none !important;
 }
-.session-detail-body.conversation-hidden .terminal-pane {
+.session-detail-body.main-panel-hidden .session-right-pane {
   flex: 1 1 auto !important;
   max-width: none !important;
 }
-.session-detail-body.session-readonly .terminal-pane,
-.session-detail-body.session-readonly .terminal-splitter {
+.session-detail-body.session-readonly #right-tab-btn-terminal,
+.session-detail-body.session-readonly .terminal-pane {
   display: none !important;
 }
 .terminal-splitter {
@@ -742,21 +742,41 @@ body {
   transition: color 0.15s;
   line-height: 1;
 }
-.session-detail-body.conversation-hidden .terminal-splitter::before {
+.session-detail-body.main-panel-hidden .terminal-splitter::before {
   content: '\00BB';                  /* » — hidden state, click to show */
 }
 .terminal-splitter:hover::before {
   color: var(--text-primary, #e6edf3);
 }
-.terminal-pane {
-  position: relative;
+.session-right-pane {
   flex: 0 0 var(--terminal-width, 25%);
   display: flex;
   flex-direction: column;
-  background: #000;
   min-width: 280px;
   max-width: calc(100% - 416px);
   border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+.session-right-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+/* Both right-pane tabs stay laid out; the inactive one is only made invisible, so xterm can
+   measure and fit itself while the Conversation tab is showing. */
+.session-right-body > .session-messages-wrap,
+.session-right-body > .terminal-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+.session-right-body > .right-tab-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+.terminal-pane {
+  background: #000;
 }
 .terminal-pane-header {
   display: flex;
@@ -935,7 +955,7 @@ body {
 @media (max-width: 900px) {
   .session-detail-body { flex-direction: column; }
   .session-detail-body .session-main-panel { flex: 0 0 50%; }
-  .session-detail-body .terminal-pane { flex: 0 0 50%; border-left: none; border-top: 1px solid var(--border); }
+  .session-detail-body .session-right-pane { flex: 0 0 50%; max-width: none; border-left: none; border-top: 1px solid var(--border); }
   .session-detail-body .terminal-splitter { display: none; }
 }
 

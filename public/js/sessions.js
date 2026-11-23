@@ -823,7 +823,7 @@ const Sessions = {
   REFRESH_INTERVAL_KEY: 'claude-manager-conversation-refresh-ms',
   REFRESH_INTERVAL_DEFAULT_MS: 3000,
   REFRESH_INTERVAL_MIN_MS: 1000,
-  CONVERSATION_HIDDEN_KEY: 'claude-manager-conversation-hidden',
+  MAIN_PANEL_HIDDEN_KEY: 'claude-manager-conversation-hidden', // key kept so the saved preference survives
   SHOW_TOOL_DETAILS_KEY: 'claude-manager-show-tool-details',
   DEFAULT_READONLY_KEY: 'claude-manager-default-readonly',
   SNAPSHOT_KEY: 'claude-manager-session-snapshots',
@@ -870,7 +870,7 @@ const Sessions = {
     const key = Sessions._snapshotKey(state.slug, state.sessionId);
     delete map[key];
     map[key] = {
-      tab: Sessions._activeTab || 'conversation',
+      tab: Sessions._activeTab || 'file-changes',
       scrollTop: scroller ? scroller.scrollTop : 0,
       offset: state.offset || 0,
       searchQuery: Sessions._detailSearchQuery || '',
@@ -894,18 +894,18 @@ const Sessions = {
   setRefreshIntervalMs(ms) {
     if (!Number.isFinite(ms) || ms < Sessions.REFRESH_INTERVAL_MIN_MS) return false;
     localStorage.setItem(Sessions.REFRESH_INTERVAL_KEY, String(ms));
-    if (Sessions._refreshTimer && !Sessions.isConversationHidden()) Sessions.startAutoRefresh();
+    if (Sessions._refreshTimer) Sessions.startAutoRefresh();
     if (Sessions._ctxTimer) Sessions.startCtxPolling();
     return true;
   },
 
-  isConversationHidden() {
-    return localStorage.getItem(Sessions.CONVERSATION_HIDDEN_KEY) === '1';
+  isMainPanelHidden() {
+    return localStorage.getItem(Sessions.MAIN_PANEL_HIDDEN_KEY) === '1';
   },
 
-  applyConversationHiddenState() {
+  applyMainPanelHiddenState() {
     const body = document.getElementById('session-detail-body');
-    if (body) body.classList.toggle('conversation-hidden', Sessions.isConversationHidden());
+    if (body) body.classList.toggle('main-panel-hidden', Sessions.isMainPanelHidden());
   },
 
   applyReadOnlyState() {
@@ -1120,8 +1120,11 @@ const Sessions = {
     const countEl = document.getElementById('session-detail-search-count');
     if (countEl) countEl.textContent = '';
 
+    Sessions.switchRightTab('conversation');
+    if (typeof TerminalPanel !== 'undefined') TerminalPanel.applySavedWidth();
+
     if (!sessionId) {
-      Sessions.switchTab('conversation');
+      Sessions.switchTab('file-changes');
       container.innerHTML = '<div class="empty-state"><p>Waiting for session to start...</p></div>';
       const ctxEl = document.getElementById('sf-changed');
       if (ctxEl) ctxEl.innerHTML = '';
@@ -1133,7 +1136,7 @@ const Sessions = {
         if (TerminalPanel.isOpen()) TerminalPanel.close();
         TerminalPanel.open(slug, null);
       }
-      Sessions.applyConversationHiddenState();
+      Sessions.applyMainPanelHiddenState();
       Sessions.applyToolDetailsState();
       Sessions._startDiscovery(slug);
       return;
@@ -1147,8 +1150,7 @@ const Sessions = {
         .catch(() => {});
     }
 
-    // Start on the saved tab if we're restoring one, otherwise Files — loadContext may still
-    // switch to Conversation if nothing changed, but the restore below has the final say.
+    // Start on the saved tab if we're restoring one, otherwise Files.
     Sessions.switchTab(snapshot ? snapshot.tab : 'file-changes');
     const ctxEl = document.getElementById('sf-changed');
     if (ctxEl) { ctxEl.innerHTML = ''; }
@@ -1184,15 +1186,14 @@ const Sessions = {
       TerminalPanel.open(slug, sessionId);
     }
 
-    Sessions.applyConversationHiddenState();
+    Sessions.applyMainPanelHiddenState();
     Sessions.applyToolDetailsState();
-    if (!Sessions.isConversationHidden()) Sessions.startAutoRefresh();
+    Sessions.startAutoRefresh();
     Sessions.startCtxPolling();
   },
 
   startAutoRefresh() {
     Sessions.stopConversationRefresh();
-    if (Sessions.isConversationHidden()) return;
     Sessions._refreshTimer = setInterval(() => Sessions.pollNewMessages(), Sessions.refreshIntervalMs());
     if (typeof setFooterStatus === 'function') {
       const sec = Math.round(Sessions.refreshIntervalMs() / 1000);
@@ -1258,7 +1259,7 @@ const Sessions = {
     Sessions.loadContext(session.sessionId, session);
     Sessions.loadMore().then(() => {
       Sessions.setupScroll();
-      if (!Sessions.isConversationHidden()) Sessions.startAutoRefresh();
+      Sessions.startAutoRefresh();
       Sessions.startCtxPolling();
     });
   },
@@ -1279,7 +1280,6 @@ const Sessions = {
     const state = Sessions.detailState;
     if (!state.slug || !state.sessionId) return;
     if (state.loading) return;
-    if (Sessions.isConversationHidden()) return;
     if (Sessions._detailSearchQuery) return; // don't disturb active filter
     const slugAtStart = state.slug;
     const sessionAtStart = state.sessionId;
@@ -1626,30 +1626,28 @@ const Sessions = {
     });
   },
 
+  /** Left panel tabs. Anything else (e.g. 'conversation' from an old snapshot) falls back to Files. */
   switchTab(tab) {
     const ctx = document.getElementById('session-context');
-    const msgs = document.getElementById('session-messages-wrap');
     const act = document.getElementById('session-activity');
     const sp = document.getElementById('session-scratchpad');
     const art = document.getElementById('session-artifacts');
     const fcBtn = document.getElementById('tab-btn-file-changes');
-    const cvBtn = document.getElementById('tab-btn-conversation');
     const acBtn = document.getElementById('tab-btn-activity');
     const spBtn = document.getElementById('tab-btn-scratchpad');
     const artBtn = document.getElementById('tab-btn-artifacts');
-    if (!ctx || !msgs || !fcBtn || !cvBtn) return;
+    if (!ctx || !fcBtn) return;
+    if (!['file-changes', 'activity', 'scratchpad', 'artifacts'].includes(tab)) tab = 'file-changes';
     Sessions._activeTab = tab;
     const isFC = tab === 'file-changes';
     const isAct = tab === 'activity';
     const isSP = tab === 'scratchpad';
     const isArt = tab === 'artifacts';
     ctx.style.display = isFC ? 'flex' : 'none';
-    msgs.style.display = isAct || isFC || isSP || isArt ? 'none' : '';
     if (act) act.style.display = isAct ? 'flex' : 'none';
     if (sp) sp.style.display = isSP ? 'flex' : 'none';
     if (art) art.style.display = isArt ? '' : 'none';
     fcBtn.classList.toggle('active', isFC);
-    cvBtn.classList.toggle('active', !isFC && !isAct && !isSP && !isArt);
     if (acBtn) acBtn.classList.toggle('active', isAct);
     if (spBtn) spBtn.classList.toggle('active', isSP);
     if (artBtn) artBtn.classList.toggle('active', isArt);
@@ -1665,6 +1663,22 @@ const Sessions = {
     }
     if (isAct && !Sessions._activityLoaded) Sessions.loadActivity();
     if (isSP && !Sessions._scratchpadLoaded) Sessions.loadScratchpad();
+  },
+
+  /** Right pane tabs: 'conversation' (default) or 'terminal'. */
+  switchRightTab(tab) {
+    const msgs = document.getElementById('session-messages-wrap');
+    const term = document.getElementById('terminal-pane');
+    const cvBtn = document.getElementById('right-tab-btn-conversation');
+    const tmBtn = document.getElementById('right-tab-btn-terminal');
+    if (!msgs || !term) return;
+    const isTerm = tab === 'terminal';
+    Sessions._activeRightTab = isTerm ? 'terminal' : 'conversation';
+    msgs.classList.toggle('right-tab-hidden', isTerm);
+    term.classList.toggle('right-tab-hidden', !isTerm);
+    if (cvBtn) cvBtn.classList.toggle('active', !isTerm);
+    if (tmBtn) tmBtn.classList.toggle('active', isTerm);
+    if (isTerm && typeof TerminalPanel !== 'undefined') TerminalPanel._sendResize();
   },
 
   _rerenderPlans() {

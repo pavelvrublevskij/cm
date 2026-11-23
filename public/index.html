@@ -699,7 +699,6 @@
           <div class="session-main-panel">
             <div class="session-tab-bar">
               <button class="session-tab-btn active" id="tab-btn-file-changes" onclick="Sessions.switchTab('file-changes')">Files</button>
-              <button class="session-tab-btn" id="tab-btn-conversation" onclick="Sessions.switchTab('conversation')">Conversation</button>
               <button class="session-tab-btn" id="tab-btn-activity" onclick="Sessions.switchTab('activity')">Activity</button>
               <button class="session-tab-btn" id="tab-btn-scratchpad" style="display:none" onclick="Sessions.switchTab('scratchpad')">Scratchpad</button>
               <button class="session-tab-btn" id="tab-btn-artifacts" style="display:none" onclick="Sessions.switchTab('artifacts')">Artifacts</button>
@@ -728,63 +727,71 @@
             <div id="session-activity" class="session-activity-panel" style="display:none"></div>
             <div id="session-scratchpad" class="sf-layout" style="display:none"></div>
             <div id="session-artifacts" style="display:none;padding:16px 0"></div>
-            <div class="session-messages-wrap" id="session-messages-wrap" style="display:none">
-            <div class="session-messages-header">
-              <div class="subtitle" id="session-count" style="color:var(--text-muted)"></div>
-              <div class="session-search-wrap" style="margin-top:8px;margin-bottom:0">
-                <div class="session-search-container" onmouseenter="Sessions._cancelHideDetailHistoryDropdown()" onmouseleave="Sessions._hideDetailHistoryDropdownDelayed()">
-                  <input type="text" class="session-search" id="session-detail-search-input"
-                    placeholder="Search in this session..."
-                    oninput="Sessions._hideDetailHistoryDropdown(); Sessions.onDetailSearch(this.value)"
-                    onfocus="Sessions.showDetailHistory()"
-                    onblur="Sessions._hideDetailHistoryDropdownDelayed()">
-                  <div class="search-history-dropdown" id="detail-search-history-dropdown" style="display:none"></div>
-                </div>
-                <span id="session-detail-search-count" style="font-size:12px;color:var(--text-muted);white-space:nowrap"></span>
-                <label class="session-tool-toggle" title="Show tool calls (commands, file edits) and their results">
-                  <input type="checkbox" id="session-detail-show-tools" onchange="Sessions.setShowToolDetails(this.checked)">
-                  Tool details
-                </label>
-              </div>
-              <hr class="session-messages-divider">
-            </div>
-            <div class="session-messages-pane" id="session-messages-pane">
-              <div id="session-messages" class="chat-container"></div>
-            </div>
-            <div class="session-input" id="session-input" style="display:none">
-              <textarea id="session-input-text" class="session-input-text" rows="2"
-                placeholder="Message Claude — Enter to send, Shift+Enter for a new line"
-                onkeydown="SessionInput.onKeyDown(event)"></textarea>
-              <div class="session-input-note" id="session-input-note"></div>
-            </div>
-            <button class="scroll-to-top" id="scroll-to-top-btn" onclick="Sessions.scrollToTop()" aria-label="Scroll to top" title="Scroll to top">&#8593;</button>
-            </div><!-- end session-messages-wrap -->
           </div><!-- end session-main-panel -->
           <div class="terminal-splitter" id="terminal-splitter" onmousedown="TerminalPanel.startDrag(event)"></div>
-          <div class="terminal-pane" id="terminal-pane">
-            <div class="terminal-pane-header">
-              <span class="terminal-pane-title">Terminal</span>
-              <span class="terminal-pane-status" id="terminal-status">disconnected</span>
-              <div class="terminal-pane-actions">
-                <button class="terminal-skills-btn terminal-action-when-connected" id="terminal-skills-btn" onclick="TerminalSkills.toggle()" title="Project skills" aria-label="Project skills">Skills</button>
-                <button class="icon-btn terminal-action-when-connected" onclick="TerminalPanel.reconnect()" title="Restart claude in this panel" aria-label="Restart">&#x21bb;</button>
-                <button class="icon-btn terminal-action-when-connected" onclick="TerminalPanel.closeFromUser()" title="Close terminal" aria-label="Close">&#x2715;</button>
+          <div class="session-right-pane" id="session-right-pane">
+            <div class="session-tab-bar">
+              <button class="session-tab-btn active" id="right-tab-btn-conversation" onclick="Sessions.switchRightTab('conversation')">Conversation</button>
+              <button class="session-tab-btn" id="right-tab-btn-terminal" onclick="Sessions.switchRightTab('terminal')">Terminal</button>
+            </div>
+            <div class="session-right-body">
+              <div class="session-messages-wrap" id="session-messages-wrap">
+                <div class="session-messages-header">
+                  <div class="subtitle" id="session-count" style="color:var(--text-muted)"></div>
+                  <div class="session-search-wrap" style="margin-top:8px;margin-bottom:0">
+                    <div class="session-search-container" onmouseenter="Sessions._cancelHideDetailHistoryDropdown()" onmouseleave="Sessions._hideDetailHistoryDropdownDelayed()">
+                      <input type="text" class="session-search" id="session-detail-search-input"
+                        placeholder="Search in this session..."
+                        oninput="Sessions._hideDetailHistoryDropdown(); Sessions.onDetailSearch(this.value)"
+                        onfocus="Sessions.showDetailHistory()"
+                        onblur="Sessions._hideDetailHistoryDropdownDelayed()">
+                      <div class="search-history-dropdown" id="detail-search-history-dropdown" style="display:none"></div>
+                    </div>
+                    <span id="session-detail-search-count" style="font-size:12px;color:var(--text-muted);white-space:nowrap"></span>
+                    <label class="session-tool-toggle" title="Show tool calls (commands, file edits) and their results">
+                      <input type="checkbox" id="session-detail-show-tools" onchange="Sessions.setShowToolDetails(this.checked)">
+                      Tool details
+                    </label>
+                  </div>
+                  <hr class="session-messages-divider">
+                </div>
+                <div class="session-messages-pane" id="session-messages-pane">
+                  <div id="session-messages" class="chat-container"></div>
+                </div>
+                <div class="session-input" id="session-input" style="display:none">
+                  <textarea id="session-input-text" class="session-input-text" rows="2"
+                    placeholder="Message Claude — Enter to send, Shift+Enter for a new line"
+                    onkeydown="SessionInput.onKeyDown(event)"></textarea>
+                  <div class="session-input-note" id="session-input-note"></div>
+                </div>
+                <button class="scroll-to-top" id="scroll-to-top-btn" onclick="Sessions.scrollToTop()" aria-label="Scroll to top" title="Scroll to top">&#8593;</button>
+              </div><!-- end session-messages-wrap -->
+              <div class="terminal-pane right-tab-hidden" id="terminal-pane">
+                <div class="terminal-pane-header">
+                  <span class="terminal-pane-title">Terminal</span>
+                  <span class="terminal-pane-status" id="terminal-status">disconnected</span>
+                  <div class="terminal-pane-actions">
+                    <button class="terminal-skills-btn terminal-action-when-connected" id="terminal-skills-btn" onclick="TerminalSkills.toggle()" title="Project skills" aria-label="Project skills">Skills</button>
+                    <button class="icon-btn terminal-action-when-connected" onclick="TerminalPanel.reconnect()" title="Restart claude in this panel" aria-label="Restart">&#x21bb;</button>
+                    <button class="icon-btn terminal-action-when-connected" onclick="TerminalPanel.closeFromUser()" title="Close terminal" aria-label="Close">&#x2715;</button>
+                  </div>
+                </div>
+                <div class="terminal-skills-popover" id="terminal-skills-popover" style="display:none"></div>
+                <div class="terminal-pane-note">Recommended: keep only one terminal open per session to avoid conflicts.</div>
+                <div class="terminal-disconnected" id="terminal-disconnected">
+                  <button class="btn btn-primary" onclick="TerminalPanel.openFromSession()">Open Terminal</button>
+                </div>
+                <div id="terminal-host" class="terminal-host"></div>
+                <div class="term-error-overlay" id="terminal-error-overlay" style="display:none">
+                  <div class="term-error-box">
+                    <div class="term-error-icon">⚠</div>
+                    <div class="term-error-text" id="terminal-error-text"></div>
+                    <button type="button" class="btn btn-primary" id="terminal-fix-btn" onclick="TerminalPanel.runFix()">Fix &amp; Restart App</button>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div class="terminal-skills-popover" id="terminal-skills-popover" style="display:none"></div>
-            <div class="terminal-pane-note">Recommended: keep only one terminal open per session to avoid conflicts.</div>
-            <div class="terminal-disconnected" id="terminal-disconnected">
-              <button class="btn btn-primary" onclick="TerminalPanel.openFromSession()">Open Terminal</button>
-            </div>
-            <div id="terminal-host" class="terminal-host"></div>
-            <div class="term-error-overlay" id="terminal-error-overlay" style="display:none">
-              <div class="term-error-box">
-                <div class="term-error-icon">⚠</div>
-                <div class="term-error-text" id="terminal-error-text"></div>
-                <button type="button" class="btn btn-primary" id="terminal-fix-btn" onclick="TerminalPanel.runFix()">Fix &amp; Restart App</button>
-              </div>
-            </div>
-          </div>
+            </div><!-- end session-right-body -->
+          </div><!-- end session-right-pane -->
         </div>
       </div>
 
