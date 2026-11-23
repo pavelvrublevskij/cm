@@ -6932,6 +6932,11 @@ body.git-split-dragging {
   font-size: 13px;
   color: var(--text-primary);
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 .tb-card-kind {
   display: inline-flex;
@@ -7276,6 +7281,11 @@ body.git-split-dragging {
   font-size: 11px;
   color: var(--warning);
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 .tb-card-git {
   margin-top: 4px;

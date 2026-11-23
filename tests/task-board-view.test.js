@@ -81,9 +81,18 @@ test('hidden lanes are left out and their chip is inactive', () => {
 
 test('a card without a title shows the first description line as its heading', () => {
   const html = TaskBoard.cardHtml({ id: 'x', title: '', notes: 'ABC-7 vibe idea\nmore detail\nhidden', column: 'todo' });
-  assert.match(html, /tb-card-title">ABC-7 vibe idea</);
+  assert.match(html, /tb-card-title" title="ABC-7 vibe idea">ABC-7 vibe idea</);
   assert.match(html, /tb-card-notes">more detail</);
   assert.ok(!html.includes('hidden'));
+});
+
+test('full-view card title and run message are clamped to two lines so cards share a max height', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf-8');
+  for (const sel of ['tb-card-title', 'tb-card-run']) {
+    const rule = css.match(new RegExp(`\\n\\.${sel}\\s*\\{([^}]*)\\}`))[1];
+    assert.match(rule, /-webkit-line-clamp:\s*2;/);
+    assert.match(rule, /overflow:\s*hidden;/);
+  }
 });
 
 const STAGED = {
@@ -601,7 +610,7 @@ test('a ticket that took a condition shows it on its card', () => {
 
 test('a recognised ticket type shows its icon before the heading, in both card modes', () => {
   const card = { id: 'k', title: 'Fix login', notes: '', column: 'done', kind: 'bug' };
-  assert.match(TaskBoard.cardHtml(card, null, false), /<div class="tb-card-title"><span class="tb-card-kind tb-card-kind--bug" title="Bug"[^]*?<\/span>Fix login<\/div>/);
+  assert.match(TaskBoard.cardHtml(card, null, false), /<div class="tb-card-title" title="Fix login"><span class="tb-card-kind tb-card-kind--bug" title="Bug"[^]*?<\/span>Fix login<\/div>/);
   assert.match(TaskBoard.cardHtml(card, null, true), /<span class="tb-line-text"><span class="tb-card-kind tb-card-kind--bug"/);
   for (const kind of ['feature', 'question', 'other']) assert.match(TaskBoard.kindIconHtml({ kind }), new RegExp('tb-card-kind--' + kind));
   assert.strictEqual(TaskBoard.kindIconHtml({}), '');
