@@ -589,15 +589,34 @@ test('a lane shows the project branch only when git gives one', () => {
   assert.doesNotMatch(TaskBoard.laneHtml(BOARD, 'C--work-zeta'), /tb-lane-git/);
 });
 
-test('Finalize and Done cards show a notes button with done/total to-dos', () => {
-  const card = { id: '9', title: 'T', notes: '', project: 'C--work-zeta', column: 'done', closed: false, memo: 'wait\nmore', todos: [{ text: 'a', done: true }, { text: 'b', done: false }] };
+test('Finalize and Done cards show a to-dos button with the open count, or done/total once all are done', () => {
+  const card = { id: '9', title: 'T', notes: '', project: 'C--work-zeta', column: 'done', closed: false, todos: [{ text: 'a', done: true }, { text: 'b', done: false }] };
   const html = TaskBoard.cardHtml(card, [], false);
   assert.match(html, /tb-card-memo tb-card-memo--has tb-card-memo--open/);
-  assert.match(html, /1\/2/);
-  assert.match(html, /title="wait"/);
+  assert.match(html, /tb-memo-count--open">1</);
+  assert.match(html, /title="1 open to-do"/);
   assert.match(TaskBoard.cardHtml(card, [], true), /tb-card-memo/);
   assert.doesNotMatch(TaskBoard.cardHtml({ ...card, column: 'todo' }, [], false), /tb-card-memo/);
-  assert.doesNotMatch(TaskBoard.memoIconHtml({ ...card, memo: '', todos: [] }), /--has/);
+  const done = TaskBoard.memoIconHtml({ ...card, todos: [{ text: 'a', done: true }, { text: 'b', done: true }] });
+  assert.match(done, /tb-card-memo--has"/);
+  assert.match(done, /tb-memo-count">2\/2</);
+  const empty = TaskBoard.memoIconHtml({ ...card, todos: [] });
+  assert.doesNotMatch(empty, /--has|tb-memo-count/);
+  assert.match(empty, /title="Add to-dos"/);
+});
+
+test('a ticket with an unchecked to-do cannot be deleted', () => {
+  const card = { id: '9', title: 'T', notes: '', project: 'C--work-zeta', column: 'done', closed: false, todos: [{ text: 'a', done: true }, { text: 'b', done: false }] };
+  assert.ok(!TaskBoard.canDelete(card));
+  assert.doesNotMatch(TaskBoard.cardHtml(card, [], false), /tb-card-delete/);
+  assert.ok(TaskBoard.canDelete({ ...card, todos: [{ text: 'a', done: true }] }));
+  assert.ok(TaskBoard.canDelete({ ...card, column: 'todo' }), 'reopened in ToDo, where its to-dos cannot be edited');
+});
+
+test('a to-do row has a make-ticket button', () => {
+  assert.match(TaskBoard.todoRowHtml({ text: 'x', done: false }), /onclick="TaskBoard\.todoToTicket\(this\)"/);
+  assert.match(TaskBoard.todoRowHtml({ text: 'x', done: false }, 2), /<div class="tb-todo-row" data-index="2">/);
+  assert.doesNotMatch(TaskBoard.todoRowHtml({ text: 'x', done: false }), /data-index/);
 });
 
 test('a kept worktree on delete opens the Force remove dialog, which posts project and worktree', async () => {

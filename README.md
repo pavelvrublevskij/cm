@@ -81,7 +81,7 @@ All projects on one board, one lane per project, showing the project's current g
 - **Tickets run by themselves** — Ready starts a background Claude session that works through the stages; it waits when it needs your input. A type icon (bug, feature, question, other) shows on each card.
 - **Parallel lanes** — several tickets at once (3 by default, set in CM Settings); in a git project each gets its own worktree and branch.
 - **Finalize** — runs the project's tests; a worktree ticket then waits for you to Merge (no squash) or Create PR.
-- **Follow-ups and notes** — drag a ticket back to ToDo to follow up; keep private notes and to-dos on finished tickets.
+- **Follow-ups and to-dos** — drag a ticket back to ToDo to follow up; keep private to-dos on finished tickets and turn any into a new ticket.
 
 ### Token Usage
 Token and cost tracking across all sessions with charts, usage marks and AI efficiency insights. Pricing is fetched from Anthropic and kept in a history log.

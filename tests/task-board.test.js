@@ -222,37 +222,62 @@ async function inColumn(column) {
   return card;
 }
 
-test('a note and to-dos can be saved on a ticket in Finalize or Done', async () => {
+test('to-dos can be saved on a ticket in Finalize or Done', async () => {
   for (const column of ['finalize', 'done']) {
     const card = await inColumn(column);
     const res = await request(app).put(`/api/task-board/cards/${card.id}/memo`)
-      .send({ memo: 'waiting for client', todos: [{ text: ' ask Bob ', done: true }, { text: '  ' }, { text: 'retest' }] });
+      .send({ todos: [{ text: ' ask Bob ', done: true }, { text: '  ' }, { text: 'retest' }] });
     assert.strictEqual(res.status, 200, JSON.stringify(res.body));
-    assert.strictEqual(res.body.card.memo, 'waiting for client');
     assert.deepStrictEqual(res.body.card.todos, [{ text: 'ask Bob', done: true }, { text: 'retest', done: false }]);
   }
 });
 
-test('notes cannot be added before Finalize', async () => {
+test('saving to-dos drops a note left from before', async () => {
+  const card = await inColumn('done');
+  const board = JSON.parse(fs.readFileSync(paths.TASK_BOARD_FILE, 'utf-8'));
+  board.cards.find(c => c.id === card.id).memo = 'old note';
+  fs.writeFileSync(paths.TASK_BOARD_FILE, JSON.stringify(board));
+  const res = await request(app).put(`/api/task-board/cards/${card.id}/memo`).send({ memo: 'ignored', todos: [{ text: 'a' }] });
+  assert.strictEqual(res.status, 200);
+  assert.ok(!('memo' in res.body.card));
+});
+
+test('a ticket with an unchecked to-do cannot be deleted', async () => {
+  const card = await inColumn('done');
+  const url = `/api/task-board/cards/${card.id}/memo`;
+  await request(app).put(url).send({ todos: [{ text: 'a', done: true }, { text: 'b' }] });
+  const res = await request(app).delete('/api/task-board/cards/' + card.id);
+  assert.strictEqual(res.status, 400);
+  assert.match(res.body.error, /open to-dos/);
+  await request(app).put(url).send({ todos: [{ text: 'a', done: true }, { text: 'b', done: true }] });
+  assert.strictEqual((await request(app).delete('/api/task-board/cards/' + card.id)).status, 200);
+});
+
+test('a ticket reopened in ToDo with an open to-do can still be deleted', async () => {
+  const card = await inColumn('done');
+  await request(app).put(`/api/task-board/cards/${card.id}/memo`).send({ todos: [{ text: 'b' }] });
+  await move(card.id, 'todo');
+  assert.strictEqual((await request(app).delete('/api/task-board/cards/' + card.id)).status, 200);
+});
+
+test('to-dos cannot be added before Finalize', async () => {
   const card = await addCard({ title: 'Task', project: SLUG });
-  const res = await request(app).put(`/api/task-board/cards/${card.id}/memo`).send({ memo: 'x' });
+  const res = await request(app).put(`/api/task-board/cards/${card.id}/memo`).send({ todos: [{ text: 'x' }] });
   assert.strictEqual(res.status, 400);
 });
 
-test('invalid notes are refused', async () => {
+test('invalid to-dos are refused', async () => {
   const card = await inColumn('done');
   const url = `/api/task-board/cards/${card.id}/memo`;
-  assert.strictEqual((await request(app).put(url).send({ memo: 'x'.repeat(5001) })).status, 400);
   assert.strictEqual((await request(app).put(url).send({ todos: 'nope' })).status, 400);
   assert.strictEqual((await request(app).put(url).send({ todos: [{ text: 'x'.repeat(301) }] })).status, 400);
   assert.strictEqual((await request(app).put(url).send({ todos: Array.from({ length: 51 }, () => ({ text: 'a' })) })).status, 400);
   assert.strictEqual((await request(app).put('/api/task-board/cards/missing/memo').send({})).status, 404);
 });
 
-test('notes stay on a ticket moved from Done back to ToDo', async () => {
+test('to-dos stay on a ticket moved from Done back to ToDo', async () => {
   const card = await inColumn('done');
-  await request(app).put(`/api/task-board/cards/${card.id}/memo`).send({ memo: 'keep', todos: [{ text: 'a' }] });
+  await request(app).put(`/api/task-board/cards/${card.id}/memo`).send({ todos: [{ text: 'a' }] });
   const res = await move(card.id, 'todo');
-  assert.strictEqual(res.body.card.memo, 'keep');
   assert.strictEqual(res.body.card.todos.length, 1);
 });

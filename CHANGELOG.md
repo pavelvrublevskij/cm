@@ -14,7 +14,7 @@
 - **Favorite projects** — star a project to pin it on top of the sidebar and All Projects; the rest fold into "Other projects".
 - **Saved workflows** — save a project's workflow under a name and load it again, even after the lane was removed; Export/Import a workflow as a JSON file to reuse it in another project. The Saved menu marks the saved workflow in use.
 - **Fullscreen workflow editor** — a button in the workflow dialog's title bar maximizes it to the full window.
-- **Ticket notes** — on Finalize and Done tickets keep your own note and to-do list (never sent to Claude); the card shows done/total to-dos.
+- **Ticket to-dos** — on Finalize and Done tickets keep your own to-do list (never sent to Claude); the card shows open to-dos as a badge, a ticket with open to-dos cannot be deleted, and "→ Ticket" turns a to-do into a new ticket.
 - **Ticket type icon** — when a ticket starts, Claude recognises it as a bug, feature, question or other, and the card shows a matching icon before its title.
 - **Compact sidebar** — a Compact switch at the bottom of the sidebar shows only General and Projects.
 - **Ticket conversation on hover** — hold the pointer on a ticket for a second to see its latest conversation lines.
