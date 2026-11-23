@@ -61,6 +61,26 @@ test('modal without maximizable has no fullscreen button', () => {
   assert.strictEqual(find(overlay.children[0], 'modal-maximize'), undefined);
 });
 
+test('every modal has a close icon that dismisses it and calls onClose', () => {
+  const ctx = load();
+  let closed = false;
+  const overlay = ctx.openModal({ title: 'Plain', body: '', onClose: () => { closed = true; } });
+  const btn = find(overlay.children[0], 'modal-close');
+  assert.ok(btn);
+  assert.strictEqual(btn.title, 'Close');
+
+  btn.onclick();
+  assert.ok(overlay.removed);
+  assert.ok(closed);
+});
+
+test('maximizable modal shows the close icon after the maximize button', () => {
+  const ctx = load();
+  const overlay = ctx.openModal({ title: 'Workflow', body: '', maximizable: true });
+  const actions = find(overlay.children[0], 'modal-header-actions');
+  assert.deepStrictEqual(actions.children.map(c => c.className), ['btn btn-sm modal-maximize', 'modal-close']);
+});
+
 test('clicking outside the modal does not close it', () => {
   const ctx = load();
   let closed = false;
