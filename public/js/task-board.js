@@ -124,7 +124,9 @@ const TaskBoard = {
     return (card.column === 'finalize' || !TaskBoard.COLUMN_TITLES[card.column]) && !card.finalized;
   },
 
+  /** Not while the ticket is in a running workflow, or in Finalize/Done with an unchecked to-do. */
   canDelete(card) {
+    if (TaskBoard.MEMO_COLUMNS.includes(card.column) && (card.todos || []).some(t => !t.done)) return false;
     return TaskBoard.DELETABLE.includes(card.column) || (card.column === 'finalize' && !!card.finalized);
   },
 
@@ -480,38 +482,41 @@ const TaskBoard = {
       </div>`;
   },
 
-  /** Notes button on a Finalize/Done card: highlighted when it has a note or to-dos, with done/total to-dos. */
+  /**
+   * To-dos button on a Finalize/Done card: a filled badge with the open count while any is unchecked,
+   * done/total once all are checked, faint (shown on hover) when there are none.
+   */
   memoIconHtml(card) {
     if (!TaskBoard.MEMO_COLUMNS.includes(card.column)) return '';
     const todos = card.todos || [];
-    const memo = (card.memo || '').trim();
-    const has = memo || todos.length;
     const open = todos.filter(t => !t.done).length;
-    const count = todos.length ? `<span class="tb-memo-count">${todos.length - open}/${todos.length}</span>` : '';
-    const tip = memo ? memo.split('\n')[0] : has ? `${open} open to-do${open === 1 ? '' : 's'}` : 'Add notes / to-dos';
-    return `<button class="icon-btn tb-card-memo${has ? ' tb-card-memo--has' : ''}${open ? ' tb-card-memo--open' : ''}" draggable="false" title="${escapeAttr(tip)}" aria-label="Notes"
-        onclick="event.stopPropagation(); TaskBoard.openMemo('${escapeAttr(card.id)}')"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M2.5 1.75C2.5.78 3.28 0 4.25 0h7.5c.97 0 1.75.78 1.75 1.75v12.5A1.75 1.75 0 0 1 11.75 16h-7.5A1.75 1.75 0 0 1 2.5 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .14.11.25.25.25h7.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25ZM5 4.75A.75.75 0 0 1 5.75 4h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 4.75Zm0 3A.75.75 0 0 1 5.75 7h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 7.75Zm0 3a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"/></svg>${count}</button>`;
+    const count = open ? `<span class="tb-memo-count tb-memo-count--open">${open}</span>`
+      : todos.length ? `<span class="tb-memo-count">${todos.length}/${todos.length}</span>` : '';
+    const tip = open ? `${open} open to-do${open === 1 ? '' : 's'}` : todos.length ? 'All to-dos done' : 'Add to-dos';
+    return `<button class="icon-btn tb-card-memo${todos.length ? ' tb-card-memo--has' : ''}${open ? ' tb-card-memo--open' : ''}" draggable="false" title="${escapeAttr(tip)}" aria-label="To-dos"
+        onclick="event.stopPropagation(); TaskBoard.openMemo('${escapeAttr(card.id)}')"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M2.5 1.75v11.5c0 .14.11.25.25.25h3.17a.75.75 0 0 1 0 1.5H2.75A1.75 1.75 0 0 1 1 13.25V1.75C1 .78 1.78 0 2.75 0h8.5C12.22 0 13 .78 13 1.75v7.74a.75.75 0 0 1-1.5 0V1.75a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13.06 9.48-4.25 4.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 1 1 1.06-1.06l1.72 1.72 3.72-3.72a.75.75 0 1 1 1.06 1.06ZM4 4.75A.75.75 0 0 1 4.75 4h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 4 4.75Zm0 3A.75.75 0 0 1 4.75 7h2.5a.75.75 0 0 1 0 1.5h-2.5A.75.75 0 0 1 4 7.75Z"/></svg>${count}</button>`;
   },
 
-  todoRowHtml(todo) {
-    return `<div class="tb-todo-row">
+  /** index: the to-do's place in the saved list; none for a row added in the dialog. */
+  todoRowHtml(todo, index) {
+    return `<div class="tb-todo-row"${Number.isInteger(index) ? ` data-index="${index}"` : ''}>
         <input type="checkbox" class="tb-todo-done"${todo.done ? ' checked' : ''}>
         <input type="text" class="tb-todo-text" maxlength="300" value="${escapeAttr(todo.text)}" placeholder="To-do">
+        <button class="btn btn-sm" onclick="TaskBoard.todoToTicket(this)" title="Make a new ticket from this to-do" aria-label="Make a ticket">&rarr; Ticket</button>
         <button class="btn btn-sm" onclick="this.parentElement.remove()" title="Remove" aria-label="Remove to-do">&times;</button>
       </div>`;
   },
 
-  /** Own note and to-do list on a Finalize/Done ticket — for the user only, never sent to Claude. */
+  /** Own to-do list on a Finalize/Done ticket — for the user only, never sent to Claude. */
   openMemo(id) {
     const card = TaskBoard.findCard(id);
     if (!card) return;
     const heading = card.title || (card.notes || '').trim().split('\n')[0];
-    const body = `<div class="tb-editor-project">${escapeHtml(heading)}</div>`
-      + formGroup('Note', `<textarea id="tb-memo" rows="5" maxlength="5000" placeholder="Only for you — not sent to Claude">${escapeHtml(card.memo || '')}</textarea>`)
-      + formGroup('To-do', `<div id="tb-todos">${(card.todos || []).map(TaskBoard.todoRowHtml).join('')}</div>
+    const body = `<div class="tb-editor-project" id="tb-memo-card" data-id="${escapeAttr(card.id)}">${escapeHtml(heading)}</div>`
+      + formGroup('To-do', `<div id="tb-todos">${(card.todos || []).map((t, i) => TaskBoard.todoRowHtml(t, i)).join('')}</div>
           <button class="btn btn-sm" onclick="TaskBoard.addTodoRow()">+ To-do</button>`);
-    openModal({ title: 'Notes', width: 520, body, buttons: [{ label: 'Save', primary: true, onClick: () => TaskBoard.saveMemo(card.id) }] });
-    if (!(card.todos || []).length && !card.memo) setTimeout(() => { const t = document.getElementById('tb-memo'); if (t) t.focus(); }, 0);
+    openModal({ title: 'To-dos', width: 560, body, buttons: [{ label: 'Save', primary: true, onClick: () => TaskBoard.saveMemo(card.id) }] });
+    if (!(card.todos || []).length) setTimeout(() => { if (document.getElementById('tb-todos')) TaskBoard.addTodoRow(); }, 0);
   },
 
   addTodoRow() {
@@ -525,13 +530,52 @@ const TaskBoard = {
       text: row.querySelector('.tb-todo-text').value,
       done: row.querySelector('.tb-todo-done').checked
     }));
-    const memo = document.getElementById('tb-memo').value;
     try {
-      await api('/api/task-board/cards/' + encodeURIComponent(id) + '/memo', { method: 'PUT', body: { memo, todos } });
+      await api('/api/task-board/cards/' + encodeURIComponent(id) + '/memo', { method: 'PUT', body: { todos } });
     } catch (e) {
       toast(e.message, 'error');
       return false;
     }
+    await TaskBoard.load();
+  },
+
+  /**
+   * A to-do in the open To-dos dialog becomes a new ToDo ticket in the same project. A saved to-do is
+   * first removed from the saved list (other unsaved edits in the dialog stay unsaved); the ticket is
+   * created only once that succeeds, and the to-do is put back if creating fails.
+   */
+  async todoToTicket(btn) {
+    const row = btn.closest('.tb-todo-row');
+    const text = row.querySelector('.tb-todo-text').value.trim();
+    const card = TaskBoard.findCard(document.getElementById('tb-memo-card').dataset.id);
+    if (!text || !card || btn.disabled) return;
+    btn.disabled = true;
+    const url = '/api/task-board/cards/' + encodeURIComponent(card.id) + '/memo';
+    const saved = card.todos || [];
+    const index = row.dataset.index === undefined ? -1 : Number(row.dataset.index);
+    try {
+      if (index !== -1) await api(url, { method: 'PUT', body: { todos: saved.filter((t, i) => i !== index) } });
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message, 'error');
+      return;
+    }
+    try {
+      await api('/api/task-board/cards', { method: 'POST', body: { project: card.project, notes: text } });
+    } catch (e) {
+      if (index !== -1) await api(url, { method: 'PUT', body: { todos: saved } }).catch(() => {});
+      btn.disabled = false;
+      toast(e.message, 'error');
+      await TaskBoard.load();
+      return;
+    }
+    row.remove();
+    if (index !== -1) {
+      document.querySelectorAll('#tb-todos .tb-todo-row[data-index]').forEach(r => {
+        if (Number(r.dataset.index) > index) r.dataset.index = Number(r.dataset.index) - 1;
+      });
+    }
+    toast('Ticket created in ToDo');
     await TaskBoard.load();
   },
 
