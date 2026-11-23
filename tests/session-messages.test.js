@@ -32,6 +32,7 @@ const context = vm.createContext({
   clearTimeout: () => {},
   setTimeout: () => {},
 });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/js/session-questions.js'), 'utf-8'), context);
 vm.runInContext(src, context);
 
 function makeConvEl(agentId) {
@@ -134,6 +135,19 @@ test('refreshOpenAgentConvs: only refreshes visible, previously-loaded panels', 
   await Sessions.refreshOpenAgentConvs();
   assert.strictEqual(apiCalls, 1, 'closed panel should be skipped');
   assert.strictEqual(openConv.dataset.loaded, '1');
+});
+
+test('renderMessage: an AskUserQuestion is a question card, not a hidden tool line; its result carries the answers', () => {
+  const questions = [{ question: 'Which DB?', header: 'DB', multiSelect: false, options: [{ label: 'Postgres', description: '' }] }];
+  const ask = Sessions.renderMessage({ role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'AskUserQuestion', input: { questions } }] });
+  assert.match(ask, /class="chat-question" data-tool-use-id="tu1"/);
+  assert.doesNotMatch(ask, /chat-msg-tools-only/);
+  assert.doesNotMatch(ask, /chat-tool-header/);
+  const result = Sessions.renderMessage({ role: 'user', content: [{ type: 'tool_result', toolUseId: 'tu1', text: 'answered', answers: { 'Which DB?': 'Postgres' } }] });
+  assert.match(result, /class="chat-question-answer" hidden data-tool-use-id="tu1"/);
+  assert.match(result, /chat-msg-tools-only/, 'the result stays a tool line');
+  const other = Sessions.renderMessage({ role: 'user', content: [{ type: 'tool_result', toolUseId: 'b1', text: 'ok' }] });
+  assert.doesNotMatch(other, /chat-question-answer/);
 });
 
 // --- task-notification rendering ---

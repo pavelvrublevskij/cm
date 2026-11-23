@@ -1263,6 +1263,18 @@ const Sessions = {
     });
   },
 
+  /** The open session's URL, under which its question cards answer. */
+  detailSessionUrl() {
+    const { slug, sessionId } = Sessions.detailState;
+    return `/api/projects/${slug}/sessions/${sessionId}`;
+  },
+
+  /** Bring the conversation's AskUserQuestion cards up to date (answered, answerable here, or open). */
+  applyQuestions() {
+    if (typeof SessionQuestions === 'undefined' || !Sessions.detailState.sessionId) return;
+    SessionQuestions.apply(document.getElementById('session-messages'), Sessions.detailSessionUrl(), !Sessions.detailState.readOnly);
+  },
+
   async pollNewMessages() {
     const state = Sessions.detailState;
     if (!state.slug || !state.sessionId) return;
@@ -1303,6 +1315,7 @@ const Sessions = {
       if (!container) return;
       container.insertAdjacentHTML('afterbegin', html);
       addCodeCopyButtons(container);
+      Sessions.applyQuestions();
 
       state.total = data.total;
       state.offset += added;
@@ -1390,6 +1403,7 @@ const Sessions = {
       const html = data.messages.map(m => Sessions.renderMessage(m)).join('');
       container.insertAdjacentHTML('beforeend', html);
       addCodeCopyButtons(container);
+      Sessions.applyQuestions();
 
       Sessions.updateMessageCount();
 

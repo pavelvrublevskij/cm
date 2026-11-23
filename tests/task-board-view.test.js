@@ -825,6 +825,7 @@ function previewEnv({ cards, api }) {
     addCodeCopyButtons: () => {},
     Sessions: { renderMessage: m => `<msg>${m.text}</msg>`, refreshIntervalMs: () => 5000 },
     SessionInput: { NOTES: { none: 'no pty', busy: 'working', question: 'answer first', ready: '' } },
+    SessionQuestions: { held: [], applied: [], setHeld(url, list) { this.held.push([url, list]); }, apply(root, url, can) { this.applied.push([url, can]); } },
     toast: () => {},
     api: (url, opts) => (url.endsWith('/input-state') || url.endsWith('/input') ? Promise.resolve({ state: 'none' }) : api(url, opts))
   });
