@@ -1538,7 +1538,42 @@ const Sessions = {
     if (!panel) return;
     const isOpen = panel.classList.contains('open');
     document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
-    if (!isOpen) panel.classList.add('open');
+    if (isOpen) return;
+    // Fixed positioning so overflow/stacking of ancestors can't clip the panel
+    const r = btn.getBoundingClientRect();
+    // Measure the CSS (absolute) layout first to keep the panel's own left/right alignment
+    panel.classList.remove('fixed');
+    panel.style.top = panel.style.left = panel.style.right = '';
+    panel.classList.add('open');
+    const pr = panel.getBoundingClientRect();
+    const leftAligned = Math.abs(pr.left - r.left) < Math.abs(pr.right - r.right);
+    panel.classList.add('fixed');
+    panel._anchor = btn;
+    if (leftAligned) {
+      panel.style.left = r.left + 'px';
+      panel.style.right = 'auto';
+    } else {
+      panel.style.right = (window.innerWidth - r.right) + 'px';
+      panel.style.left = 'auto';
+    }
+    const h = panel.offsetHeight;
+    const below = r.bottom + 4;
+    panel.style.top = (below + h > window.innerHeight && r.top - 4 - h >= 0 ? r.top - 4 - h : below) + 'px';
+    if (!Sessions._actionMenuListeners) {
+      Sessions._actionMenuListeners = true;
+      // Close only when the scrolled element moves the anchor button (page or an ancestor scroll)
+      window.addEventListener('scroll', e => {
+        const t = e.target;
+        document.querySelectorAll('.action-menu-panel.open.fixed').forEach(p => {
+          if (t === document || t === document.documentElement || (t && t.contains && p._anchor && t.contains(p._anchor) && !p.contains(t))) {
+            p.classList.remove('open');
+          }
+        });
+      }, true);
+      window.addEventListener('resize', () => {
+        document.querySelectorAll('.action-menu-panel.open.fixed').forEach(p => p.classList.remove('open'));
+      });
+    }
   },
 
   renameAction(btn) {

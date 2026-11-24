@@ -2498,6 +2498,11 @@ mark.search-highlight {
   display: block;
 }
 
+.action-menu-panel.fixed {
+  position: fixed;
+  z-index: 1001;
+}
+
 .action-menu-item {
   display: block;
   width: 100%;
