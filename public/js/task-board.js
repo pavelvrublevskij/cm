@@ -308,7 +308,7 @@ const TaskBoard = {
     p.inputState = state;
     const box = p.el.querySelector('.tb-preview-input');
     box.querySelector('textarea').disabled = state !== 'ready' && state !== 'busy';
-    box.querySelector('.session-input-note').textContent = SessionInput.NOTES[state] || '';
+    SessionInput.renderNote(box.querySelector('.session-input-note'), state);
   },
 
   onPreviewKeyDown(p, e) {

@@ -43,7 +43,15 @@ const SessionInput = {
     wrap.style.display = slug && !readOnly ? '' : 'none';
     wrap.dataset.state = state;
     text.disabled = state !== 'ready' && state !== 'busy';
-    note.textContent = SessionInput.NOTES[state] || '';
+    SessionInput.renderNote(note, state);
+  },
+
+  // Rewrites the note only when its state changes, so a poll does not restart the busy spinner.
+  renderNote(note, state) {
+    if (note.dataset.state === state) return;
+    note.dataset.state = state;
+    if (state === 'busy') note.innerHTML = `<span class="btn-spinner"></span>${SessionInput.NOTES.busy}`;
+    else note.textContent = SessionInput.NOTES[state] || '';
   },
 
   onKeyDown(event) {
