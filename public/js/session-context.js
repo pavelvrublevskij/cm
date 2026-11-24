@@ -331,9 +331,17 @@ Object.assign(Sessions, {
         <span class="sf-name">${escapeHtml(f.name)}</span>
         <span class="sf-dirty" style="display:none" title="Unsaved changes">&#9679;</span>
         <span class="ctx-file-badge ctx-file-badge-${byScript ? 'script' : status}">${byScript ? 'edited by script' : status}</span>
+        ${Sessions._ctxMainBadge(f)}
       </div>`;
     });
     return html;
+  },
+
+  /** Marks a file a worktree session changed in its main checkout, outside the worktree. */
+  _ctxMainBadge(f) {
+    return f.projSlug
+      ? '<span class="ctx-file-badge ctx-file-badge-main" title="Changed in the main checkout, outside this worktree">main checkout</span>'
+      : '';
   },
 
   /** Changed only by shell commands, with no recorded "before" text to diff against. */
@@ -387,8 +395,20 @@ Object.assign(Sessions, {
     SessionFiles.openFile(el.dataset.path, { mode: 'diff', ctx: { ...el.dataset } });
   },
 
+  /** The main-checkout slug of a file a worktree session changed outside its worktree, else null. */
+  _ctxFileSlug(filePath) {
+    const files = (Sessions._ctx && Sessions._ctx.files) || [];
+    const p = (filePath || '').replace(/\\/g, '/');
+    const f = files.find(f => f.projSlug && f.path.replace(/\\/g, '/') === p);
+    return f ? f.projSlug : null;
+  },
+
+  _ctxSlugFor(filePath) {
+    return Sessions._ctxFileSlug(filePath) || (Sessions._ctx ? Sessions._ctx.projSlug : '');
+  },
+
   async openCtxFile(filePath) {
-    const projSlug = Sessions._ctx ? Sessions._ctx.projSlug : '';
+    const projSlug = Sessions._ctxSlugFor(filePath);
     if (!projSlug) return;
     try {
       await api('/api/file-history/open-file', { method: 'POST', body: { projSlug, filePath } });
@@ -398,7 +418,7 @@ Object.assign(Sessions, {
   },
 
   async revealCtxFile(filePath) {
-    const projSlug = Sessions._ctx ? Sessions._ctx.projSlug : '';
+    const projSlug = Sessions._ctxSlugFor(filePath);
     if (!projSlug) return;
     try {
       await api('/api/file-history/reveal-file', { method: 'POST', body: { projSlug, filePath } });

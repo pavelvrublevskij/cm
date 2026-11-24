@@ -67,6 +67,7 @@ const SessionChanges = {
             <div class="sc-file-header">
               <span class="sc-file-path" title="${escapeAttr(f.path)}">${escapeHtml(f.path)}</span>
               <span class="ctx-file-badge ctx-file-badge-${byScript ? 'script' : status}">${byScript ? 'edited by script' : status}</span>
+              ${Sessions._ctxMainBadge(f)}
               <span class="sc-file-stats" id="sc-stats-${i}"></span>
               ${f.isDeleted ? '' : `<button class="btn btn-sm" onclick="SessionChanges.openSource(${escapeAttr(JSON.stringify(f.path))})">Open</button>`}
             </div>
@@ -87,7 +88,7 @@ const SessionChanges = {
         return;
       }
       try {
-        const result = await FileHistory.fetchDiffCurrent(ctx.sessionId, f.hash, f.versions[0], ctx.projSlug, f.path, {
+        const result = await FileHistory.fetchDiffCurrent(ctx.sessionId, f.hash, f.versions[0], f.projSlug || ctx.projSlug, f.path, {
           isNew: f.isNew, readBase: f.readBase
         });
         if (token !== SessionChanges._token) return;

@@ -16,6 +16,9 @@ const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 
 const router = express.Router();
 const FILE_HISTORY_DIR = path.join(CLAUDE_DIR, 'file-history');
+// Internal key prefix for files a worktree session changed in its main checkout (never sent to clients).
+const MAIN_PREFIX = 'main-checkout:';
+const WORKTREE_MARKER = '--claude-worktrees-';
 
 /**
  * Claude Code names file-history backups `<sha256(absolute path) truncated to 16 hex>@v<n>`.
@@ -107,6 +110,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
   let files = [];
 
   let projSlug = null;
+  let mainSlug = null;
   const planPathsFromSession = new Set();
   // Temporary diagnostic for the macOS file-detection issue -- pass ?debug=1 to see, per tool
   // call, why a file was or wasn't matched into the project directory. Remove once resolved.
@@ -186,13 +190,40 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       } catch (_) {}
     }
 
-    const projectDir = projSlug ? decodeSlug(projSlug) : null;
+    let projectDir = projSlug ? decodeSlug(projSlug) : null;
+    // A Claude worktree session (<project>/.claude/worktrees/<name>) also lists the files it changed
+    // in its main checkout; they keep their own slug so diff/open/reveal resolve against that folder.
+    // Nearest checkout: the last worktree marker, in case the project itself sits inside another worktree.
+    const wtIdx = projSlug ? projSlug.lastIndexOf(WORKTREE_MARKER) : -1;
+    mainSlug = wtIdx > 0 ? projSlug.slice(0, wtIdx) : null;
+    let mainDir = mainSlug ? decodeSlug(mainSlug) : null;
+    if (mainDir) mainDir = path.resolve(mainDir);
+    // A removed worktree can't be decoded from disk; its location follows from the main checkout.
+    if (mainDir && projectDir && !fs.existsSync(projectDir)) {
+      projectDir = path.join(mainDir, '.claude', 'worktrees', projSlug.slice(wtIdx + WORKTREE_MARKER.length));
+    }
 
     // Fallback: collect files touched via Write/Edit/MultiEdit tool calls, plus files/dirs removed
     // via rm/git rm inside Bash calls (Claude Code has no dedicated delete tool).
     // Runs unconditionally so sessions without a file-history dir still show their files.
     if (projectDir) {
       const resolvedProjectDir = path.resolve(projectDir);
+      if (mainDir && path.relative(mainDir, resolvedProjectDir).startsWith('..')) mainDir = null;
+      // Snapshot records key files outside the cwd by absolute path; give main-checkout ones the same
+      // key the tool-call pass below uses, so one file never becomes two rows.
+      if (mainDir) {
+        for (const key of Object.keys(fileMap)) {
+          if (!path.isAbsolute(key)) continue;
+          const abs = path.resolve(key);
+          const wtRel = path.relative(resolvedProjectDir, abs);
+          if (!(wtRel.startsWith('..') || path.isAbsolute(wtRel))) continue;
+          const mainRel = path.relative(mainDir, abs);
+          if (mainRel.startsWith('..') || path.isAbsolute(mainRel)) continue;
+          const mainKey = MAIN_PREFIX + mainRel.replace(/\\/g, '/');
+          if (!fileMap[mainKey]) fileMap[mainKey] = fileMap[key];
+          delete fileMap[key];
+        }
+      }
       const existingKeys = new Set(Object.keys(fileMap).map(k => k.replace(/\\/g, '/')));
       let sessionStart = 0;
       for (const line of sessionContent.split('\n')) {
@@ -262,10 +293,18 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
             else if (block.name === 'NotebookEdit') { filePath = block.input.notebook_path; }
             if (!filePath) continue;
             const rel = path.relative(resolvedProjectDir, path.resolve(filePath));
-            const included = !(rel.startsWith('..') || path.isAbsolute(rel));
+            let included = !(rel.startsWith('..') || path.isAbsolute(rel));
+            let relNorm = rel.replace(/\\/g, '/');
+            if (!included && mainDir) {
+              // A worktree session editing the main checkout, e.g. its git-ignored sources the worktree lacks.
+              const mainRel = path.relative(mainDir, path.resolve(filePath));
+              if (!(mainRel.startsWith('..') || path.isAbsolute(mainRel))) {
+                included = true;
+                relNorm = MAIN_PREFIX + mainRel.replace(/\\/g, '/');
+              }
+            }
             if (debug) debug.push({ tool: block.name, filePath, resolvedProjectDir, rel, included });
             if (!included) continue;
-            const relNorm = rel.replace(/\\/g, '/');
             touch(relNorm, promptIdx);
             if (!existingKeys.has(relNorm)) {
               existingKeys.add(relNorm);
@@ -277,12 +316,14 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
     }
 
     const histFiles = fs.existsSync(histDir) ? fs.readdirSync(histDir) : [];
+    const isMain = (key) => key.startsWith(MAIN_PREFIX);
+    const absOf = (key) => isMain(key) ? path.resolve(mainDir, key.slice(MAIN_PREFIX.length)) : path.resolve(projectDir, key);
 
     // Files found via tool calls carry no backup name; recover it from the path so their diffs work.
     if (projectDir && histFiles.length) {
       for (const [filePath, info] of Object.entries(fileMap)) {
         if (info.hash || info.isNew) continue;
-        const candidate = backupHash(path.resolve(projectDir, filePath));
+        const candidate = backupHash(absOf(filePath));
         if (histFiles.some(f => f.startsWith(candidate + '@v'))) info.hash = candidate;
       }
     }
@@ -298,7 +339,7 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       let isDeleted = false;
       let mtime = null;
       if (projectDir) {
-        const currentFile = path.resolve(projectDir, filePath);
+        const currentFile = absOf(filePath);
         try {
           mtime = fs.statSync(currentFile).mtimeMs;
         } catch (_) {
@@ -312,6 +353,9 @@ router.get('/:sessionId/context', wrapRoute(async (req, res) => {
       const touchedBy = filePrompts.get(relNormKey);
       const promptIdxs = touchedBy ? [...touchedBy].sort((a, b) => a - b) : [];
       const scripts = fileScripts.get(relNormKey) || [];
+      if (isMain(filePath)) {
+        return { path: filePath.slice(MAIN_PREFIX.length), projSlug: mainSlug, hash: info.hash, versions, isNew: info.isNew, isDeleted, mtime, readBase: false, prompts: promptIdxs, scripts };
+      }
       return { path: filePath, hash: info.hash, versions, isNew: info.isNew, isDeleted, mtime, readBase, prompts: promptIdxs, scripts };
     });
     // Every entry came from a snapshot backup or a Write/Edit/MultiEdit/NotebookEdit call, so all of
