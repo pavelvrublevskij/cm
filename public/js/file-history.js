@@ -131,7 +131,7 @@ const FileHistory = {
     const diffBody = overlay.querySelector('#fh-diff-body');
     if (diffBody) diffBody.innerHTML = '<div class="loading"><div class="spinner"></div>Computing diff…</div>';
 
-    const projSlug = Sessions._ctx ? Sessions._ctx.projSlug : '';
+    const projSlug = Sessions._ctxSlugFor(path);
     await FileHistory._loadDiff(overlay, session, hash, version, projSlug, path, {
       isNew: isNewBool,
       isDeleted: isDeletedBool,

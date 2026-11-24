@@ -4831,6 +4831,13 @@ mark.search-highlight {
   color: #d29922;
 }
 
+.ctx-file-badge-main {
+  background: rgba(163, 113, 247, 0.15);
+  color: #a371f7;
+}
+
+.sf-row .ctx-file-badge + .ctx-file-badge { margin-left: 4px; }
+
 @keyframes ctx-file-flash {
   0%   { background: rgba(56, 139, 253, 0.45); }
   30%  { background: rgba(56, 139, 253, 0.3); }

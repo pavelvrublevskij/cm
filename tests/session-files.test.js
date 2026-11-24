@@ -1320,3 +1320,44 @@ test('a persisted collapsed state is reapplied on session load', () => {
   SessionFiles.reset('proj-slug');
   assert.strictEqual(el('session-context').classList.contains('sf-structure-collapsed'), true);
 });
+
+test('a main-checkout change of a worktree session loads its content from the main checkout\'s slug', async () => {
+  context.Sessions._ctxFileSlug = p => (p === 'sources/repo/b.js' ? 'main-slug' : null);
+  try {
+    harness.apiHandler = () => ({ content: 'b', mtime: 1 });
+    await SessionFiles.openFile('sources/repo/b.js');
+    await SessionFiles.openFile('a.js');
+    const urls = harness.apiCalls.map(c => c.url).filter(u => u.includes('/files/content'));
+    assert.ok(urls[0].startsWith('/api/projects/main-slug/files/content?path=sources%2Frepo%2Fb.js'));
+    assert.ok(urls[1].startsWith('/api/projects/proj-slug/files/content?path=a.js'));
+  } finally {
+    delete context.Sessions._ctxFileSlug;
+  }
+});
+
+test('a main-checkout change of a worktree session diffs and saves under the main checkout\'s slug', async () => {
+  context.Sessions._ctxFileSlug = p => (p === 'sources/repo/b.js' ? 'main-slug' : null);
+  const origFetch = context.FileHistory.fetchDiffCurrent;
+  const diffSlugs = [];
+  context.FileHistory.fetchDiffCurrent = async (...args) => { diffSlugs.push(args[3]); return origFetch(...args); };
+  try {
+    harness.apiHandler = () => ({ content: 'b', mtime: 1 });
+    await SessionFiles.openFile('sources/repo/b.js', {
+      mode: 'diff',
+      ctx: { session: 's1', hash: 'abc', from: '1', path: 'sources/repo/b.js', isNew: '', isDeleted: '' }
+    });
+    await new Promise(r => setImmediate(r));
+    assert.ok(diffSlugs.length > 0 && diffSlugs.every(s => s === 'main-slug'), 'session diff is fetched under the main slug');
+
+    SessionFiles.setMode('source');
+    harness.cm.type('changed');
+    harness.apiHandler = () => ({ ok: true, mtime: 2, size: 7 });
+    harness.apiCalls = [];
+    await SessionFiles.save();
+    assert.strictEqual(harness.apiCalls[0].opts.method, 'PUT');
+    assert.strictEqual(harness.apiCalls[0].url, '/api/projects/main-slug/files/content');
+  } finally {
+    delete context.Sessions._ctxFileSlug;
+    context.FileHistory.fetchDiffCurrent = origFetch;
+  }
+});
