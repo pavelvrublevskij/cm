@@ -43,7 +43,34 @@ const SessionInput = {
     wrap.style.display = slug && !readOnly ? '' : 'none';
     wrap.dataset.state = state;
     text.disabled = state !== 'ready' && state !== 'busy';
-    note.textContent = SessionInput.NOTES[state] || '';
+    SessionInput.renderNote(note, state);
+  },
+
+  // Rewrites the note only when its state changes, so a poll does not restart the busy spinner.
+  renderNote(note, state) {
+    if (note.dataset.state === state) return;
+    note.dataset.state = state;
+    if (state === 'busy') note.innerHTML = `<span class="btn-spinner"></span>${SessionInput.NOTES.busy}`;
+    else note.textContent = SessionInput.NOTES[state] || '';
+  },
+
+  // Drag on the grip above the box: up makes it taller; its CSS min/max-height bound the size.
+  startResize(event) {
+    event.preventDefault();
+    const text = document.getElementById('session-input-text');
+    const startY = event.clientY;
+    const startH = text.offsetHeight;
+    const css = getComputedStyle(text);
+    const minH = parseFloat(css.minHeight), maxH = parseFloat(css.maxHeight);
+    const onMove = e => {
+      text.style.height = Math.min(maxH, Math.max(minH, startH + startY - e.clientY)) + 'px';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   },
 
   onKeyDown(event) {

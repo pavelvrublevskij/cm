@@ -146,16 +146,35 @@ test('a new session without an id yet sends its message over the terminal WebSoc
 
 // --- client: public/js/session-input.js ---
 
+// Setting textContent or innerHTML replaces the other, as on a real element.
+function fakeNote() {
+  let html = '';
+  return {
+    dataset: {},
+    writes: 0,
+    get innerHTML() { return html; },
+    set innerHTML(v) { html = v; this.writes++; },
+    get textContent() { return html.replace(/<[^>]*>/g, ''); },
+    set textContent(v) { html = v; this.writes++; }
+  };
+}
+
 function loadClient() {
   const src = fs.readFileSync(path.join(__dirname, '../public/js/session-input.js'), 'utf-8');
   const els = {
     'session-input': { style: {}, dataset: {} },
-    'session-input-text': { value: '', disabled: false },
-    'session-input-note': { textContent: '' }
+    'session-input-text': { value: '', disabled: false, style: {}, offsetHeight: 60 },
+    'session-input-note': fakeNote()
   };
   const h = { els, calls: [], response: {}, toasts: [] };
   const context = vm.createContext({
-    document: { getElementById: id => els[id] || null },
+    document: {
+      getElementById: id => els[id] || null,
+      listeners: {},
+      addEventListener(type, fn) { this.listeners[type] = fn; },
+      removeEventListener(type, fn) { if (this.listeners[type] === fn) delete this.listeners[type]; }
+    },
+    getComputedStyle: () => ({ minHeight: '40px', maxHeight: '200px' }),
     Sessions: { detailState: { slug: 'proj', sessionId: 'sid' } },
     api: async (url, opts) => {
       h.calls.push({ url, opts });
@@ -188,6 +207,51 @@ test('client: the box is disabled with a note without a CM pty or while a questi
   assert.strictEqual(h.els['session-input-text'].disabled, false);
   assert.strictEqual(h.els['session-input-note'].textContent, '');
   assert.strictEqual(h.calls[0].url, '/api/projects/proj/sessions/sid/input-state');
+});
+
+test('client: dragging the top grip up grows the box and down shrinks it', () => {
+  const h = loadClient();
+  const doc = h.context.document;
+  const text = h.els['session-input-text'];
+  let prevented = false;
+  h.SessionInput.startResize({ clientY: 500, preventDefault: () => { prevented = true; } });
+  assert.ok(prevented, 'no text selection while dragging');
+  doc.listeners.mousemove({ clientY: 450 });
+  assert.strictEqual(text.style.height, '110px');
+  doc.listeners.mousemove({ clientY: 520 });
+  assert.strictEqual(text.style.height, '40px');
+  doc.listeners.mousemove({ clientY: 100 });
+  assert.strictEqual(text.style.height, '200px', 'clamped to max-height');
+  doc.listeners.mousemove({ clientY: 900 });
+  assert.strictEqual(text.style.height, '40px', 'clamped to min-height');
+  doc.listeners.mousemove({ clientY: 490 });
+  assert.strictEqual(text.style.height, '70px', 'no dead zone after overshooting');
+  doc.listeners.mouseup();
+  assert.deepStrictEqual(Object.keys(doc.listeners), [], 'listeners removed on mouseup');
+});
+
+test('client: only the busy note shows a spinner', async () => {
+  const h = loadClient();
+  const note = h.els['session-input-note'];
+  h.SessionInput.render('busy');
+  assert.ok(note.innerHTML.startsWith('<span class="btn-spinner"></span>'));
+  assert.strictEqual(note.textContent, h.SessionInput.NOTES.busy);
+  for (const s of ['none', 'question', 'ready']) {
+    h.SessionInput.render(s);
+    assert.ok(!note.innerHTML.includes('btn-spinner'), s);
+    assert.strictEqual(note.textContent, h.SessionInput.NOTES[s], s);
+  }
+});
+
+test('client: a repeated busy render keeps the running spinner', () => {
+  const h = loadClient();
+  const note = h.els['session-input-note'];
+  h.SessionInput.render('busy');
+  const writes = note.writes;
+  h.SessionInput.render('busy');
+  assert.strictEqual(note.writes, writes, 'a poll in the same state does not rewrite the note');
+  h.SessionInput.render('ready');
+  assert.strictEqual(note.writes, writes + 1);
 });
 
 test('client: a new session without an id is ready and sends through the terminal panel', async () => {
