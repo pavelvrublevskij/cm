@@ -362,7 +362,7 @@ const SessionFiles = {
     if (isDeleted) return;
 
     try {
-      const data = await api(`/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/content?path=${encodeURIComponent(relPath)}`);
+      const data = await api(`/api/projects/${encodeURIComponent(SessionFiles._fileSlug(relPath))}/files/content?path=${encodeURIComponent(relPath)}`);
       const open = SessionFiles.open;
       if (!open || open.path !== relPath) return;
       const content = data.content != null ? data.content : '';
@@ -402,7 +402,7 @@ const SessionFiles = {
     open.loadingMore = true;
     SessionFiles.renderStatus();
     try {
-      const data = await api(`/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/content?path=${encodeURIComponent(open.path)}&offset=${open.nextOffset}`);
+      const data = await api(`/api/projects/${encodeURIComponent(SessionFiles._fileSlug(open.path))}/files/content?path=${encodeURIComponent(open.path)}&offset=${open.nextOffset}`);
       if (SessionFiles.open !== open) return true;
       const chunk = data.content || '';
       open.saved += chunk;
@@ -511,7 +511,7 @@ const SessionFiles = {
 
     const body = document.getElementById('sf-pane-body');
     if (isImageMode) {
-      const src = `/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/raw?path=${encodeURIComponent(open.path)}`
+      const src = `/api/projects/${encodeURIComponent(SessionFiles._fileSlug(open.path))}/files/raw?path=${encodeURIComponent(open.path)}`
         + (open.mtime ? `&mtime=${open.mtime}` : '');
       body.innerHTML = `<div class="sf-preview-pane sf-image-pane"><img class="sf-image-preview" src="${escapeAttr(src)}" alt="${escapeHtml(name)}"></div>`;
     } else if (isScripts) {
@@ -607,7 +607,17 @@ const SessionFiles = {
   },
 
   _projSlug() {
-    return (Sessions._ctx && Sessions._ctx.projSlug) || SessionFiles.slug;
+    const own = SessionFiles.open && SessionFiles._ownSlug(SessionFiles.open.path);
+    return own || (Sessions._ctx && Sessions._ctx.projSlug) || SessionFiles.slug;
+  },
+
+  /** Slug the file's content lives under: a worktree session's main-checkout change carries its own. */
+  _fileSlug(relPath) {
+    return SessionFiles._ownSlug(relPath) || SessionFiles.slug;
+  },
+
+  _ownSlug(relPath) {
+    return typeof Sessions !== 'undefined' && Sessions._ctxFileSlug ? Sessions._ctxFileSlug(relPath) : null;
   },
 
   /** Text as it stands in the pane — the unsaved buffer if there is one, else what is on disk. */
@@ -785,7 +795,7 @@ const SessionFiles = {
     SessionFiles._saving = true;
     SessionFiles.renderStatus();
     try {
-      const res = await api(`/api/projects/${encodeURIComponent(SessionFiles.slug)}/files/content`, {
+      const res = await api(`/api/projects/${encodeURIComponent(SessionFiles._fileSlug(path))}/files/content`, {
         method: 'PUT',
         body: { path, content }
       });

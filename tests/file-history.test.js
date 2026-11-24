@@ -831,3 +831,173 @@ test('context: each changed file lists the prompts whose tool calls touched it',
   assert.deepStrictEqual(byPath['a.js'], [1, 2]);
   assert.deepStrictEqual(byPath['b.js'], [1]);
 });
+
+// ── worktree sessions that change their main checkout ─────────────────────────
+
+const WT_MAIN_DIR = path.join(HOME, 'wtmain-proj');
+const WT_DIR = path.join(WT_MAIN_DIR, '.claude', 'worktrees', 'cm-0000wt01');
+const WT_MAIN_SLUG = slugForPath(WT_MAIN_DIR);
+const WT_SLUG = slugForPath(WT_DIR);
+
+test('context: a worktree session lists files it changed in the main checkout, diffed from its own snapshot', async () => {
+  const sessionId = 'wtmain001-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  // sources/ is git-ignored in the main checkout, so the worktree never gets a copy of it.
+  const mainFile = path.join(WT_MAIN_DIR, 'sources', 'repo', 'app.js');
+  const wtFile = path.join(WT_DIR, 'docs.md');
+  fs.mkdirSync(path.dirname(mainFile), { recursive: true });
+  fs.mkdirSync(WT_DIR, { recursive: true });
+  fs.writeFileSync(mainFile, 'after edit\n');
+  fs.writeFileSync(wtFile, 'doc\n');
+  const outsideFile = path.join(require('os').tmpdir(), 'cm-fh-elsewhere.js');
+
+  const hash = crypto.createHash('sha256').update(mainFile, 'utf8').digest('hex').slice(0, 16);
+  const histDir = path.join(FILE_HISTORY_DIR, sessionId);
+  fs.mkdirSync(histDir, { recursive: true });
+  fs.writeFileSync(path.join(histDir, `${hash}@v1`), 'before edit\n');
+
+  const projDir = path.join(paths.PROJECTS_DIR, WT_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projDir, sessionId + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'edit sources' } },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'm1', name: 'Edit', input: { file_path: mainFile, old_string: 'a', new_string: 'b' } },
+            { type: 'tool_use', id: 'm2', name: 'Edit', input: { file_path: wtFile, old_string: 'a', new_string: 'b' } },
+            { type: 'tool_use', id: 'm3', name: 'Edit', input: { file_path: outsideFile, old_string: 'a', new_string: 'b' } }
+          ]
+        }
+      }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+
+  const res = await request(app).get(`/api/file-history/${sessionId}/context`);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.projSlug, WT_SLUG);
+
+  const main = res.body.files.find(f => f.path === 'sources/repo/app.js');
+  assert.ok(main, 'the main-checkout file must be listed');
+  assert.strictEqual(main.projSlug, WT_MAIN_SLUG, 'it carries the main checkout slug');
+  assert.strictEqual(main.hash, hash);
+  assert.deepStrictEqual(main.versions, [1]);
+  assert.strictEqual(main.isDeleted, false);
+  assert.deepStrictEqual(main.prompts, [1]);
+
+  const wt = res.body.files.find(f => f.path === 'docs.md');
+  assert.ok(wt, 'worktree files are still listed');
+  assert.strictEqual(wt.projSlug, undefined);
+
+  assert.strictEqual(res.body.files.length, 2, 'files outside both folders stay excluded');
+
+  const diff = await request(app)
+    .get(`/api/file-history/${sessionId}/${hash}/diff-current`)
+    .query({ version: 1, projSlug: main.projSlug, filePath: main.path });
+  assert.strictEqual(diff.status, 200);
+  assert.strictEqual(diff.body.stats.added, 1);
+  assert.strictEqual(diff.body.stats.removed, 1);
+});
+
+test('context: a non-worktree session does not list files outside its folder', async () => {
+  const sessionId = 'wtmain002-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  fs.mkdirSync(WT_DIR, { recursive: true });
+  const projDir = path.join(paths.PROJECTS_DIR, WT_MAIN_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projDir, sessionId + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-07-01T10:00:00.000Z', message: { content: 'edit' } },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'n1', name: 'Edit', input: { file_path: path.join(require('os').tmpdir(), 'cm-fh-other.js'), old_string: 'a', new_string: 'b' } }] }
+      }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+  const res = await request(app).get(`/api/file-history/${sessionId}/context`);
+  assert.deepStrictEqual(res.body.files, []);
+});
+
+test('context: main-checkout changes still show after the worktree folder is removed', async () => {
+  const sessionId = 'wtmain003-cccc-cccc-cccc-cccccccccccc';
+  const goneSlug = slugForPath(path.join(WT_MAIN_DIR, '.claude', 'worktrees', 'cm-0000gone'));
+  const mainFile = path.join(WT_MAIN_DIR, 'sources', 'repo', 'kept.js');
+  const goneFile = path.join(WT_MAIN_DIR, '.claude', 'worktrees', 'cm-0000gone', 'lost.js');
+  fs.mkdirSync(path.dirname(mainFile), { recursive: true });
+  fs.writeFileSync(mainFile, 'now\n');
+
+  const hash = crypto.createHash('sha256').update(mainFile, 'utf8').digest('hex').slice(0, 16);
+  const histDir = path.join(FILE_HISTORY_DIR, sessionId);
+  fs.mkdirSync(histDir, { recursive: true });
+  fs.writeFileSync(path.join(histDir, `${hash}@v1`), 'then\n');
+
+  const projDir = path.join(paths.PROJECTS_DIR, goneSlug);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projDir, sessionId + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-07-02T10:00:00.000Z', message: { content: 'edit' } },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'g1', name: 'Edit', input: { file_path: mainFile, old_string: 'a', new_string: 'b' } },
+            { type: 'tool_use', id: 'g2', name: 'Edit', input: { file_path: goneFile, old_string: 'a', new_string: 'b' } }
+          ]
+        }
+      }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+
+  const res = await request(app).get(`/api/file-history/${sessionId}/context`);
+  const kept = res.body.files.find(f => f.path === 'sources/repo/kept.js');
+  assert.ok(kept, 'the main-checkout file is listed');
+  assert.strictEqual(kept.projSlug, WT_MAIN_SLUG);
+  assert.strictEqual(kept.hash, hash);
+  assert.strictEqual(kept.isDeleted, false);
+
+  const lost = res.body.files.find(f => f.path === 'lost.js');
+  assert.ok(lost, 'a file of the removed worktree keeps its worktree-relative path');
+  assert.strictEqual(lost.projSlug, undefined);
+  assert.strictEqual(lost.isDeleted, true);
+});
+
+test('context: a main-checkout file in snapshot records and tool calls is listed once, under the main slug', async () => {
+  const sessionId = 'wtmain004-dddd-dddd-dddd-dddddddddddd';
+  const mainFile = path.join(WT_MAIN_DIR, 'sources', 'repo', 'snap.js');
+  fs.mkdirSync(path.dirname(mainFile), { recursive: true });
+  fs.mkdirSync(WT_DIR, { recursive: true });
+  fs.writeFileSync(mainFile, 'after\n');
+
+  const hash = 'snapmainhash0001';
+  const histDir = path.join(FILE_HISTORY_DIR, sessionId);
+  fs.mkdirSync(histDir, { recursive: true });
+  fs.writeFileSync(path.join(histDir, `${hash}@v1`), 'before\n');
+
+  const projDir = path.join(paths.PROJECTS_DIR, WT_SLUG);
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projDir, sessionId + '.jsonl'),
+    [
+      { type: 'user', timestamp: '2026-07-03T10:00:00.000Z', message: { content: 'edit' } },
+      {
+        type: 'file-history-snapshot',
+        isSnapshotUpdate: true,
+        snapshot: { trackedFileBackups: { [mainFile]: { backupFileName: `${hash}@v1`, version: 1 } } }
+      },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 's1', name: 'Edit', input: { file_path: mainFile, old_string: 'a', new_string: 'b' } }] }
+      }
+    ].map(e => JSON.stringify(e)).join('\n')
+  );
+
+  const res = await request(app).get(`/api/file-history/${sessionId}/context`);
+  assert.strictEqual(res.body.files.length, 1, 'one row, not a duplicate under the absolute snapshot key');
+  const f = res.body.files[0];
+  assert.strictEqual(f.path, 'sources/repo/snap.js');
+  assert.strictEqual(f.projSlug, WT_MAIN_SLUG);
+  assert.strictEqual(f.hash, hash, 'the snapshot backup is kept');
+  assert.deepStrictEqual(f.prompts, [1]);
+});
