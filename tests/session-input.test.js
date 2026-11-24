@@ -146,12 +146,25 @@ test('a new session without an id yet sends its message over the terminal WebSoc
 
 // --- client: public/js/session-input.js ---
 
+// Setting textContent or innerHTML replaces the other, as on a real element.
+function fakeNote() {
+  let html = '';
+  return {
+    dataset: {},
+    writes: 0,
+    get innerHTML() { return html; },
+    set innerHTML(v) { html = v; this.writes++; },
+    get textContent() { return html.replace(/<[^>]*>/g, ''); },
+    set textContent(v) { html = v; this.writes++; }
+  };
+}
+
 function loadClient() {
   const src = fs.readFileSync(path.join(__dirname, '../public/js/session-input.js'), 'utf-8');
   const els = {
     'session-input': { style: {}, dataset: {} },
     'session-input-text': { value: '', disabled: false },
-    'session-input-note': { textContent: '' }
+    'session-input-note': fakeNote()
   };
   const h = { els, calls: [], response: {}, toasts: [] };
   const context = vm.createContext({
@@ -188,6 +201,30 @@ test('client: the box is disabled with a note without a CM pty or while a questi
   assert.strictEqual(h.els['session-input-text'].disabled, false);
   assert.strictEqual(h.els['session-input-note'].textContent, '');
   assert.strictEqual(h.calls[0].url, '/api/projects/proj/sessions/sid/input-state');
+});
+
+test('client: only the busy note shows a spinner', async () => {
+  const h = loadClient();
+  const note = h.els['session-input-note'];
+  h.SessionInput.render('busy');
+  assert.ok(note.innerHTML.startsWith('<span class="btn-spinner"></span>'));
+  assert.strictEqual(note.textContent, h.SessionInput.NOTES.busy);
+  for (const s of ['none', 'question', 'ready']) {
+    h.SessionInput.render(s);
+    assert.ok(!note.innerHTML.includes('btn-spinner'), s);
+    assert.strictEqual(note.textContent, h.SessionInput.NOTES[s], s);
+  }
+});
+
+test('client: a repeated busy render keeps the running spinner', () => {
+  const h = loadClient();
+  const note = h.els['session-input-note'];
+  h.SessionInput.render('busy');
+  const writes = note.writes;
+  h.SessionInput.render('busy');
+  assert.strictEqual(note.writes, writes, 'a poll in the same state does not rewrite the note');
+  h.SessionInput.render('ready');
+  assert.strictEqual(note.writes, writes + 1);
 });
 
 test('client: a new session without an id is ready and sends through the terminal panel', async () => {
