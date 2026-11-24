@@ -54,6 +54,25 @@ const SessionInput = {
     else note.textContent = SessionInput.NOTES[state] || '';
   },
 
+  // Drag on the grip above the box: up makes it taller; its CSS min/max-height bound the size.
+  startResize(event) {
+    event.preventDefault();
+    const text = document.getElementById('session-input-text');
+    const startY = event.clientY;
+    const startH = text.offsetHeight;
+    const css = getComputedStyle(text);
+    const minH = parseFloat(css.minHeight), maxH = parseFloat(css.maxHeight);
+    const onMove = e => {
+      text.style.height = Math.min(maxH, Math.max(minH, startH + startY - e.clientY)) + 'px';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  },
+
   onKeyDown(event) {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
     event.preventDefault();

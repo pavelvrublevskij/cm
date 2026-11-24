@@ -759,6 +759,7 @@
                   <div id="session-messages" class="chat-container"></div>
                 </div>
                 <div class="session-input" id="session-input" style="display:none">
+                  <div class="session-input-resize" onmousedown="SessionInput.startResize(event)" title="Drag to resize"></div>
                   <textarea id="session-input-text" class="session-input-text" rows="2"
                     placeholder="Message Claude — Enter to send, Shift+Enter for a new line"
                     onkeydown="SessionInput.onKeyDown(event)"></textarea>

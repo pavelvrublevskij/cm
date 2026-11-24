@@ -702,6 +702,7 @@ body {
   flex: 0 0 auto;
   padding: 8px 24px 12px;
   border-top: 1px solid var(--border);
+  position: relative;
 }
 .session-input-text {
   display: block;
@@ -711,6 +712,35 @@ body {
   max-height: 200px;
   resize: vertical;
   font: inherit;
+}
+/* The conversation's box resizes from its own top grip instead. */
+.session-input .session-input-text {
+  resize: none;
+}
+/* The box sits at the bottom of the pane, so it grows upward from a grip on its top edge. */
+.session-input-resize {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  z-index: 5;
+}
+.session-input-resize::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 32px;
+  height: 2px;
+  margin-left: -16px;
+  border-radius: 1px;
+  background: var(--text-muted);
+  opacity: 0.5;
+}
+.session-input-resize:hover::after {
+  opacity: 1;
 }
 .session-input-note {
   margin-top: 4px;
