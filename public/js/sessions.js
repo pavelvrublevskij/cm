@@ -1440,7 +1440,14 @@ const Sessions = {
     }
   },
 
+  /** The project a new session starts in: a worktree under <project>/.claude/worktrees/ starts it in that project (as lib/slug.js parentSlug). */
+  _newSessionSlug(slug) {
+    const i = slug.indexOf('--claude-worktrees-');
+    return i > 0 ? slug.slice(0, i) : slug;
+  },
+
   async newSessionOS(slug) {
+    slug = Sessions._newSessionSlug(slug);
     document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
     try {
       await Sessions.checkPricing();
@@ -1453,6 +1460,7 @@ const Sessions = {
   },
 
   async newSessionBrowser(slug) {
+    slug = Sessions._newSessionSlug(slug);
     document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
     try { await Sessions.checkPricing(); } catch (_) { /* non-fatal */ }
     if (typeof TerminalPanel === 'undefined') {
