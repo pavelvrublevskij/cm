@@ -731,11 +731,11 @@
           <div class="terminal-splitter" id="terminal-splitter" onmousedown="TerminalPanel.startDrag(event)"></div>
           <div class="session-right-pane" id="session-right-pane">
             <div class="session-tab-bar">
-              <button class="session-tab-btn active" id="right-tab-btn-conversation" onclick="Sessions.switchRightTab('conversation')">Conversation</button>
-              <button class="session-tab-btn" id="right-tab-btn-terminal" onclick="Sessions.switchRightTab('terminal')">Terminal</button>
+              <button class="session-tab-btn active" id="right-tab-btn-terminal" onclick="Sessions.switchRightTab('terminal')">Terminal</button>
+              <button class="session-tab-btn" id="right-tab-btn-conversation" onclick="Sessions.switchRightTab('conversation')">Chat <span class="beta-badge">beta</span></button>
             </div>
             <div class="session-right-body">
-              <div class="session-messages-wrap" id="session-messages-wrap">
+              <div class="session-messages-wrap right-tab-hidden" id="session-messages-wrap">
                 <div class="session-messages-header">
                   <div class="subtitle" id="session-count" style="color:var(--text-muted)"></div>
                   <div class="session-search-wrap" style="margin-top:8px;margin-bottom:0">
@@ -766,7 +766,7 @@
                 </div>
                 <button class="scroll-to-top" id="scroll-to-top-btn" onclick="Sessions.scrollToTop()" aria-label="Scroll to top" title="Scroll to top">&#8593;</button>
               </div><!-- end session-messages-wrap -->
-              <div class="terminal-pane right-tab-hidden" id="terminal-pane">
+              <div class="terminal-pane" id="terminal-pane">
                 <div class="terminal-pane-header">
                   <span class="terminal-pane-title">Terminal</span>
                   <span class="terminal-pane-status" id="terminal-status">disconnected</span>
