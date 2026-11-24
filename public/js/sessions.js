@@ -1120,7 +1120,7 @@ const Sessions = {
     const countEl = document.getElementById('session-detail-search-count');
     if (countEl) countEl.textContent = '';
 
-    Sessions.switchRightTab('conversation');
+    Sessions.switchRightTab(readOnly ? 'conversation' : 'terminal');
     if (typeof TerminalPanel !== 'undefined') TerminalPanel.applySavedWidth();
 
     if (!sessionId) {
@@ -1665,7 +1665,7 @@ const Sessions = {
     if (isSP && !Sessions._scratchpadLoaded) Sessions.loadScratchpad();
   },
 
-  /** Right pane tabs: 'conversation' (default) or 'terminal'. */
+  /** Right pane tabs: 'terminal' (default) or 'conversation' (shown as Chat beta; default in a read-only view). */
   switchRightTab(tab) {
     const msgs = document.getElementById('session-messages-wrap');
     const term = document.getElementById('terminal-pane');

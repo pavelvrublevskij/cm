@@ -662,6 +662,19 @@ body {
   border-top-color: var(--accent);
 }
 
+.beta-badge {
+  margin-left: 4px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  vertical-align: 1px;
+}
+
 .session-messages-wrap {
   flex: 1 1 auto;
   min-width: 0;

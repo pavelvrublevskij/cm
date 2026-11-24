@@ -99,7 +99,7 @@ const TerminalPanel = {
     return !!view && view.send(payload);
   },
 
-  /** Size the right pane (Conversation / Terminal) from the saved splitter position. */
+  /** Size the right pane (Terminal / Chat) from the saved splitter position. */
   applySavedWidth() {
     const body = document.getElementById('session-detail-body');
     if (!body) return;

@@ -320,18 +320,20 @@ test('switchRightTab back to conversation hides the terminal', () => {
   assert.ok(!el.tmBtn.classList.contains('active'));
 });
 
-test('loadDetail opens the right pane on Conversation even if Terminal was selected before', async () => {
+test('loadDetail opens the right pane on Terminal even if Chat was selected before', async () => {
   const el = rightPaneEls();
-  Sessions.switchRightTab('terminal');
+  Sessions.switchRightTab('conversation');
 
   await Sessions.loadDetail('proj', 's1', {}, false);
 
-  assert.strictEqual(Sessions._activeRightTab, 'conversation');
-  assert.ok(el.term.classList.contains('right-tab-hidden'));
-  assert.ok(!el.msgs.classList.contains('right-tab-hidden'));
+  assert.strictEqual(Sessions._activeRightTab, 'terminal');
+  assert.ok(!el.term.classList.contains('right-tab-hidden'));
+  assert.ok(el.msgs.classList.contains('right-tab-hidden'));
+  assert.ok(el.tmBtn.classList.contains('active'));
+  assert.ok(!el.cvBtn.classList.contains('active'));
 });
 
-test('loadDetail for a read-only session also opens on Conversation', async () => {
+test('loadDetail for a read-only session opens on Chat', async () => {
   rightPaneEls();
   Sessions.switchRightTab('terminal');
 
@@ -350,16 +352,16 @@ test('a saved Conversation tab from before the move opens Files on the left', as
   assert.strictEqual(Sessions._activeTab, 'file-changes');
 });
 
-test('loadDetail with no session id yet starts on Files and Conversation', async () => {
+test('loadDetail with no session id yet starts on Files and Terminal', async () => {
   rightPaneEls();
   Sessions._activeTab = 'activity';
-  Sessions.switchRightTab('terminal');
+  Sessions.switchRightTab('conversation');
   Sessions._startDiscovery = () => {};
 
   await Sessions.loadDetail('proj', null, {}, false);
 
   assert.strictEqual(Sessions._activeTab, 'file-changes');
-  assert.strictEqual(Sessions._activeRightTab, 'conversation');
+  assert.strictEqual(Sessions._activeRightTab, 'terminal');
 });
 
 test('message polling keeps running while the left panel is collapsed', async () => {
