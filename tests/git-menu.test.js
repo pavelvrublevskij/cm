@@ -12,7 +12,7 @@ const src = ['git-menu.js', 'git-branch-picker.js']
   .map(f => fs.readFileSync(path.join(__dirname, '../public/js', f), 'utf-8'))
   .join('\n');
 
-const harness = {};
+const harness = { listeners: {} };
 
 function makeEl(id) {
   return {
@@ -53,7 +53,7 @@ const context = vm.createContext({
     getElementById: id => el(id),
     querySelector: () => null,
     querySelectorAll: () => [],
-    addEventListener: () => {},
+    addEventListener: (type, fn) => { (harness.listeners[type] = harness.listeners[type] || []).push(fn); },
     activeElement: null,
   },
   window: {},
@@ -100,6 +100,7 @@ beforeEach(() => {
   Picker._branches = null;
   Picker._filter = '';
   Picker._hl = 0;
+  Picker._ctx = null;
 });
 
 const itemIndex = label => GitMenu._items.findIndex(i => i.label === label);
@@ -292,4 +293,51 @@ test('a failed branch read is reported and closes the picker', async () => {
   }
   assert.strictEqual(Picker._isOpen, false);
   assert.match(harness.toasts.pop().msg, /boom/);
+});
+
+test('the picker opened for another project lists, asks and switches through that project', async () => {
+  const seen = [];
+  context.GitApi.branches = async slug => { seen.push(slug); return harness.branches; };
+  const ctx = {
+    slug: 'other', panelId: 'tb-branch-picker-other',
+    files: () => 1, label: () => 'dev',
+    checkout: (name, remote, stash) => { harness.calls.push(['lane-checkout', name, remote, stash]); },
+  };
+  try {
+    await Picker.open(ctx);
+  } finally {
+    context.GitApi.branches = async () => harness.branches;
+  }
+  assert.deepStrictEqual(seen, ['other']);
+  assert.ok(el('tb-branch-picker-other').classList.contains('open'));
+  Picker.pick(1);
+  const modal = harness.modals.pop();
+  assert.match(modal.body, /1 changed file on dev/);
+  modal.buttons.find(b => b.label === 'Stash & switch').onClick();
+  assert.deepStrictEqual(harness.calls, [['lane-checkout', 'feature/login', false, true]]);
+  assert.ok(!el('tb-branch-picker-other').classList.contains('open'));
+});
+
+const laneCtx = () => ({
+  slug: 'other', panelId: 'tb-branch-picker-other',
+  files: () => 0, label: () => 'dev',
+  checkout: () => {},
+});
+
+test('a mousedown outside the picker host closes it, one inside keeps it open', async () => {
+  await Picker.open(laneCtx());
+  const down = target => harness.listeners.mousedown.forEach(fn => fn({ target }));
+  down({ closest: sel => (sel === '.git-branch-host' ? {} : null) });
+  assert.strictEqual(Picker._isOpen, true);
+  down({ closest: () => null });
+  assert.strictEqual(Picker._isOpen, false);
+});
+
+test('a lane picker left open does not show in the git menu bar, and the branch name opens the panel picker', async () => {
+  await Picker.open(laneCtx());
+  GitMenu.render();
+  assert.match(el('git-menubar-host').innerHTML, /class="git-menu-panel git-branch-picker" id="git-branch-picker"/);
+  Picker.toggle();
+  await flush();
+  assert.ok(Picker.isOpenIn('git-branch-picker'), 'one click opens the panel picker');
 });

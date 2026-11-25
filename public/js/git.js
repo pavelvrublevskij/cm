@@ -151,6 +151,13 @@ const GitActions = {
     return GitActions._remote(() => GitApi.checkout(GitActions._slug, branch, remote, stash), `Switched to ${branch}`);
   },
 
+  /** Switch another project's branch (the Task Board lane), repainting git views if it is the open project. */
+  async checkoutIn(slug, branch, remote, stash) {
+    const ok = await GitActions._call(() => GitApi.checkout(slug, branch, remote, stash), `Switched to ${branch}`);
+    if (slug === GitActions._slug) await GitActions._repaint();
+    return ok;
+  },
+
   createBranch(name) {
     return GitActions._remote(() => GitApi.createBranch(GitActions._slug, name), `Created ${name}`);
   },

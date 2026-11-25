@@ -85,13 +85,13 @@ const GitMenu = {
 
     host.innerHTML = `<div class="git-menubar" id="git-menubar">
         ${menus}
-        <div class="git-menu git-menu-branch">
+        <div class="git-menu git-menu-branch git-branch-host">
           <button class="git-menu-title git-branch-btn" onclick="GitBranchPicker.toggle()" title="Switch branch">
             <span class="git-branch-icon">&#x2387;</span> ${escapeHtml(GitPanel._branchLabel())} <span class="dd-arrow"></span></button>
-          <div class="git-menu-panel git-branch-picker${GitBranchPicker._isOpen ? ' open' : ''}" id="git-branch-picker"></div>
+          <div class="git-menu-panel git-branch-picker${GitBranchPicker.isOpenIn('git-branch-picker') ? ' open' : ''}" id="git-branch-picker"></div>
         </div>
       </div>`;
-    if (GitBranchPicker._isOpen) GitBranchPicker.render();
+    if (GitBranchPicker.isOpenIn('git-branch-picker')) GitBranchPicker.render();
     GitMenu._listen();
   },
 
@@ -221,10 +221,9 @@ const GitMenu = {
     if (GitMenu._listening) return;
     GitMenu._listening = true;
     document.addEventListener('mousedown', e => {
-      if (!GitMenu._open && !GitBranchPicker._isOpen) return;
+      if (!GitMenu._open) return;
       if (e.target.closest && e.target.closest('#git-menubar')) return;
       GitMenu.close();
-      GitBranchPicker.close();
     });
     document.addEventListener('keydown', e => GitMenu._onKey(e));
   },

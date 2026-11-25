@@ -7565,6 +7565,15 @@ body.git-split-dragging {
 .tb-lane-git {
   margin-top: 0;
 }
+.tb-lane-branch .tb-lane-git {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tb-lane-branch .git-branch-picker {
+  left: 0;
+  right: auto;
+}
 .tb-card-branch {
   margin-top: 4px;
   font-size: 11px;
