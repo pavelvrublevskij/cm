@@ -1062,6 +1062,7 @@ const TaskBoard = {
       ? formGroup('Project', `<div class="tb-editor-project">${escapeHtml(decodeName(card.project))}</div>`)
         + (TaskBoard.gitBranchOf(card) ? formGroup('Branch', `<div class="tb-editor-project tb-card-git">${escapeHtml(TaskBoard.gitBranchOf(card))}${card.baseBranch ? ' &larr; ' + escapeHtml(card.baseBranch) : ''}</div>`) : '')
         + (card.prUrl ? formGroup('Pull request', `<div class="tb-editor-project"><a href="${escapeAttr(card.prUrl)}" target="_blank" rel="noopener">${escapeHtml(card.prUrl)}</a></div>`) : '')
+        + ((card.subprojects || []).length ? formGroup('Subprojects', card.subprojects.map(s => `<div class="tb-editor-project tb-card-git">${escapeHtml(s.path)}: ${escapeHtml(s.gitBranch || '')}${s.baseBranch ? ' &larr; ' + escapeHtml(s.baseBranch) : ''}${s.prUrl ? ` · <a href="${escapeAttr(s.prUrl)}" target="_blank" rel="noopener">PR</a>` : ''}</div>`).join('')) : '')
       : formGroup('Project', Projects.selectHtml('tb-project', lane));
     const editable = !card || card.column === 'todo';
     const ro = editable ? '' : ' readonly';

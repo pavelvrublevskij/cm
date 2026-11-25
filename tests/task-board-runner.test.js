@@ -1175,6 +1175,237 @@ test('Create PR pushes the ticket branch and opens a PR into its base; the ticke
   assert.ok(!fs.existsSync(path.join(GIT_ROOT, 'ticket.txt')), 'nothing merged locally');
 });
 
+/** A separate git repo nested in the project (ignored by it), checked out on "develop". */
+function makeSubRepo(rel) {
+  const dir = path.join(GIT_ROOT, rel);
+  fs.mkdirSync(dir, { recursive: true });
+  sh(['init', '-q', '-b', 'main'], dir);
+  sh(['config', 'user.email', 'cm@test.local'], dir);
+  sh(['config', 'user.name', 'CM Test'], dir);
+  fs.writeFileSync(path.join(dir, 'sub.txt'), rel + '\n');
+  sh(['add', '.'], dir);
+  sh(['commit', '-q', '-m', 'sub init'], dir);
+  sh(['checkout', '-q', '-b', 'develop'], dir);
+  return dir;
+}
+
+function ignoreSubprojects() {
+  fs.writeFileSync(path.join(GIT_ROOT, '.gitignore'), 'libs/\n');
+  sh(['add', '.gitignore'], GIT_ROOT);
+  sh(['commit', '-q', '-m', 'ignore libs'], GIT_ROOT);
+}
+
+function commitIn(dir, file, message) {
+  fs.writeFileSync(path.join(dir, file), file + '\n');
+  sh(['add', file], dir);
+  sh(['commit', '-q', '-m', message], dir);
+}
+
+test('subprojects (nested git repos) get their own worktree and branch; Merge lands each one the ticket changed', async () => {
+  makeRepo();
+  const subA = makeSubRepo('libs/a');
+  const subB = makeSubRepo('libs/b');
+  ignoreSubprojects();
+  const headB = sh(['rev-parse', 'HEAD'], subB);
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  const wtBranch = 'worktree-cm-' + card.id.slice(0, 8);
+  const started = await cardOf(card.id);
+  assert.deepStrictEqual(started.subprojects, [
+    { path: 'libs/a', baseBranch: 'develop', gitBranch: wtBranch },
+    { path: 'libs/b', baseBranch: 'develop', gitBranch: wtBranch }
+  ]);
+  const wtA = path.join(wtDir(card), 'libs', 'a');
+  assert.strictEqual(sh(['rev-parse', '--abbrev-ref', 'HEAD'], wtA), wtBranch);
+
+  await hook(0, 'SessionStart', { sessionId: SID });
+  workIn(card, 'ticket.txt');
+  commitIn(wtA, 'sub-ticket.txt', 'sub ticket work');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(() => pasted(spawned[0].entry).length === 2);
+  assert.match(pasted(spawned[0].entry)[1], /"libs\/a" \(from "develop"\), "libs\/b" \(from "develop"\)/);
+
+  // The subproject's base moved meanwhile: claude is sent to merge it in first.
+  commitIn(subA, 'later.txt', 'later on develop');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(() => pasted(spawned[0].entry).length === 3);
+  assert.match((await cardOf(card.id)).run.message, /develop of libs\/a has new changes/);
+
+  sh(['merge', '-q', '--no-edit', 'develop'], wtA);
+  sh(['branch', '-m', 'feature/sub-a'], wtA);
+  sh(['branch', '-m', 'feature/parent'], wtDir(card));
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(card.id)).finalized === true);
+  assert.strictEqual((await cardOf(card.id)).subprojects[0].gitBranch, 'feature/sub-a');
+
+  const res = await request(app).post(`/api/task-board/cards/${card.id}/merge`);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.strictEqual((await cardOf(card.id)).run.message, 'Merged into feature-x; subprojects: libs/a');
+  assert.strictEqual(sh(['log', '-1', '--format=%s'], subA), "Merge branch 'feature/sub-a' into develop");
+  assert.strictEqual(sh(['rev-list', '--parents', '-n', '1', 'HEAD'], subA).split(' ').length, 3, 'a merge commit, not a squash');
+  assert.ok(fs.existsSync(path.join(subA, 'sub-ticket.txt')));
+  assert.strictEqual(sh(['rev-parse', 'HEAD'], subB), headB, 'an unchanged subproject is left alone');
+  assert.ok(fs.existsSync(path.join(GIT_ROOT, 'ticket.txt')));
+
+  const del = await request(app).delete('/api/task-board/cards/' + card.id);
+  assert.deepStrictEqual(del.body, { ok: true, warning: '' });
+  assert.ok(!fs.existsSync(wtDir(card)));
+  assert.strictEqual(sh(['worktree', 'list', '--porcelain'], subA).split('\n').filter(l => l.startsWith('worktree ')).length, 1);
+});
+
+test('Merge stops on a subproject folder that is not on its base, and lands nothing', async () => {
+  makeRepo();
+  const subA = makeSubRepo('libs/a');
+  ignoreSubprojects();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  commitIn(path.join(wtDir(card), 'libs', 'a'), 'sub-ticket.txt', 'sub ticket work');
+  await toWaitingInFinalize(card, 0, 'feature/parent');
+  sh(['checkout', '-q', 'main'], subA);
+  const head = sh(['rev-parse', 'HEAD'], GIT_ROOT);
+
+  const res = await request(app).post(`/api/task-board/cards/${card.id}/merge`);
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'The subproject folder libs/a is on "main": switch it to "develop" first');
+  assert.strictEqual(sh(['rev-parse', 'HEAD'], GIT_ROOT), head);
+  assert.strictEqual((await cardOf(card.id)).finalized, true);
+});
+
+test('Create PR opens a PR for each changed subproject too; the project\'s own only when it changed', async () => {
+  const ghCalls = [];
+  runner._reset();
+  startDriver(0, { gh: async (args, cwd) => {
+    ghCalls.push({ args, cwd });
+    return 'https://github.com/o/sub/pull/' + ghCalls.length + '\n';
+  } });
+  makeRepo();
+  const subA = makeSubRepo('libs/a');
+  ignoreSubprojects();
+  const origin = path.join(HOME, 'suborigin.git');
+  fs.rmSync(origin, { recursive: true, force: true });
+  sh(['init', '-q', '--bare', origin], HOME);
+  sh(['remote', 'add', 'origin', origin], subA);
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  const wtA = path.join(wtDir(card), 'libs', 'a');
+  commitIn(wtA, 'sub-ticket.txt', 'sub ticket work');
+  sh(['branch', '-m', 'feature/sub-pr'], wtA);
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(card.id)).finalized === true);
+
+  const res = await request(app).post(`/api/task-board/cards/${card.id}/pr`);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.strictEqual(ghCalls.length, 1, 'no PR for the unchanged project');
+  assert.deepStrictEqual(ghCalls[0].args.slice(0, 6), ['pr', 'create', '--base', 'develop', '--head', 'feature/sub-pr']);
+  assert.strictEqual(ghCalls[0].cwd, subA);
+  assert.strictEqual(sh(['rev-parse', 'feature/sub-pr'], origin), sh(['rev-parse', 'feature/sub-pr'], subA));
+  const done = await cardOf(card.id);
+  assert.deepStrictEqual([done.column, done.prUrl, done.run.message], ['done', '', 'PRs created for subprojects: libs/a']);
+  assert.strictEqual(done.subprojects[0].prUrl, 'https://github.com/o/sub/pull/1');
+});
+
+test('a newer base in a subproject the ticket did not change does not hold the ticket in Finalize', async () => {
+  makeRepo();
+  makeSubRepo('libs/a');
+  const subB = makeSubRepo('libs/b');
+  ignoreSubprojects();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  commitIn(path.join(wtDir(card), 'libs', 'a'), 'sub-ticket.txt', 'sub ticket work');
+  workIn(card, 'ticket.txt');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  commitIn(subB, 'later.txt', 'later on develop of b');
+  await hook(0, 'Stop', { lastAssistantMessage: 'CM-STAGE: done' });
+  await until(async () => (await cardOf(card.id)).finalized === true);
+});
+
+test('nested repos on a detached HEAD or tracked as submodules are not subprojects', async () => {
+  makeRepo();
+  const detached = makeSubRepo('libs/tag');
+  sh(['checkout', '-q', '--detach'], detached);
+  const linked = makeSubRepo('mods/c');
+  sh(['update-index', '--add', '--cacheinfo', '160000,' + sh(['rev-parse', 'HEAD'], linked) + ',mods/c'], GIT_ROOT);
+  sh(['commit', '-q', '-m', 'submodule-like gitlink'], GIT_ROOT);
+  makeSubRepo('libs/a');
+  ignoreSubprojects();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  assert.deepStrictEqual((await cardOf(card.id)).subprojects.map(s => s.path), ['libs/a']);
+  assert.ok(!fs.existsSync(path.join(wtDir(card), 'libs', 'tag')));
+  assert.ok(!fs.existsSync(path.join(wtDir(card), 'mods', 'c', '.git')));
+});
+
+test('Merge conflicts in a subproject go to claude, which is told about the subprojects', async () => {
+  makeRepo();
+  const subA = makeSubRepo('libs/a');
+  ignoreSubprojects();
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  const wtA = path.join(wtDir(card), 'libs', 'a');
+  fs.writeFileSync(path.join(wtA, 'sub.txt'), 'ticket side\n');
+  sh(['commit', '-q', '-am', 'ticket side'], wtA);
+  await toWaitingInFinalize(card, 0, 'feature/parent');
+  fs.writeFileSync(path.join(subA, 'sub.txt'), 'develop side\n');
+  sh(['commit', '-q', '-am', 'develop side'], subA);
+  const subHead = sh(['rev-parse', 'HEAD'], subA);
+
+  const res = await request(app).post(`/api/task-board/cards/${card.id}/merge`);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.strictEqual(res.body.card.run.message, 'Resolving conflicts with feature-x');
+  assert.strictEqual(spawned.length, 2);
+  assert.match(spawned[1].opts.args.join(' '), /--resume/);
+  assert.match(sh(['diff', '--name-only', '--diff-filter=U'], wtA), /sub\.txt/);
+  assert.strictEqual(sh(['rev-parse', 'HEAD'], subA), subHead, 'nothing landed');
+  assert.ok(!fs.existsSync(path.join(GIT_ROOT, 'ticket.txt')), 'nothing landed');
+});
+
+test('a Create PR retry keeps the subproject PR made by the failed try', async () => {
+  const ghCalls = [];
+  runner._reset();
+  startDriver(0, { gh: async (args, cwd) => {
+    ghCalls.push({ args, cwd });
+    if (cwd === GIT_ROOT && ghCalls.length === 2) throw new Error('gh: network down');
+    return 'https://github.com/o/r/pull/' + ghCalls.length + '\n';
+  } });
+  makeRepo();
+  const subA = makeSubRepo('libs/a');
+  ignoreSubprojects();
+  for (const [name, dir] of [['retryorigin.git', GIT_ROOT], ['retrysub.git', subA]]) {
+    const origin = path.join(HOME, name);
+    fs.rmSync(origin, { recursive: true, force: true });
+    sh(['init', '-q', '--bare', origin], HOME);
+    sh(['remote', 'add', 'origin', origin], dir);
+  }
+  await parallelLane(GIT_SLUG, ['Plan']);
+  const [card] = await readyTickets(GIT_SLUG, 1);
+  await until(() => spawned.length === 1);
+  await hook(0, 'SessionStart', { sessionId: SID });
+  commitIn(path.join(wtDir(card), 'libs', 'a'), 'sub-ticket.txt', 'sub ticket work');
+  await toWaitingInFinalize(card, 0, 'feature/both');
+
+  let res = await request(app).post(`/api/task-board/cards/${card.id}/pr`);
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'Could not create the PR: gh: network down');
+  assert.strictEqual((await cardOf(card.id)).subprojects[0].prUrl, 'https://github.com/o/r/pull/1');
+
+  res = await request(app).post(`/api/task-board/cards/${card.id}/pr`);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.deepStrictEqual(ghCalls.map(c => c.cwd), [subA, GIT_ROOT, GIT_ROOT]);
+  const done = await cardOf(card.id);
+  assert.deepStrictEqual([done.prUrl, done.run.message], ['https://github.com/o/r/pull/3', 'PR created into feature-x; subprojects: libs/a']);
+});
+
 test('a Parallel lane without git runs tickets at once in the project folder', async () => {
   await parallelLane(SLUG, ['Plan']);
   await readyTickets(SLUG, 2);
