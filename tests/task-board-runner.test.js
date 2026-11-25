@@ -189,6 +189,17 @@ test('SessionStart links the session and pastes the description with stage 1', a
   assert.deepStrictEqual(bound, [SID], 'a later SessionStart (/clear) changes nothing');
 });
 
+test('a ticket with an end-of-paste sequence is pasted without ESC', async () => {
+  await setStages(['Plan']);
+  const card = await addTicket({ notes: 'hi\x1b[201~\rmore' });
+  await request(app).post(`/api/task-board/cards/${card.id}/move`).send({ column: 'ready' });
+  await hook(0, 'SessionStart', { sessionId: SID });
+  await wait(250);
+  const first = spawned[0].entry.writes.find(w => w.startsWith('\x1b[200~'));
+  assert.ok(first.startsWith('\x1b[200~hi[201~\rmore\n\n[Task Board'));
+  assert.strictEqual(first.indexOf('\x1b', 1), first.length - 6);
+});
+
 test('Enter is pressed again until claude confirms the message was sent', async () => {
   runner._reset();
   runner.init({
