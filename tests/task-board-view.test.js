@@ -1609,6 +1609,12 @@ test('Radar: a ring per column but Done, ticket dots, a beacon for a waiting tic
   assert.match(html, /aria-label="Todo &lt;x&gt;"/);
 });
 
+test('Radar: the disc scales by viewBox, no fixed width or height', () => {
+  const svg = TaskBoard.viewHtml(VIZ, [], 'radar').match(/<svg class="tb-rd-svg"[^>]*>/)[0];
+  assert.match(svg, /viewBox="0 0 300 300"/);
+  assert.doesNotMatch(svg, /\s(width|height)=/);
+});
+
 test('Radar: no sweep while nothing runs', () => {
   const idle = { projects: VIZ.projects, cards: [VIZ.cards[0], { id: 'q', title: 'q', notes: '', project: 'p', column: 'ready' }] };
   assert.doesNotMatch(TaskBoard.viewHtml(idle, [], 'radar'), /tb-rd-sweep/);
