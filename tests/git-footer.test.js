@@ -196,6 +196,117 @@ test('reset clears state and hides both entry points', async () => {
   assert.strictEqual(el('git-tab-btn').style.display, 'none');
 });
 
+// Leaving a session for the Task Board resets the footer while the session's git request may still
+// be in flight; its late answer must not paint the old branch back.
+function deferredGitInfo() {
+  let release;
+  const pending = new Promise(r => { release = r; });
+  harness.apiHandler = async url => {
+    if (url.includes('terminal/info')) return { available: true, running: false };
+    await pending;
+    return { available: true, branch: 'feature/x', files: [] };
+  };
+  return () => release();
+}
+
+test('an init answer arriving after reset leaves the footer empty', async () => {
+  const release = deferredGitInfo();
+  const pending = GitActions.init('proj');
+  GitActions.reset();
+  release();
+  await pending;
+
+  assert.strictEqual(el('footer-git').innerHTML, '');
+  assert.strictEqual(el('footer-git').style.display, 'none');
+  assert.strictEqual(el('git-tab-btn').style.display, 'none');
+  assert.strictEqual(GitActions._info, null);
+});
+
+test('a refresh answer arriving after reset leaves the footer empty', async () => {
+  await GitActions.init('proj');
+  const release = deferredGitInfo();
+  const pending = GitActions.refresh();
+  GitActions.reset();
+  release();
+  await pending;
+
+  assert.strictEqual(el('footer-git').innerHTML, '');
+  assert.strictEqual(el('footer-git').style.display, 'none');
+  assert.strictEqual(GitActions._info, null);
+});
+
+function deferredShellInfo() {
+  let release;
+  const pending = new Promise(r => { release = r; });
+  harness.apiHandler = async url => {
+    if (url.includes('terminal/info')) { await pending; return { available: true, running: true }; }
+    return { available: true, branch: 'feature/x', files: [] };
+  };
+  return () => release();
+}
+
+test('a shell probe answering after reset during init leaves the footer empty', async () => {
+  const release = deferredShellInfo();
+  const pending = GitActions.init('proj');
+  await new Promise(r => setImmediate(r));
+  GitActions.reset();
+  release();
+  await pending;
+
+  assert.strictEqual(el('footer-git').innerHTML, '');
+  assert.strictEqual(el('footer-git').style.display, 'none');
+  assert.strictEqual(GitActions._shellRunning, false);
+});
+
+test('a refreshShellState answer arriving after reset leaves the footer empty', async () => {
+  await GitActions.init('proj');
+  const release = deferredShellInfo();
+  const pending = GitActions.refreshShellState();
+  GitActions.reset();
+  release();
+  await pending;
+
+  assert.strictEqual(el('footer-git').innerHTML, '');
+  assert.strictEqual(GitActions._shellRunning, false);
+});
+
+test('a superseded init does not overwrite the newer project', async () => {
+  let releaseA;
+  const pendingA = new Promise(r => { releaseA = r; });
+  harness.apiHandler = async url => {
+    if (url.includes('terminal/info')) return { available: true, running: false };
+    if (url.includes('/projects/a/')) { await pendingA; return { available: true, branch: 'branch-a', files: [] }; }
+    return { available: true, branch: 'branch-b', files: [] };
+  };
+  const initA = GitActions.init('a');
+  await GitActions.init('b');
+  releaseA();
+  await initA;
+
+  assert.strictEqual(GitActions._info.branch, 'branch-b');
+  assert.match(el('footer-git').innerHTML, /branch-b/);
+});
+
+test('reset then init of the same project ignores the stale answer', async () => {
+  let releaseOld;
+  const pendingOld = new Promise(r => { releaseOld = r; });
+  let calls = 0;
+  harness.apiHandler = async url => {
+    if (url.includes('terminal/info')) return { available: true, running: false };
+    calls++;
+    if (calls === 1) { await pendingOld; return { available: true, branch: 'old', files: [] }; }
+    return { available: true, branch: 'new', files: [] };
+  };
+  const oldInit = GitActions.init('proj');
+  GitActions.reset();
+  await GitActions.init('proj');
+  releaseOld();
+  await oldInit;
+
+  assert.strictEqual(GitActions._info.branch, 'new');
+  assert.match(el('footer-git').innerHTML, /new/);
+});
+
 test('refreshShellState is a no-op before any project is loaded', async () => {
   GitActions._slug = null;
   await GitActions.refreshShellState();
