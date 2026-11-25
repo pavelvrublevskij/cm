@@ -11,9 +11,10 @@
  * @param {string} [opts.cancelLabel] - Label for the dismiss button (default "Cancel")
  * @param {boolean|{minWidth?: number, minHeight?: number}} [opts.resizable] - Adds a drag handle to resize the modal
  * @param {boolean} [opts.maximizable] - Adds a title-bar button that toggles the modal fullscreen
+ * @param {string} [opts.headerHtml] - HTML placed in the title bar before its buttons
  * @returns {HTMLElement} The overlay element (for external removal if needed)
  */
-function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel, resizable, maximizable }) {
+function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel, resizable, maximizable, headerHtml }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   const close = () => { overlay.remove(); if (onClose) onClose(); };
@@ -29,6 +30,12 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
   header.appendChild(h3);
   const actions = document.createElement('div');
   actions.className = 'modal-header-actions';
+  if (headerHtml) {
+    const extra = document.createElement('div');
+    extra.className = 'modal-header-extra';
+    extra.innerHTML = headerHtml;
+    actions.appendChild(extra);
+  }
   if (maximizable) {
     const maxBtn = document.createElement('button');
     maxBtn.className = 'btn btn-sm modal-maximize';

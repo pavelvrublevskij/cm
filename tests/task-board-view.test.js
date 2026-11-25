@@ -27,7 +27,12 @@ test('one lane per project, sorted by name', () => {
 });
 
 test('an empty board says how to start', () => {
-  assert.match(TaskBoard.html({ cards: [], projects: {} }, []), /No tickets yet/);
+  assert.match(TaskBoard.html({ cards: [], projects: {} }, []), /No tickets yet\. Add a project lane to start\./);
+});
+
+test('the board header has no New ticket button (lanes have + Ticket)', () => {
+  const index = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf-8');
+  assert.doesNotMatch(index, /task-board-new-btn/);
 });
 
 test('every lane has the fixed columns around its workflow', () => {
@@ -183,8 +188,164 @@ test('the stage panel shows type, reference with missing marker, and delete', ()
   assert.match(html, /writing-plans · project/);
   assert.ok(!html.includes('tester · global'), 'agents are not offered for a skill stage');
   assert.match(html, /Delete stage/);
-  assert.match(Flow.panelHtml(Object.assign({}, WF, { sel: null })), /Drag<\/strong> a stage to move it/);
+  assert.strictEqual(Flow.panelHtml(Object.assign({}, WF, { sel: null })), '', 'nothing selected: the panel is empty and hidden');
 });
+
+test('the help text lives in the title-bar help icon, not in the side panel', () => {
+  const icon = Flow.helpIconHtml();
+  assert.match(icon, /^<span class="tbf-help-icon" tabindex="0"[^>]*>\?<span class="tbf-help-pop">/);
+  assert.match(icon, /Drag<\/strong> a stage to move it/);
+  assert.match(icon, /Ctrl \+ mouse wheel/);
+});
+
+test('zoom scales the diagram size and keeps its own coordinates in the viewBox', () => {
+  const at100 = Flow.svgHtml(WF, null);
+  const [, w, h] = at100.match(/width="(\d+)" height="(\d+)" viewBox="0 0 (?:\d+) (?:\d+)"/);
+  assert.match(at100, new RegExp(`viewBox="0 0 ${w} ${h}"`));
+  Flow._zoom = 0.5;
+  try {
+    const at50 = Flow.svgHtml(WF, null);
+    assert.match(at50, new RegExp(`width="${Math.round(w * 0.5)}" height="${Math.round(h * 0.5)}" viewBox="0 0 ${w} ${h}"`));
+  } finally {
+    Flow._zoom = 1;
+  }
+});
+
+test('zoom stays within 50%–200% and the toolbar shows it with the limits disabled', () => {
+  assert.strictEqual(Flow.clampZoom(0.1), 0.5);
+  assert.strictEqual(Flow.clampZoom(5), 2);
+  assert.strictEqual(Flow.clampZoom(1 + 0.1 + 0.1), 1.2);
+  assert.match(TaskBoard.workflowHtml(WF), /tbf-zoom-level"[^>]*>100%</);
+  Flow._zoom = 2;
+  try {
+    const html = Flow.zoomHtml();
+    assert.match(html, />200%</);
+    assert.match(html, /title="Zoom in" disabled/);
+    assert.doesNotMatch(html, /title="Zoom out" disabled/);
+  } finally {
+    Flow._zoom = 1;
+  }
+});
+
+test('Ctrl+wheel zooms in proportion to the delta and ignores a zero vertical delta', () => {
+  assert.strictEqual(Flow.wheelZoom(1, 0), 1);
+  const small = Flow.wheelZoom(1, -3);
+  assert.ok(small > 1 && small < 1.02, 'a small pinch step zooms a little, not a whole 10%');
+  assert.ok(Flow.wheelZoom(1, 100) < 1);
+  assert.strictEqual(Flow.wheelZoom(1.99, -1000), 2);
+  assert.strictEqual(Flow.wheelZoom(0.51, 1000), 0.5);
+});
+
+/** A fake canvas DOM: a scrollable 400×300 canvas at (100, 50) with a 15px scrollbar, the SVG at its scroll offset. */
+function fakeCanvasDom() {
+  const listeners = {};
+  const winListeners = {};
+  const classes = new Set();
+  const canvas = {
+    scrollLeft: 0, scrollTop: 0, clientLeft: 0, clientTop: 0, clientWidth: 385, clientHeight: 285, innerHTML: '',
+    getBoundingClientRect: () => ({ left: 100, top: 50, width: 400, height: 300 }),
+    classList: { add: c => classes.add(c), remove: c => classes.delete(c) },
+    addEventListener: (type, fn) => { listeners[type] = fn; }
+  };
+  const svg = { getBoundingClientRect: () => ({ left: 100 - canvas.scrollLeft, top: 50 - canvas.scrollTop }) };
+  const document = {
+    getElementById: id => (id === 'tbf-canvas' ? canvas : null),
+    querySelector: sel => (sel === '#tbf-canvas svg' ? svg : null)
+  };
+  const window = {
+    addEventListener: (type, fn) => { winListeners[type] = fn; },
+    removeEventListener: type => { delete winListeners[type]; }
+  };
+  return { canvas, classes, listeners, winListeners, document, window };
+}
+
+function withDom(fn) {
+  const dom = fakeCanvasDom();
+  const saved = { document: context.document, window: context.window, wf: TaskBoard._wf };
+  Object.assign(context, { document: dom.document, window: dom.window });
+  TaskBoard._wf = plain(WF);
+  Flow.prepare(TaskBoard._wf);
+  TaskBoard._wf.sel = { node: 's-a' };
+  Flow._zoom = 1;
+  Flow._drag = null;
+  try {
+    Flow.bind();
+    fn(dom);
+  } finally {
+    Object.assign(context, { document: saved.document, window: saved.window });
+    TaskBoard._wf = saved.wf;
+    Flow._zoom = 1;
+    Flow._drag = null;
+  }
+}
+
+const press = (x, y, target) => ({ button: 0, clientX: x, clientY: y, target: target || { closest: () => null }, preventDefault() {} });
+
+test('pointer positions are divided by the zoom, so drags land on diagram coordinates', () => withDom(dom => {
+  Flow._zoom = 2;
+  assert.deepStrictEqual(plain(Flow.point({ clientX: 300, clientY: 250 })), { x: 100, y: 100 });
+  dom.canvas.scrollLeft = 40;
+  assert.deepStrictEqual(plain(Flow.point({ clientX: 300, clientY: 250 })), { x: 120, y: 100 });
+}));
+
+test('zooming keeps the diagram point under the cursor in place', () => withDom(dom => {
+  dom.canvas.scrollLeft = 50;
+  dom.canvas.scrollTop = 20;
+  const before = Flow.point({ clientX: 200, clientY: 150 });
+  Flow.setZoom(2, 200, 150);
+  assert.strictEqual(Flow._zoom, 2);
+  assert.deepStrictEqual(plain(Flow.point({ clientX: 200, clientY: 150 })), plain(before));
+  assert.match(dom.canvas.innerHTML, /width="\d+" height="\d+" viewBox/);
+}));
+
+test('zoom buttons step to the next whole 10%', () => withDom(() => {
+  Flow._zoom = 1.13;
+  Flow.zoomBy(1);
+  assert.strictEqual(Flow._zoom, 1.2);
+  Flow._zoom = 1.13;
+  Flow.zoomBy(-1);
+  assert.strictEqual(Flow._zoom, 1.1);
+  Flow.zoomBy(-1);
+  assert.strictEqual(Flow._zoom, 1);
+}));
+
+test('a click on empty background clears the selection without scrolling', () => withDom(dom => {
+  dom.listeners.pointerdown(press(200, 150));
+  assert.ok(dom.classes.has('tbf-canvas--panning'));
+  dom.winListeners.pointerup({ clientX: 201, clientY: 150 });
+  assert.strictEqual(TaskBoard._wf.sel, null);
+  assert.strictEqual(dom.canvas.scrollLeft, 0);
+  assert.ok(!dom.classes.has('tbf-canvas--panning'));
+}));
+
+test('dragging empty background scrolls the canvas and keeps the selection', () => withDom(dom => {
+  dom.canvas.scrollLeft = 100;
+  dom.canvas.scrollTop = 80;
+  dom.listeners.pointerdown(press(200, 150));
+  dom.winListeners.pointermove({ clientX: 170, clientY: 130 });
+  assert.strictEqual(dom.canvas.scrollLeft, 130);
+  assert.strictEqual(dom.canvas.scrollTop, 100);
+  dom.winListeners.pointerup({ clientX: 170, clientY: 130 });
+  assert.deepStrictEqual(plain(TaskBoard._wf.sel), { node: 's-a' });
+}));
+
+test('zooming during a pan continues the pan from the new scroll position', () => withDom(dom => {
+  dom.listeners.pointerdown(press(200, 150));
+  dom.winListeners.pointermove({ clientX: 180, clientY: 150 });
+  assert.strictEqual(dom.canvas.scrollLeft, 20);
+  Flow.setZoom(2, 180, 150);
+  const zoomed = dom.canvas.scrollLeft;
+  dom.winListeners.pointermove({ clientX: 170, clientY: 150 });
+  assert.strictEqual(dom.canvas.scrollLeft, zoomed + 10);
+}));
+
+test('a press on the canvas scrollbar is left to the browser', () => withDom(dom => {
+  dom.listeners.pointerdown(press(100 + 390, 150));
+  dom.listeners.pointerdown(press(200, 50 + 290));
+  assert.strictEqual(Flow._drag, null);
+  assert.strictEqual(dom.winListeners.pointerup, undefined);
+  assert.deepStrictEqual(plain(TaskBoard._wf.sel), { node: 's-a' });
+}));
 
 test('switching a stage to Workflow drops its reference and fills the default prompt once', () => {
   const wf = { available: WF.available, stages: [{ id: 's-w', title: 'Deep review', type: 'skill', ref: 'writing-plans', prompt: '' }], sel: { node: 's-w' } };
@@ -658,6 +819,31 @@ test('a lane shows the project branch only when git gives one', () => {
   assert.match(TaskBoard.laneHtml(withBranch, 'C--work-zeta'), /class="tb-card-git tb-lane-git"[^>]*>&#5833; feature\/&lt;x&gt;</);
   assert.doesNotMatch(TaskBoard.laneHtml(withBranch, 'C--work-alpha'), /tb-lane-git/);
   assert.doesNotMatch(TaskBoard.laneHtml(BOARD, 'C--work-zeta'), /tb-lane-git/);
+});
+
+test('a lane has a New Session menu right after Workflow that starts a session in the lane project', () => {
+  const html = TaskBoard.laneHtml(BOARD, 'C--work-zeta');
+  assert.match(html, /tb-workflow-btn[^>]*>Workflow[^<]*<\/button>\s*<div class="action-menu tb-new-session">/);
+  assert.match(html, /Sessions\.newSessionOS\('C--work-zeta'\)">In OS terminal</);
+  assert.match(html, /Sessions\.newSessionBrowser\('C--work-zeta'\)">In browser terminal</);
+});
+
+test('the board refresh waits while a drag is on or a lane menu is open', () => {
+  const savedDoc = context.document;
+  let open = null;
+  context.document = { querySelector: sel => (sel === '#task-board-body .action-menu-panel.open' ? open : null) };
+  try {
+    TaskBoard._drag = null;
+    assert.strictEqual(TaskBoard.pollPaused(), false);
+    open = {};
+    assert.strictEqual(TaskBoard.pollPaused(), true);
+    open = null;
+    TaskBoard._drag = { id: '1' };
+    assert.strictEqual(TaskBoard.pollPaused(), true);
+  } finally {
+    TaskBoard._drag = null;
+    context.document = savedDoc;
+  }
 });
 
 test('Finalize and Done cards show a to-dos button with the open count, or done/total once all are done', () => {
