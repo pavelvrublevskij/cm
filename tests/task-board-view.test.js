@@ -1262,6 +1262,7 @@ test('new ticket and add lane use the shared project select', () => {
   assert.strictEqual(id, 'tb-lane-project');
   assert.ok(filter('C--work-new'));
   assert.ok(!filter('C--work-zeta'));
+  assert.ok(!filter('C--work-new--claude-worktrees-wt1'));
 });
 
 test('add lane says so when every project already has one', () => {
@@ -1270,7 +1271,7 @@ test('add lane says so when every project already has one', () => {
   Object.assign(context, {
     openModal: m => { modal = m; },
     toast: (...a) => toasts.push(a),
-    Projects: { data: [{ slug: 'C--work-zeta' }], selectHtml: () => '' }
+    Projects: { data: [{ slug: 'C--work-zeta' }, { slug: 'C--work-new--claude-worktrees-wt1' }], selectHtml: () => '' }
   });
   TaskBoard.board = BOARD;
   TaskBoard.openAddLane();
