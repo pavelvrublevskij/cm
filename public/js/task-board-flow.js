@@ -250,12 +250,13 @@ const TaskBoardFlow = {
     const nodes = TaskBoardFlow.nodes(wf);
     const width = Math.max(...nodes.map(n => n.x)) + W + 30;
     const height = Math.max(320, ...nodes.map(n => n.y)) + H + 40;
+    const z = TaskBoardFlow._zoom;
     let temp = '';
     if (drag && drag.kind === 'connect') {
       const a = nodes.find(n => n.id === drag.from);
       temp = `<path class="tbf-temp" d="M${a.x + W},${a.y + H / 2} L${drag.x},${drag.y}" marker-end="url(#tbf-arrow-sel)"/>`;
     }
-    return `<svg class="tbf-svg" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    return `<svg class="tbf-svg" width="${Math.round(width * z)}" height="${Math.round(height * z)}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <marker id="tbf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="tbf-arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
           <marker id="tbf-arrow-sel" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="tbf-arrowhead tbf-arrowhead--sel" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -272,7 +273,7 @@ const TaskBoardFlow = {
     return list.map(([v, label]) => `<option value="${escapeAttr(v)}"${v === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
   },
 
-  /** Side panel: the selected stage's fields, the selected arrow, or how to use the diagram. */
+  /** Side panel: the selected stage's fields or the selected arrow; empty (hidden) with nothing selected. */
   panelHtml(wf) {
     const sel = wf.sel || {};
     if (sel.node) {
@@ -283,12 +284,85 @@ const TaskBoardFlow = {
       const e = TaskBoardFlow.edgeOf(wf, sel.edge);
       if (e) return TaskBoardFlow.edgePanelHtml(wf, e);
     }
+    return '';
+  },
+
+  /** How to use the diagram: shown by the help icon in the dialog's title bar. */
+  helpHtml() {
     return `<div class="tbf-help">
         <p><strong>Click</strong> a stage to edit it, or an arrow to set its condition.</p>
         <p><strong>Drag</strong> a stage to move it. Drag from the <span class="tbf-dot"></span> on its right edge to another stage or Done to draw an arrow.</p>
+        <p>Drag the empty background to move the diagram; Ctrl + mouse wheel or the zoom buttons zoom it.</p>
         <p>The first arrow out of a stage is its default path; more arrows are conditions Claude checks when the stage is done. One ticket runs the same stage at most 3 times.</p>
         <p>An arrow into Done goes through Finalize first: the tests run, and a worktree ticket commits on its own branch and waits there for you to merge it or create a PR.</p>
       </div>`;
+  },
+
+  helpIconHtml() {
+    return `<span class="tbf-help-icon" tabindex="0" aria-label="How to use the diagram">?<span class="tbf-help-pop">${TaskBoardFlow.helpHtml()}</span></span>`;
+  },
+
+  // --- Zoom ---
+
+  _zoom: 1,
+  ZOOM_MIN: 0.5,
+  ZOOM_MAX: 2,
+  ZOOM_STEP: 0.1,
+
+  /** The zoom clamped to its limits, rounded to tenths of a percent. Pure, for tests. */
+  clampZoom(z) {
+    return Math.round(Math.min(TaskBoardFlow.ZOOM_MAX, Math.max(TaskBoardFlow.ZOOM_MIN, z)) * 1000) / 1000;
+  },
+
+  /** Ctrl+wheel zoom: proportional to the wheel delta, so a trackpad pinch zooms smoothly; no vertical delta, no change. Pure, for tests. */
+  wheelZoom(z, deltaY) {
+    return deltaY ? TaskBoardFlow.clampZoom(z * Math.exp(-deltaY / 300)) : z;
+  },
+
+  zoomHtml() {
+    const z = TaskBoardFlow._zoom;
+    return `<span class="tbf-zoom">
+        <button class="btn btn-sm" onclick="TaskBoardFlow.zoomBy(-1)" title="Zoom out"${z <= TaskBoardFlow.ZOOM_MIN ? ' disabled' : ''}>−</button>
+        <button class="btn btn-sm tbf-zoom-level" onclick="TaskBoardFlow.setZoom(1)" title="Reset zoom">${Math.round(z * 100)}%</button>
+        <button class="btn btn-sm" onclick="TaskBoardFlow.zoomBy(1)" title="Zoom in"${z >= TaskBoardFlow.ZOOM_MAX ? ' disabled' : ''}>+</button>
+      </span>`;
+  },
+
+  /** Buttons step to the next whole 10% in that direction. */
+  zoomBy(steps) {
+    const tenths = TaskBoardFlow._zoom / TaskBoardFlow.ZOOM_STEP;
+    const base = steps > 0 ? Math.floor(tenths + 1e-6) : Math.ceil(tenths - 1e-6);
+    TaskBoardFlow.setZoom((base + steps) * TaskBoardFlow.ZOOM_STEP);
+  },
+
+  /** Zoom keeping the diagram point under (cx, cy), client coordinates (default the canvas centre), in place. */
+  setZoom(z, cx, cy) {
+    const next = TaskBoardFlow.clampZoom(z);
+    const prev = TaskBoardFlow._zoom;
+    if (next === prev) return;
+    const canvas = document.getElementById('tbf-canvas');
+    let keep = null;
+    if (canvas) {
+      const r = canvas.getBoundingClientRect();
+      const ox = cx === undefined ? r.width / 2 : cx - r.left;
+      const oy = cy === undefined ? r.height / 2 : cy - r.top;
+      keep = { ox, oy, x: (canvas.scrollLeft + ox) / prev, y: (canvas.scrollTop + oy) / prev };
+    }
+    TaskBoardFlow._zoom = next;
+    TaskBoardFlow.renderSvg();
+    const zoom = document.querySelector('#tb-wf .tbf-zoom');
+    if (zoom) zoom.outerHTML = TaskBoardFlow.zoomHtml();
+    if (keep) {
+      const before = { left: canvas.scrollLeft, top: canvas.scrollTop };
+      canvas.scrollLeft = keep.x * next - keep.ox;
+      canvas.scrollTop = keep.y * next - keep.oy;
+      // A pan in progress continues from the new scroll position.
+      const drag = TaskBoardFlow._drag;
+      if (drag && drag.kind === 'pan') {
+        drag.left += canvas.scrollLeft - before.left;
+        drag.top += canvas.scrollTop - before.top;
+      }
+    }
   },
 
   stagePanelHtml(wf, s) {
@@ -394,15 +468,24 @@ const TaskBoardFlow = {
   point(e) {
     const svg = document.querySelector('#tbf-canvas svg');
     const r = svg.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    const z = TaskBoardFlow._zoom;
+    return { x: (e.clientX - r.left) / z, y: (e.clientY - r.top) / z };
   },
 
-  /** Pointer handling on the canvas: move a stage, draw an arrow from a dot, select a stage or arrow. */
+  /** Pointer handling on the canvas: move a stage, draw an arrow from a dot, select a stage or arrow, pan, zoom. */
   bind() {
     const canvas = document.getElementById('tbf-canvas');
     if (!canvas) return;
+    canvas.addEventListener('wheel', e => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      TaskBoardFlow.setZoom(TaskBoardFlow.wheelZoom(TaskBoardFlow._zoom, e.deltaY), e.clientX, e.clientY);
+    }, { passive: false });
     canvas.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;
+      // A press on the canvas's own scrollbars is left to the browser.
+      const r = canvas.getBoundingClientRect();
+      if (e.clientX - r.left - canvas.clientLeft >= canvas.clientWidth || e.clientY - r.top - canvas.clientTop >= canvas.clientHeight) return;
       const wf = TaskBoard._wf;
       const p = TaskBoardFlow.point(e);
       const handle = e.target.closest('[data-handle]');
@@ -413,10 +496,13 @@ const TaskBoardFlow = {
       } else if (node && TaskBoardFlow.stageById(wf, node.dataset.node)) {
         const s = TaskBoardFlow.stageById(wf, node.dataset.node);
         TaskBoardFlow._drag = { kind: 'move', id: s.id, dx: p.x - s.pos.x, dy: p.y - s.pos.y, x0: p.x, y0: p.y, moved: false };
-      } else {
-        wf.sel = edge ? { edge: edge.dataset.edge } : null;
+      } else if (edge) {
+        wf.sel = { edge: edge.dataset.edge };
         TaskBoardFlow.render();
         return;
+      } else {
+        TaskBoardFlow._drag = { kind: 'pan', cx: e.clientX, cy: e.clientY, left: canvas.scrollLeft, top: canvas.scrollTop, moved: false };
+        canvas.classList.add('tbf-canvas--panning');
       }
       e.preventDefault();
       window.addEventListener('pointermove', TaskBoardFlow.onMove);
@@ -428,6 +514,14 @@ const TaskBoardFlow = {
     const drag = TaskBoardFlow._drag;
     const wf = TaskBoard._wf;
     if (!drag || !wf) return;
+    if (drag.kind === 'pan') {
+      if (!drag.moved && Math.hypot(e.clientX - drag.cx, e.clientY - drag.cy) < 4) return;
+      drag.moved = true;
+      const canvas = document.getElementById('tbf-canvas');
+      canvas.scrollLeft = drag.left - (e.clientX - drag.cx);
+      canvas.scrollTop = drag.top - (e.clientY - drag.cy);
+      return;
+    }
     const p = TaskBoardFlow.point(e);
     if (drag.kind === 'move') {
       if (!drag.moved && Math.hypot(p.x - drag.x0, p.y - drag.y0) < 4) return;
@@ -448,6 +542,14 @@ const TaskBoardFlow = {
     TaskBoardFlow._drag = null;
     const wf = TaskBoard._wf;
     if (!drag || !wf) return;
+    if (drag.kind === 'pan') {
+      document.getElementById('tbf-canvas').classList.remove('tbf-canvas--panning');
+      if (!drag.moved) {
+        wf.sel = null;
+        TaskBoardFlow.render();
+      }
+      return;
+    }
     if (drag.kind === 'move') {
       if (!drag.moved) wf.sel = { node: drag.id };
       TaskBoardFlow.render();

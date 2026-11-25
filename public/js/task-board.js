@@ -952,10 +952,12 @@ const TaskBoard = {
     }
     TaskBoard._wf = Object.assign({ slug, diff: false }, data, { stages: JSON.parse(JSON.stringify(data.stages)) });
     TaskBoardFlow.prepare(TaskBoard._wf);
+    TaskBoardFlow._zoom = 1;
     openModal({
       title: 'Workflow — ' + decodeName(slug),
       width: 1040,
       maximizable: true,
+      headerHtml: TaskBoardFlow.helpIconHtml(),
       body: '<div id="tb-wf"></div>',
       buttons: [{ label: 'Save', primary: true, onClick: () => TaskBoard.saveWorkflow() }],
       onClose: () => { TaskBoard._wf = null; }
@@ -1013,6 +1015,7 @@ const TaskBoard = {
         <button class="btn btn-sm" onclick="TaskBoard.wfExport()" title="Download the stages as a JSON file">Export</button>
         <button class="btn btn-sm" onclick="document.getElementById('tb-wf-file').click()" title="Load stages from an exported JSON file">Import</button>
         <input type="file" id="tb-wf-file" accept=".json,application/json" hidden onchange="TaskBoard.wfImportFile(this)">
+        ${TaskBoardFlow.zoomHtml()}
       </div>
       ${empty}
       <div class="tbf">

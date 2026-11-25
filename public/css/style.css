@@ -7315,6 +7315,63 @@ body.git-split-dragging {
 .tbf-label--dim {
   fill: var(--text-muted);
 }
+.tbf-canvas--panning {
+  cursor: grabbing;
+}
+.tbf-panel:empty {
+  display: none;
+}
+.tbf-zoom {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.tbf-zoom-level {
+  min-width: 52px;
+}
+.tbf-help-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: help;
+}
+.tbf-help-icon:hover,
+.tbf-help-icon:focus {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  outline: none;
+}
+.tbf-help-pop {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  width: 320px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-weight: normal;
+  text-align: left;
+  cursor: default;
+}
+.tbf-help-icon:hover .tbf-help-pop,
+.tbf-help-icon:focus .tbf-help-pop {
+  display: block;
+}
+.tbf-help-pop .tbf-help p:last-child {
+  margin-bottom: 0;
+}
 .tbf-panel {
   width: 260px;
   flex-shrink: 0;
