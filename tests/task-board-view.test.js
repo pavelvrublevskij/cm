@@ -1484,3 +1484,92 @@ test('the preview stays open while its message box has focus', async () => {
   el.text.onblur();
   assert.ok(el.removed, 'closes once the box loses focus with the pointer outside');
 });
+
+test('view: Compact by default, Board when the old Compact switch was off, else the chosen view', () => {
+  const store = {};
+  context.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } };
+  assert.strictEqual(TaskBoard.view(), 'compact');
+  store[TaskBoard.COMPACT_KEY] = '0';
+  assert.strictEqual(TaskBoard.view(), 'board');
+  for (const v of ['pipeline', 'radar', 'board', 'compact']) {
+    store[TaskBoard.VIEW_KEY] = v;
+    assert.strictEqual(TaskBoard.view(), v);
+    assert.strictEqual(TaskBoard.compact(), v === 'compact');
+  }
+  store[TaskBoard.VIEW_KEY] = 'bogus';
+  assert.strictEqual(TaskBoard.view(), 'board');
+  delete context.localStorage;
+});
+
+test('the board header has a View menu with Board, Compact, Pipeline and Radar', () => {
+  const index = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf-8');
+  assert.doesNotMatch(index, /task-board-compact-btn/);
+  for (const v of ['board', 'compact', 'pipeline', 'radar']) assert.ok(index.includes(`TaskBoard.setView('${v}')`), v);
+});
+
+test('Board and Compact views render the Kanban', () => {
+  assert.strictEqual(TaskBoard.viewHtml(STAGED, [], 'board'), TaskBoard.html(STAGED, [], false));
+  assert.strictEqual(TaskBoard.viewHtml(STAGED, [], 'compact'), TaskBoard.html(STAGED, [], true));
+});
+
+const VIZ = {
+  projects: { p: { parallel: false, stages: [
+    { id: 's-a', title: 'Plan', branches: [{ when: 'question', to: 'done' }] },
+    { id: 's-b', title: 'Build' },
+    { id: 's-c', title: 'Review', next: 's-a' }] } },
+  cards: [
+    { id: 't', title: 'Todo <x>', notes: '', project: 'p', column: 'todo' },
+    { id: 'r', title: 'Run', notes: '', project: 'p', column: 's-b', run: { status: 'running' } },
+    { id: 'n', title: 'Ask', notes: '', project: 'p', column: 's-c', run: { status: 'needs_input' } },
+    { id: 'd', title: 'Done', notes: '', project: 'p', column: 'done' }
+  ]
+};
+
+test('ticket status for the Pipeline and Radar colours', () => {
+  assert.strictEqual(TaskBoard.vizStatus({ column: 'todo', closed: true }), 'closed');
+  assert.strictEqual(TaskBoard.vizStatus({ column: 'ready' }), 'starting');
+  assert.strictEqual(TaskBoard.vizStatus({ column: 'finalize', finalized: true }), 'ready');
+  assert.strictEqual(TaskBoard.vizStatus({ column: 's-b', run: { status: 'conflict' } }), 'conflict');
+  assert.strictEqual(TaskBoard.vizStatus({ column: 'done' }), 'done');
+  assert.strictEqual(TaskBoard.vizStatus({ column: 'todo' }), 'idle');
+});
+
+test('Pipeline: one station per column, tickets under their station, branch and jump arcs', () => {
+  const html = TaskBoard.viewHtml(VIZ, [], 'pipeline');
+  assert.strictEqual((html.match(/class="tb-pl-station/g) || []).length, 7);
+  assert.deepStrictEqual(Array.from(html.matchAll(/tb-pl-name" title="([^"]+)"/g), m => m[1]), ['ToDo', 'Ready', 'Plan', 'Build', 'Review', 'Finalize', 'Done']);
+  assert.match(html, /tb-viz-ticket tb-viz--running" data-id="r"/);
+  assert.match(html, /Todo &lt;x&gt;/);
+  assert.match(html, /<title>If question<\/title>/);
+  assert.match(html, /<title>Next<\/title>/);
+  assert.match(html, /tb-pl-station--alert/);
+  assert.match(html, /tb-pl-track tb-pl-track--live/);
+  assert.match(html, /class="tb-chips"/);
+});
+
+test('Pipeline: a lane without a workflow offers Set up', () => {
+  assert.match(TaskBoard.viewHtml(BOARD, [], 'pipeline'), /No workflow yet/);
+});
+
+test('Radar: a ring per column but Done, ticket dots, a beacon for a waiting ticket, the Done count in the centre', () => {
+  const html = TaskBoard.viewHtml(VIZ, [], 'radar');
+  assert.match(html, /class="tb-rd-grid"/);
+  assert.strictEqual((html.match(/class="tb-rd-ring/g) || []).length, 6);
+  assert.strictEqual((html.match(/<g class="tb-viz-ticket/g) || []).length, 3, 'Done tickets are counted, not drawn');
+  assert.strictEqual((html.match(/tb-rd-beacon/g) || []).length, 1);
+  assert.match(html, /tb-rd-core-text"[^>]*>1</);
+  assert.match(html, /class="tb-rd-sweep"/);
+  assert.match(html, /aria-label="Todo &lt;x&gt;"/);
+});
+
+test('Radar: no sweep while nothing runs', () => {
+  const idle = { projects: VIZ.projects, cards: [VIZ.cards[0], { id: 'q', title: 'q', notes: '', project: 'p', column: 'ready' }] };
+  assert.doesNotMatch(TaskBoard.viewHtml(idle, [], 'radar'), /tb-rd-sweep/);
+});
+
+test('Pipeline and Radar: hidden lanes and an empty board', () => {
+  for (const v of ['pipeline', 'radar']) {
+    assert.match(TaskBoard.viewHtml(VIZ, ['p'], v), /All lanes are hidden/);
+    assert.match(TaskBoard.viewHtml({ cards: [], projects: {} }, [], v), /No tickets yet/);
+  }
+});
