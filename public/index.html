@@ -117,7 +117,15 @@
           <div style="display:flex;align-items:center;justify-content:space-between">
             <h2>Task Board</h2>
             <div style="display:flex;gap:8px">
-              <button class="btn btn-sm" id="task-board-compact-btn" onclick="TaskBoard.toggleCompact()" title="Fold workflow stages into one In progress column">Compact</button>
+              <div class="action-menu" id="task-board-view-menu">
+                <button class="btn btn-sm" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)" title="Board view">View: <span id="task-board-view-label">Compact</span> <span class="dd-arrow"></span></button>
+                <div class="action-menu-panel">
+                  <button class="action-menu-item" onclick="event.stopPropagation(); TaskBoard.setView('board')" title="Kanban: one column per workflow stage">Board</button>
+                  <button class="action-menu-item" onclick="event.stopPropagation(); TaskBoard.setView('compact')" title="Kanban: stages folded into one In progress column">Compact</button>
+                  <button class="action-menu-item" onclick="event.stopPropagation(); TaskBoard.setView('pipeline')" title="Each project as a subway line, stages as stations">Pipeline</button>
+                  <button class="action-menu-item" onclick="event.stopPropagation(); TaskBoard.setView('radar')" title="Each project as a radar, stages as rings, Done in the centre">Radar</button>
+                </div>
+              </div>
               <button class="btn btn-sm" id="task-board-add-lane-btn" onclick="TaskBoard.openAddLane()">Add project lane</button>
             </div>
           </div>
