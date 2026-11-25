@@ -28,7 +28,7 @@ function makeEl(tag) {
 }
 
 function load() {
-  const ctx = { document: { createElement: makeEl, body: makeEl('body') } };
+  const ctx = { document: { createElement: makeEl, createTextNode: t => ({ text: t }), body: makeEl('body') } };
   vm.createContext(ctx);
   vm.runInContext(src, ctx);
   return ctx;
@@ -96,4 +96,54 @@ test('clicking outside the modal does not close it', () => {
   for (const fn of overlay.listeners.click || []) fn({ target: overlay });
   assert.ok(!overlay.removed);
   assert.ok(!closed);
+});
+
+// A busyLabel button disables the dialog's buttons and shows a spinner while its onClick runs.
+function busyModal(ctx, onClick, extra = {}) {
+  const overlay = ctx.openModal({ title: 'Delete', body: '', buttons: [{ label: 'Delete', danger: true, onClick, ...extra }] });
+  const group = find(overlay.children[0], 'btn-group');
+  return { overlay, group, cancel: group.children[0], btn: group.children[1], close: find(overlay.children[0], 'modal-close') };
+}
+
+test('busyLabel button locks the dialog with a spinner until onClick finishes, then closes', async () => {
+  const ctx = load();
+  let resolve;
+  const { overlay, btn, cancel, close } = busyModal(ctx, () => new Promise(r => { resolve = r; }), { busyLabel: 'Deleting…' });
+  const done = btn.onclick();
+  assert.ok(btn.disabled && cancel.disabled && close.disabled);
+  assert.strictEqual(btn.children[0].className, 'btn-spinner');
+  assert.strictEqual(btn.children[1].text, 'Deleting…');
+  assert.ok(!overlay.removed);
+  resolve();
+  await done;
+  assert.ok(overlay.removed);
+});
+
+test('busyLabel button restores the buttons when onClick returns false', async () => {
+  const ctx = load();
+  const { overlay, btn, cancel, close } = busyModal(ctx, async () => false, { busyLabel: 'Deleting…' });
+  await btn.onclick();
+  assert.ok(!overlay.removed);
+  assert.ok(!btn.disabled && !cancel.disabled && !close.disabled);
+  assert.strictEqual(btn.textContent, 'Delete');
+});
+
+test('button without busyLabel does not lock the dialog', async () => {
+  const ctx = load();
+  let resolve;
+  const { btn, cancel } = busyModal(ctx, () => new Promise(r => { resolve = r; }));
+  const done = btn.onclick();
+  assert.ok(!btn.disabled && !cancel.disabled);
+  assert.strictEqual(btn.textContent, 'Delete');
+  resolve();
+  await done;
+});
+
+test('busyLabel button restores the buttons when onClick throws', async () => {
+  const ctx = load();
+  const { overlay, btn, cancel, close } = busyModal(ctx, async () => { throw new Error('boom'); }, { busyLabel: 'Deleting…' });
+  await assert.rejects(btn.onclick(), /boom/);
+  assert.ok(!overlay.removed);
+  assert.ok(!btn.disabled && !cancel.disabled && !close.disabled);
+  assert.strictEqual(btn.textContent, 'Delete');
 });

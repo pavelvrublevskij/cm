@@ -69,15 +69,34 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
   cancelBtn.textContent = cancelLabel || 'Cancel';
   cancelBtn.onclick = close;
   btnGroup.appendChild(cancelBtn);
+  const lockable = [closeBtn, cancelBtn];
 
-  for (const { label, primary, danger, onClick } of buttons) {
+  for (const { label, primary, danger, onClick, busyLabel } of buttons) {
     const btn = document.createElement('button');
     btn.className = 'btn' + (primary ? ' btn-primary' : '') + (danger ? ' btn-danger' : '');
     btn.textContent = label;
     btn.onclick = async () => {
-      const result = await onClick();
-      if (result !== false) close();
+      // A busyLabel button locks the dialog and shows a spinner while its onClick runs.
+      if (busyLabel) {
+        lockable.forEach(b => { b.disabled = true; });
+        const spinner = document.createElement('span');
+        spinner.className = 'btn-spinner';
+        btn.textContent = '';
+        btn.appendChild(spinner);
+        btn.appendChild(document.createTextNode(busyLabel));
+      }
+      let result = false;
+      try {
+        result = await onClick();
+      } finally {
+        if (result !== false) close();
+        else if (busyLabel) {
+          lockable.forEach(b => { b.disabled = false; });
+          btn.textContent = label;
+        }
+      }
     };
+    lockable.push(btn);
     btnGroup.appendChild(btn);
   }
 
