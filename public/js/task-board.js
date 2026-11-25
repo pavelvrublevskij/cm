@@ -177,7 +177,7 @@ const TaskBoard = {
   onCardOver(e) {
     const el = e.target.closest(TaskBoard.CARD_SEL);
     if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
-    TaskBoard.hoverCard(el.dataset.id);
+    TaskBoard.hoverCard(el.dataset.id, el);
   },
 
   onPointerMove(e) {
@@ -192,7 +192,12 @@ const TaskBoard = {
     const card = under && under.closest(TaskBoard.CARD_SEL);
     if ((card && card.dataset.id === p.id) || (p.el && p.el.contains(under))) {
       const now = p.headOnly && TaskBoard.findCard(p.id);
-      if (now && now.sessionId) { TaskBoard.hidePreview(); TaskBoard._preview = { id: now.id }; TaskBoard.showPreview(now); }
+      if (now && now.sessionId) {
+        const anchor = card && card.dataset.id === p.id ? card : p.anchor;
+        TaskBoard.hidePreview();
+        TaskBoard._preview = { id: now.id, anchor };
+        TaskBoard.showPreview(now);
+      }
       return;
     }
     if (p.el && p.el.contains(document.activeElement)) return; // a message is being typed
@@ -205,14 +210,15 @@ const TaskBoard = {
     TaskBoard.leavePreview();
   },
 
-  hoverCard(id) {
+  /** anchor: the hovered ticket element, when known. */
+  hoverCard(id, anchor) {
     const p = TaskBoard._preview;
-    if (p.id === id) { clearTimeout(p.hide); return; }
+    if (p.id === id) { clearTimeout(p.hide); if (anchor && !p.el) p.anchor = anchor; return; }
     if (p.el) return; // passing over other cards on the way to the open preview
     TaskBoard.hidePreview();
     const card = TaskBoard.findCard(id);
     if (!card || TaskBoard._drag) return;
-    TaskBoard._preview = { id, timer: setTimeout(() => TaskBoard.showPreview(card), TaskBoard.PREVIEW_DELAY_MS) };
+    TaskBoard._preview = { id, anchor, timer: setTimeout(() => TaskBoard.showPreview(card), TaskBoard.PREVIEW_DELAY_MS) };
   },
 
   /** Before the preview shows, leaving cancels it; once shown, a short grace lets the pointer move into it. */
@@ -230,7 +236,7 @@ const TaskBoard = {
     const at = TaskBoard._pointer;
     const under = at && document.elementFromPoint(at.x, at.y);
     const card = under && under.closest(TaskBoard.CARD_SEL);
-    if (card) TaskBoard.hoverCard(card.dataset.id);
+    if (card) TaskBoard.hoverCard(card.dataset.id, card);
   },
 
   hidePreview() {
@@ -242,9 +248,22 @@ const TaskBoard = {
     TaskBoard._preview = { id: null };
   },
 
+  /**
+   * Radar shows a ticket twice (dot and legend): the hovered element while it is still shown, else
+   * the ticket's element under the pointer (a re-render replaced it), else its first element.
+   */
+  previewAnchor(id, hovered) {
+    if (hovered && hovered.isConnected === true) return hovered;
+    const at = TaskBoard._pointer;
+    const under = at && document.elementFromPoint(at.x, at.y);
+    const el = under && under.closest(TaskBoard.CARD_SEL);
+    if (el && el.dataset.id === id) return el;
+    return document.querySelector(`#task-board-body :is(${TaskBoard.CARD_SEL})[data-id="${CSS.escape(id)}"]`);
+  },
+
   async showPreview(card) {
     const p = TaskBoard._preview;
-    const anchor = document.querySelector(`#task-board-body :is(${TaskBoard.CARD_SEL})[data-id="${CSS.escape(card.id)}"]`);
+    const anchor = TaskBoard.previewAnchor(card.id, p.anchor);
     if (!anchor) { TaskBoard.hidePreview(); return; }
     const el = document.createElement('div');
     el.className = 'tb-preview';
@@ -529,6 +548,15 @@ const TaskBoard = {
     TaskBoard.render();
   },
 
+  /** All chip: shows every lane when any is hidden, else hides them all. */
+  toggleAllLanes() {
+    const keys = TaskBoard.laneKeys(TaskBoard.board);
+    const hidden = TaskBoard.hidden();
+    const next = keys.some(k => hidden.includes(k)) ? [] : keys;
+    try { localStorage.setItem(TaskBoard.HIDDEN_KEY, JSON.stringify(next)); } catch (_) {}
+    TaskBoard.render();
+  },
+
   /** Project lanes by name. */
   laneKeys(board) {
     return Object.keys(board.projects || {}).sort((a, b) => decodeName(a).localeCompare(decodeName(b)));
@@ -808,20 +836,22 @@ const TaskBoard = {
     return `${TaskBoard.chipsHtml(keys, hidden)}${lanes || '<div class="empty-state"><p>All lanes are hidden.</p></div>'}`;
   },
 
-  chipsHtml(keys, hidden) {
-    return `<div class="tb-chips">${keys.map(k => `<button class="tb-chip${hidden.includes(k) ? '' : ' active'}" onclick="TaskBoard.toggleLaneVisible('${escapeAttr(k)}')">${escapeHtml(decodeName(k))}</button>`).join('')}</div>`;
+  /** Lane filter chips; withAll adds an All chip first (active while no lane is hidden). */
+  chipsHtml(keys, hidden, withAll) {
+    const all = withAll
+      ? `<button class="tb-chip tb-chip--all${keys.some(k => hidden.includes(k)) ? '' : ' active'}" onclick="TaskBoard.toggleAllLanes()">All</button>` : '';
+    return `<div class="tb-chips">${all}${keys.map(k => `<button class="tb-chip${hidden.includes(k) ? '' : ' active'}" onclick="TaskBoard.toggleLaneVisible('${escapeAttr(k)}')">${escapeHtml(decodeName(k))}</button>`).join('')}</div>`;
   },
 
-  /** The board in the chosen view: Board / Compact (Kanban), Pipeline (subway map) or Radar. Pure, for tests. */
+  /** The board in the chosen view: Board / Compact (Kanban), Pipeline (subway map) or Radar (one for the shown projects). Pure, for tests. */
   viewHtml(board, hidden, view) {
     if (view !== 'pipeline' && view !== 'radar') return TaskBoard.html(board, hidden, view === 'compact');
     const keys = TaskBoard.laneKeys(board);
     if (!keys.length) return TaskBoard.html(board, hidden);
-    const lanes = keys.filter(k => !hidden.includes(k))
-      .map(k => (view === 'pipeline' ? TaskBoard.pipelineLaneHtml(board, k) : TaskBoard.radarLaneHtml(board, k))).join('');
-    const body = !lanes ? '<div class="empty-state"><p>All lanes are hidden.</p></div>'
-      : view === 'radar' ? `<div class="tb-rd-grid">${lanes}</div>` : lanes;
-    return TaskBoard.chipsHtml(keys, hidden) + body;
+    const shown = keys.filter(k => !hidden.includes(k));
+    const body = !shown.length ? '<div class="empty-state"><p>All lanes are hidden.</p></div>'
+      : view === 'radar' ? TaskBoard.radarHtml(board, shown) : shown.map(k => TaskBoard.pipelineLaneHtml(board, k)).join('');
+    return TaskBoard.chipsHtml(keys, hidden, view === 'radar') + body;
   },
 
   /** A lane's stations in order: ToDo, Ready, its stages, Finalize, Done. */
@@ -905,9 +935,10 @@ const TaskBoard = {
         <line class="tb-pl-track${TaskBoard.vizLive(cards) ? ' tb-pl-track--live' : ''}" x1="${x(0)}" y1="${Y}" x2="${x(n - 1)}" y2="${Y}"/>
         ${arcs.join('')}${dots}
       </svg>`;
-    const cols = stations.map((s, i) => `<div class="tb-pl-col">
+    const cols = stations.map((s, i) => `<div class="tb-pl-col" data-lane="${escapeAttr(key)}" data-column="${escapeAttr(s.id)}"
+          ondragover="TaskBoard.onDragOver(event)" ondragleave="TaskBoard.onDragLeave(event)" ondrop="TaskBoard.onDrop(event)">
         <div class="tb-pl-name" title="${escapeAttr(s.title)}">${escapeHtml(s.title)}</div>
-        <div class="tb-pl-tickets">${at[i].map(TaskBoard.vizTicketHtml).join('')}</div>
+        <div class="tb-pl-tickets">${at[i].map(c => TaskBoard.vizTicketHtml(c)).join('')}</div>
       </div>`).join('');
     const empty = n === 4 ? `<div class="tb-pl-empty">No workflow yet <button class="btn btn-sm" onclick="TaskBoard.openWorkflow('${escapeAttr(key)}')">Set up</button></div>` : '';
     return `<section class="tb-lane tb-pl-lane" data-lane="${escapeAttr(key)}">${TaskBoard.vizHeadHtml(board, key, cards)}${empty}
@@ -916,30 +947,58 @@ const TaskBoard = {
         </div></div></section>`;
   },
 
-  /** A ticket in the Pipeline view: a status dot and its heading; hover previews it, click opens it. */
-  vizTicketHtml(card) {
-    return `<div class="tb-viz-ticket tb-viz--${TaskBoard.vizStatus(card)}" data-id="${escapeAttr(card.id)}" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
+  /**
+   * A ticket in the Pipeline view and the Radar legend: a status dot, its heading, the to-do and delete
+   * icons; drag moves it, hover previews it, click opens it. tag: optional text after the heading (Radar).
+   */
+  vizTicketHtml(card, tag) {
+    return `<div class="tb-viz-ticket tb-viz--${TaskBoard.vizStatus(card)}" draggable="true" data-id="${escapeAttr(card.id)}"
+        ondragstart="TaskBoard.onDragStart(event)" ondragend="TaskBoard.onDragEnd(event)" onclick="TaskBoard.openCard('${escapeAttr(card.id)}')">
         <span class="tb-viz-dot"></span><span class="tb-viz-text">${TaskBoard.kindIconHtml(card)}${escapeHtml(TaskBoard.headingOf(card))}</span>
+        ${tag ? `<span class="tb-viz-tag" title="${escapeAttr(tag)}">${escapeHtml(tag)}</span>` : ''}
+        ${TaskBoard.memoIconHtml(card)}
+        ${TaskBoard.deleteIconHtml(card)}
       </div>`;
   },
 
   RD_SIZE: 300,
 
   /**
-   * Radar view: one disc per project. Rings from the outside in are ToDo, Ready, the stages and
-   * Finalize; Done is the centre with its count. Tickets are dots on their ring, a waiting one sends
-   * out a beacon, and a sweep turns while any ticket runs. The legend lists the stations with counts.
+   * Radar stations over the shown projects: ToDo, Ready, stage positions 1…N (N: the most stages any
+   * project has), Finalize, Done. A position takes its stage's title when every project having it
+   * agrees, else "Stage k". has(card): the ticket is at that station.
    */
-  radarLaneHtml(board, key) {
-    const cards = (board.cards || []).filter(c => c.project === key);
-    const stations = TaskBoard.stations(board, key);
+  radarStations(board, keys) {
+    const stagesOf = k => ((board.projects || {})[k] || {}).stages || [];
+    const n = Math.max(0, ...keys.map(k => stagesOf(k).length));
+    const fixed = id => ({ id, title: TaskBoard.COLUMN_TITLES[id], has: c => c.column === id });
+    const positions = Array.from({ length: n }, (_, i) => {
+      const titles = new Set(keys.filter(k => stagesOf(k)[i]).map(k => stagesOf(k)[i].title || stagesOf(k)[i].id));
+      return {
+        id: '', title: titles.size === 1 ? Array.from(titles)[0] : `Stage ${i + 1}`, stage: true,
+        has: c => stagesOf(c.project).findIndex(s => s.id === c.column) === i
+      };
+    });
+    return [fixed('todo'), fixed('ready')].concat(positions, [fixed('finalize'), fixed('done')]);
+  },
+
+  /**
+   * Radar view: one disc for the shown projects. Rings from the outside in are ToDo, Ready, the stage
+   * positions and Finalize; Done is the centre with its count. Tickets are dots on their ring, a waiting
+   * one sends out a beacon, and a sweep turns while any ticket runs. The legend lists each station's
+   * tickets (project, and stage when it differs from the row), to drag onto ToDo, Ready or Done.
+   */
+  radarHtml(board, keys) {
+    const cards = (board.cards || []).filter(c => keys.includes(c.project));
+    const stations = TaskBoard.radarStations(board, keys);
+    const multi = keys.length > 1;
     const rings = stations.slice(0, -1);
     const S = TaskBoard.RD_SIZE, C = S / 2, R0 = 22, OUT = C - 8;
     const step = (OUT - R0) / rings.length;
     const r = k => R0 + (rings.length - k - 0.5) * step;
     const ringEls = rings.map((s, k) => `<circle class="tb-rd-ring${s.stage ? ' tb-rd-ring--stage' : ''}" cx="${C}" cy="${C}" r="${(r(k) + step / 2).toFixed(1)}"/>`).join('');
     const dots = rings.map((s, k) => {
-      const list = cards.filter(c => c.column === s.id);
+      const list = cards.filter(s.has);
       return list.map((c, j) => {
         const a = -Math.PI / 2 + (j + 0.5) * 2 * Math.PI / list.length + k * 0.7;
         const cx = (C + Math.cos(a) * r(k)).toFixed(1), cy = (C + Math.sin(a) * r(k)).toFixed(1);
@@ -959,12 +1018,28 @@ const TaskBoard = {
         <text class="tb-rd-core-text" x="${C}" y="${C + 4}" text-anchor="middle">${done}</text>
         ${dots}
       </svg>`;
+    const stageName = c => {
+      const st = (((board.projects || {})[c.project] || {}).stages || []).find(x => x.id === c.column);
+      return st ? st.title || st.id : '';
+    };
     const legend = stations.map(s => {
-      const list = cards.filter(c => c.column === s.id);
+      const list = cards.filter(s.has);
       const alert = list.some(c => TaskBoard.vizAlert(TaskBoard.vizStatus(c)));
-      return `<li class="${s.stage ? 'tb-rd-leg--stage' : ''}${alert ? ' tb-rd-leg--alert' : ''}"><span class="tb-rd-leg-name">${escapeHtml(s.title)}</span><span class="tb-col-count">${list.length}</span></li>`;
+      const drop = ['todo', 'ready', 'done'].includes(s.id)
+        ? ` data-column="${s.id}" ondragover="TaskBoard.onDragOver(event)" ondragleave="TaskBoard.onDragLeave(event)" ondrop="TaskBoard.onDrop(event)"` : '';
+      const tickets = list.map(c => {
+        const stage = s.stage && stageName(c) !== s.title ? stageName(c) : '';
+        return TaskBoard.vizTicketHtml(c, [multi ? decodeName(c.project) : '', stage].filter(Boolean).join(' · '));
+      }).join('');
+      return `<li class="${s.stage ? 'tb-rd-leg--stage' : ''}${alert ? ' tb-rd-leg--alert' : ''}"${drop}>
+          <div class="tb-rd-leg-head"><span class="tb-rd-leg-name">${escapeHtml(s.title)}</span><span class="tb-col-count">${list.length}</span></div>
+          ${tickets ? `<div class="tb-rd-leg-tickets">${tickets}</div>` : ''}
+        </li>`;
     }).join('');
-    return `<section class="tb-lane tb-rd-lane" data-lane="${escapeAttr(key)}">${TaskBoard.vizHeadHtml(board, key, cards)}
+    const head = multi
+      ? `<div class="tb-lane-head"><span class="tb-lane-name">${keys.length} projects</span><span class="git-count-badge">${cards.length}</span></div>`
+      : TaskBoard.vizHeadHtml(board, keys[0], cards);
+    return `<section class="tb-lane tb-rd-lane">${head}
         <div class="tb-rd-body">${svg}<ol class="tb-rd-legend" title="Rings from the outside in; Done is the centre">${legend}</ol></div></section>`;
   },
 
@@ -1464,7 +1539,7 @@ const TaskBoard = {
 
   onDragStart(e) {
     TaskBoard.hidePreview();
-    const el = e.target.closest('.tb-card');
+    const el = e.target.closest(TaskBoard.CARD_SEL);
     TaskBoard._drag = el ? TaskBoard.findCard(el.dataset.id) : null;
     if (!TaskBoard._drag) return;
     e.dataTransfer.effectAllowed = 'move';
@@ -1473,7 +1548,7 @@ const TaskBoard = {
   },
 
   onDragEnd(e) {
-    const el = e.target.closest('.tb-card');
+    const el = e.target.closest(TaskBoard.CARD_SEL);
     if (el) el.classList.remove('tb-card--dragging');
     document.querySelectorAll('.tb-col--over').forEach(c => c.classList.remove('tb-col--over'));
     TaskBoard._drag = null;
@@ -1481,7 +1556,8 @@ const TaskBoard = {
 
   dropAllowed(col) {
     const card = TaskBoard._drag;
-    return !!card && card.project === col.dataset.lane && TaskBoard.canMove(card, col.dataset.column);
+    // Radar legend rows span projects and carry no lane
+    return !!card && (!col.dataset.lane || card.project === col.dataset.lane) && TaskBoard.canMove(card, col.dataset.column);
   },
 
   onDragOver(e) {
@@ -1496,9 +1572,11 @@ const TaskBoard = {
     if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('tb-col--over');
   },
 
-  /** Index among the column's cards to insert before: the first card whose middle is below the pointer. */
+  /** Index among the column's cards of the dragged ticket's project to insert before: the first card whose middle is below the pointer. */
   dropIndex(col, clientY) {
-    const cards = Array.from(col.querySelectorAll('.tb-card')).filter(c => !TaskBoard._drag || c.dataset.id !== TaskBoard._drag.id);
+    const drag = TaskBoard._drag;
+    const cards = Array.from(col.querySelectorAll(TaskBoard.CARD_SEL)).filter(c => !drag
+      || (c.dataset.id !== drag.id && (TaskBoard.findCard(c.dataset.id) || {}).project === drag.project));
     const i = cards.findIndex(c => { const r = c.getBoundingClientRect(); return clientY < r.top + r.height / 2; });
     return i === -1 ? cards.length : i;
   },

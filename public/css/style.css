@@ -7648,6 +7648,8 @@ body.git-split-dragging {
 .tb-pl-col {
   min-width: 0;
   padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
 }
 .tb-pl-name {
   margin-bottom: 6px;
@@ -7666,7 +7668,11 @@ body.git-split-dragging {
   max-height: 180px;
   overflow-y: auto;
 }
-.tb-pl-tickets .tb-viz-ticket {
+.tb-pl-col.tb-col--over, .tb-rd-legend li.tb-col--over {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.tb-pl-tickets .tb-viz-ticket, .tb-rd-leg-tickets .tb-viz-ticket {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -7677,8 +7683,25 @@ body.git-split-dragging {
   border-left: 3px solid var(--tb-viz);
   border-radius: var(--radius-sm);
 }
-.tb-pl-tickets .tb-viz-ticket:hover { border-color: var(--tb-viz); }
-.tb-pl-tickets .tb-viz--closed { opacity: 0.6; }
+.tb-pl-tickets .tb-viz-ticket:hover, .tb-rd-leg-tickets .tb-viz-ticket:hover { border-color: var(--tb-viz); }
+.tb-pl-tickets .tb-viz--closed, .tb-rd-leg-tickets .tb-viz--closed { opacity: 0.6; }
+.tb-viz-ticket .tb-card-delete, .tb-viz-ticket .tb-card-memo {
+  position: static;
+  height: 16px;
+  margin-top: 0;
+  flex-shrink: 0;
+}
+.tb-viz-ticket:hover .tb-card-delete { visibility: visible; }
+.tb-viz-ticket:hover .tb-card-memo { opacity: 1; }
+.tb-viz-tag {
+  flex-shrink: 0;
+  max-width: 45%;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tb-viz-dot {
   flex-shrink: 0;
   width: 7px;
@@ -7689,20 +7712,15 @@ body.git-split-dragging {
 .tb-viz--running .tb-viz-dot { box-shadow: 0 0 6px var(--accent); }
 .tb-viz--needs_input .tb-viz-dot, .tb-viz--conflict .tb-viz-dot { animation: tb-viz-blink 1s ease-in-out infinite; }
 .tb-viz-text {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tb-rd-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
-  gap: 18px;
-}
-.tb-rd-grid .tb-lane { margin-bottom: 0; }
 .tb-rd-body {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
   padding: 12px;
 }
@@ -7757,12 +7775,23 @@ body.git-split-dragging {
   font-size: 12px;
 }
 .tb-rd-legend li {
+  padding: 3px 4px;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-bottom-color: var(--border);
+}
+.tb-rd-leg-head {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  padding: 3px 0;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border);
+}
+.tb-rd-leg-tickets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 2px;
+  max-height: 180px;
+  overflow-y: auto;
 }
 .tb-rd-leg-name {
   overflow: hidden;
