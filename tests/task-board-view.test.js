@@ -27,7 +27,12 @@ test('one lane per project, sorted by name', () => {
 });
 
 test('an empty board says how to start', () => {
-  assert.match(TaskBoard.html({ cards: [], projects: {} }, []), /No tickets yet/);
+  assert.match(TaskBoard.html({ cards: [], projects: {} }, []), /No tickets yet\. Add a project lane to start\./);
+});
+
+test('the board header has no New ticket button (lanes have + Ticket)', () => {
+  const index = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf-8');
+  assert.doesNotMatch(index, /task-board-new-btn/);
 });
 
 test('every lane has the fixed columns around its workflow', () => {
