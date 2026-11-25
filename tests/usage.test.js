@@ -418,3 +418,51 @@ test('by-project: date filter scopes project data', async () => {
   const proj2 = outRange.body.projects.find(p => p.slug === 'usage-proj-gamma');
   assert.ok(!proj2, 'project should not appear for February filter');
 });
+
+test('getProjectUsageMap refreshes only its own project and keeps other projects\' entries', async () => {
+  const { buildIndex, getProjectUsageMap } = require('../lib/usage-index');
+  const { readJson } = require('../lib/file-helpers');
+  buildIndex();
+
+  const write = (slug, id, input) => {
+    const dir = path.join(paths.PROJECTS_DIR, slug);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, id + '.jsonl'), JSON.stringify({
+      type: 'assistant', timestamp: '2026-03-01T12:00:00Z',
+      message: { model: 'claude-sonnet-4-6', usage: { input_tokens: input, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }
+    }) + '\n');
+  };
+  write('usage-scope-own', 'own-1', 42);
+  write('usage-scope-other', 'other-1', 7);
+
+  const map = getProjectUsageMap('usage-scope-own');
+  assert.strictEqual(map['own-1'].totals.input_tokens, 42);
+
+  const sessions = readJson(paths.USAGE_DB, { sessions: {} }).sessions;
+  assert.ok(!sessions['usage-scope-other/other-1'], 'other project was not indexed');
+  assert.ok(sessions['usage-proj-gamma/sess-001'], 'other projects\' entries are kept');
+
+  fs.rmSync(path.join(paths.PROJECTS_DIR, 'usage-scope-own', 'own-1.jsonl'));
+  getProjectUsageMap('usage-scope-own');
+  const after = readJson(paths.USAGE_DB, { sessions: {} }).sessions;
+  assert.ok(!after['usage-scope-own/own-1'], 'deleted session of this project is dropped');
+  assert.ok(after['usage-proj-gamma/sess-001']);
+});
+
+test('getSessionUsage picks up a changed session file of its own project', async () => {
+  const { getSessionUsage } = require('../lib/usage-index');
+  const dir = path.join(paths.PROJECTS_DIR, 'usage-scope-session');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 's-1.jsonl');
+  const entry = (input) => JSON.stringify({
+    type: 'assistant', timestamp: '2026-03-01T12:00:00Z',
+    message: { model: 'claude-sonnet-4-6', usage: { input_tokens: input, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }
+  });
+  fs.writeFileSync(file, entry(10) + '\n');
+  assert.strictEqual(getSessionUsage('usage-scope-session', 's-1').totals.input_tokens, 10);
+
+  fs.appendFileSync(file, entry(5) + '\n');
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(file, later, later);
+  assert.strictEqual(getSessionUsage('usage-scope-session', 's-1').totals.input_tokens, 15);
+});
