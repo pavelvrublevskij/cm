@@ -7724,7 +7724,13 @@ body.git-split-dragging {
   gap: 16px;
   padding: 12px;
 }
-.tb-rd-svg { flex-shrink: 0; }
+.tb-rd-svg {
+  flex: 0 0 50%;
+  max-width: 50%;
+  min-width: 300px;
+  height: auto;
+  aspect-ratio: 1;
+}
 .tb-rd-ring {
   fill: none;
   stroke: var(--border);

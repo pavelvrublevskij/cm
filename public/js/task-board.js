@@ -1012,7 +1012,7 @@ const TaskBoard = {
     const sweep = TaskBoard.vizLive(cards)
       ? `<path class="tb-rd-sweep" style="transform-origin:${C}px ${C}px" d="M${C} ${C} L${C} ${C - OUT} A${OUT} ${OUT} 0 0 1 ${tip} Z"/>` : '';
     const done = cards.filter(c => c.column === 'done').length;
-    const svg = `<svg class="tb-rd-svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">
+    const svg = `<svg class="tb-rd-svg" viewBox="0 0 ${S} ${S}">
         ${ringEls}${sweep}
         <circle class="tb-rd-core" cx="${C}" cy="${C}" r="${R0}"/>
         <text class="tb-rd-core-text" x="${C}" y="${C + 4}" text-anchor="middle">${done}</text>
