@@ -81,6 +81,14 @@ test('maximizable modal shows the close icon after the maximize button', () => {
   assert.deepStrictEqual(actions.children.map(c => c.className), ['btn btn-sm modal-maximize', 'modal-close']);
 });
 
+test('headerHtml goes into the title bar before the maximize and close buttons', () => {
+  const ctx = load();
+  const overlay = ctx.openModal({ title: 'Workflow', body: '', maximizable: true, headerHtml: '<span>?</span>' });
+  const actions = find(overlay.children[0], 'modal-header-actions');
+  assert.deepStrictEqual(actions.children.map(c => c.className), ['modal-header-extra', 'btn btn-sm modal-maximize', 'modal-close']);
+  assert.strictEqual(actions.children[0].innerHTML, '<span>?</span>');
+});
+
 test('clicking outside the modal does not close it', () => {
   const ctx = load();
   let closed = false;
