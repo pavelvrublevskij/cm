@@ -702,6 +702,21 @@ test('a re-render keeps each lane\'s horizontal scroll position', () => {
   TaskBoard.board = board;
 });
 
+test('a re-render keeps the board animations phase (Radar sweep, Pipeline track)', () => {
+  const loop = () => ({ animationName: 'tb-rd-spin', startTime: null, effect: { getComputedTiming: () => ({ iterations: Infinity }) } });
+  let anims = [loop()];
+  // A new array on each swap: only animations read after the redraw count
+  const body = { querySelectorAll: () => [], set innerHTML(_) { anims = [loop()]; }, getAnimations: () => anims };
+  Object.assign(context, { document: { getElementById: id => (id === 'task-board-body' ? body : null) } });
+  context.localStorage = { getItem: () => null, setItem() {} };
+  const board = TaskBoard.board;
+  TaskBoard.board = BOARD;
+  TaskBoard.render();
+  assert.strictEqual(anims[0].startTime, 0);
+  delete context.localStorage;
+  TaskBoard.board = board;
+});
+
 test('each lane has a top scrollbar above its columns', () => {
   const html = TaskBoard.html(BOARD, []);
   assert.strictEqual((html.match(/class="tb-cols-top"/g) || []).length, 2);
@@ -1624,6 +1639,20 @@ test('Radar: fits the view height, the disc sized by height and the legend scrol
   assert.match(rule('.tb-rd-svg'), /height:\s*100%;/);
   assert.match(rule('.tb-rd-svg'), /aspect-ratio:\s*1;/);
   assert.match(rule('.tb-rd-legend'), /overflow-y:\s*auto;/);
+});
+
+test('Radar and Pipeline: a refresh keeps the animations phase (each starts at the timeline origin)', () => {
+  const timing = iterations => ({ getComputedTiming: () => ({ iterations }) });
+  const anims = [
+    { animationName: 'tb-pl-flow', startTime: 812, effect: timing(Infinity) },
+    { animationName: 'tb-rd-spin', startTime: null, effect: timing(Infinity) },
+    { animationName: 'fadeIn', startTime: 300, effect: timing(1) },
+    { transitionProperty: 'width', startTime: 400, effect: timing(1) }
+  ];
+  let opts;
+  TaskBoard.keepAnimationPhase({ getAnimations: o => { opts = o; return anims; } });
+  assert.strictEqual(opts.subtree, true); // opts comes from the vm realm, so no deepStrictEqual
+  assert.deepStrictEqual(anims.map(a => a.startTime), [0, 0, 300, 400], 'one-shot animations and transitions are left alone');
 });
 
 test('Radar: no sweep while nothing runs', () => {

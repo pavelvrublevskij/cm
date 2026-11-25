@@ -480,9 +480,22 @@ const TaskBoard = {
         TaskBoard.syncTopScroll(lane);
       });
       TaskBoard.observeLaneSizes(el);
+      TaskBoard.keepAnimationPhase(el);
     }
     const label = document.getElementById('task-board-view-label');
     if (label) label.textContent = TaskBoard.VIEWS.find(v => v.id === TaskBoard.view()).label;
+  },
+
+  /**
+   * A refresh redraws the board, which would restart its animations (Radar sweep, Pipeline track).
+   * Starting each endless CSS animation at the timeline's origin keeps it at the phase the old element
+   * had; transitions and one-shot animations are left alone, or they would finish at once.
+   */
+  keepAnimationPhase(el) {
+    if (!el.getAnimations) return;
+    el.getAnimations({ subtree: true }).forEach(a => {
+      if (a.animationName && a.effect && a.effect.getComputedTiming().iterations === Infinity) a.startTime = 0;
+    });
   },
 
   /** Size the lane's top scrollbar to its columns, show it only when they overflow, and match their position. */
