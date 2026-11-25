@@ -1009,6 +1009,7 @@ function previewEnv({ cards, api }) {
     window: { innerWidth: 1600, innerHeight: 900 },
     document: {
       activeElement: null,
+      elementFromPoint: () => null,
       querySelector: () => anchor,
       createElement: () => {
         const text = { value: '', disabled: true };
@@ -1097,7 +1098,7 @@ test('a header-only preview becomes a full one when its ticket gets a session wh
     cards: [{ id: 'b', project: 'p', title: 'T', notes: '' }],
     api: async url => { calls.push(url); return { total: 0, messages: [] }; }
   });
-  context.document.elementFromPoint = () => ({ closest: () => ({ dataset: { id: 'b' } }) });
+  context.document.elementFromPoint = () => ({ closest: () => ({ dataset: { id: 'b' }, getBoundingClientRect: () => ({ top: 100, left: 50, right: 250 }) }) });
   TaskBoard.onPointerMove({ clientX: 1, clientY: 2 });
   TaskBoard.hoverCard('b');
   await timers[0].fn();
@@ -1110,6 +1111,52 @@ test('a header-only preview becomes a full one when its ticket gets a session wh
   assert.strictEqual(appended[1].className, 'tb-preview');
   assert.strictEqual(TaskBoard._preview.id, 'b');
   assert.ok(!TaskBoard._preview.headOnly);
+});
+
+test('the preview opens at the hovered ticket element while it is shown, else at the first one for the ticket', async () => {
+  const { timers, appended } = previewEnv({ cards: [{ id: 'a', project: 'p', title: 'T', notes: '' }], api: async () => ({}) });
+  const legend = { isConnected: true, getBoundingClientRect: () => ({ top: 300, left: 600, right: 700 }) };
+  TaskBoard.hoverCard('a', legend);
+  await timers[0].fn();
+  assert.strictEqual(appended[0].style.top, '300px', 'at the hovered legend ticket, not the dot');
+  assert.strictEqual(appended[0].style.left, '708px');
+  TaskBoard.hidePreview();
+  TaskBoard.hoverCard('a', { isConnected: false });
+  await timers[timers.length - 1].fn();
+  assert.strictEqual(appended[1].style.top, '100px', 're-rendered away, nothing under the pointer: the first element for the ticket');
+});
+
+test('preview anchor: a replaced hovered element is found again under the pointer', () => {
+  previewEnv({ cards: [{ id: 'a', project: 'p', title: 'T', notes: '' }], api: async () => ({}) });
+  const fresh = { dataset: { id: 'a' } };
+  context.document.elementFromPoint = () => ({ closest: () => fresh });
+  TaskBoard.onPointerMove({ clientX: 1, clientY: 2 });
+  assert.strictEqual(TaskBoard.previewAnchor('a', { isConnected: false }), fresh);
+  assert.notStrictEqual(TaskBoard.previewAnchor('b', { isConnected: false }), fresh, 'another ticket under the pointer');
+});
+
+test('preview anchor: hovering another element of the same pending ticket moves the anchor', () => {
+  const { appended } = previewEnv({ cards: [{ id: 'a', project: 'p', title: 'T', notes: '' }], api: async () => ({}) });
+  const dot = { isConnected: true }, legend = { isConnected: true };
+  TaskBoard.hoverCard('a', dot);
+  TaskBoard.hoverCard('a', legend);
+  assert.strictEqual(TaskBoard._preview.anchor, legend);
+  assert.strictEqual(appended.length, 0);
+  TaskBoard.hidePreview();
+});
+
+test('preview anchor: grace end and a header-only preview gaining a session keep the hovered element', async () => {
+  const { timers } = previewEnv({ cards: [{ id: 'a', project: 'p', title: 'T', notes: '' }, { id: 'b', project: 'p', title: 'U', notes: '' }], api: async () => ({ total: 0, messages: [] }) });
+  const legendB = { isConnected: true, dataset: { id: 'b' }, getBoundingClientRect: () => ({ top: 300, left: 600, right: 700 }) };
+  context.document.elementFromPoint = () => ({ closest: () => legendB });
+  TaskBoard.onPointerMove({ clientX: 1, clientY: 2 });
+  TaskBoard.previewGraceEnd();
+  assert.strictEqual(TaskBoard._preview.anchor, legendB, 'grace end passes the element under the pointer');
+  await timers[timers.length - 1].fn();
+  TaskBoard.board.cards[1].sessionId = 's1';
+  TaskBoard.checkPreview();
+  assert.strictEqual(TaskBoard._preview.anchor, legendB, 're-shown with a session at the same element');
+  TaskBoard.hidePreview();
 });
 
 test('a ticket with a session shows the header above the message box', async () => {
@@ -1538,7 +1585,7 @@ test('Pipeline: one station per column, tickets under their station, branch and 
   const html = TaskBoard.viewHtml(VIZ, [], 'pipeline');
   assert.strictEqual((html.match(/class="tb-pl-station/g) || []).length, 7);
   assert.deepStrictEqual(Array.from(html.matchAll(/tb-pl-name" title="([^"]+)"/g), m => m[1]), ['ToDo', 'Ready', 'Plan', 'Build', 'Review', 'Finalize', 'Done']);
-  assert.match(html, /tb-viz-ticket tb-viz--running" data-id="r"/);
+  assert.match(html, /tb-viz-ticket tb-viz--running" draggable="true" data-id="r"/);
   assert.match(html, /Todo &lt;x&gt;/);
   assert.match(html, /<title>If question<\/title>/);
   assert.match(html, /<title>Next<\/title>/);
@@ -1553,7 +1600,7 @@ test('Pipeline: a lane without a workflow offers Set up', () => {
 
 test('Radar: a ring per column but Done, ticket dots, a beacon for a waiting ticket, the Done count in the centre', () => {
   const html = TaskBoard.viewHtml(VIZ, [], 'radar');
-  assert.match(html, /class="tb-rd-grid"/);
+  assert.strictEqual((html.match(/class="tb-rd-svg"/g) || []).length, 1);
   assert.strictEqual((html.match(/class="tb-rd-ring/g) || []).length, 6);
   assert.strictEqual((html.match(/<g class="tb-viz-ticket/g) || []).length, 3, 'Done tickets are counted, not drawn');
   assert.strictEqual((html.match(/tb-rd-beacon/g) || []).length, 1);
@@ -1572,4 +1619,100 @@ test('Pipeline and Radar: hidden lanes and an empty board', () => {
     assert.match(TaskBoard.viewHtml(VIZ, ['p'], v), /All lanes are hidden/);
     assert.match(TaskBoard.viewHtml({ cards: [], projects: {} }, [], v), /No tickets yet/);
   }
+});
+
+test('Pipeline: tickets drag, show the to-do and delete icons, and each station is a drop target', () => {
+  const board = { projects: VIZ.projects, cards: VIZ.cards.concat([{ id: 'f', title: 'Fin', notes: '', project: 'p', column: 'finalize' }]) };
+  const html = TaskBoard.viewHtml(board, [], 'pipeline');
+  assert.match(html, /tb-viz-ticket tb-viz--idle" draggable="true" data-id="t"[\s\S]*?ondragstart="TaskBoard\.onDragStart\(event\)"/);
+  const ticket = id => html.match(new RegExp(`data-id="${id}"[\\s\\S]*?</div>`))[0];
+  assert.match(ticket('t'), /tb-card-delete/, 'ToDo can be deleted');
+  assert.match(ticket('d'), /tb-card-delete/, 'Done can be deleted');
+  assert.match(ticket('d'), /tb-card-memo/, 'Done has to-dos');
+  assert.match(ticket('f'), /tb-card-memo/, 'Finalize has to-dos');
+  assert.doesNotMatch(ticket('r'), /tb-card-delete|tb-card-memo/, 'a running stage has neither');
+  for (const col of ['todo', 'ready', 's-a', 'finalize', 'done']) {
+    assert.match(html, new RegExp(`class="tb-pl-col" data-lane="p" data-column="${col}"\\s+ondragover="TaskBoard\\.onDragOver\\(event\\)"`), col);
+  }
+});
+
+const RADAR = {
+  projects: {
+    'C--work-alpha': { stages: [{ id: 'a1', title: 'Plan' }, { id: 'a2', title: 'Build' }] },
+    'C--work-zeta': { stages: [{ id: 'z1', title: 'Plan' }, { id: 'z2', title: 'Test' }, { id: 'z3', title: 'Review' }] }
+  },
+  cards: [
+    { id: 'at', title: 'Alpha todo', notes: '', project: 'C--work-alpha', column: 'todo' },
+    { id: 'a2', title: 'Alpha build', notes: '', project: 'C--work-alpha', column: 'a2', run: { status: 'running' } },
+    { id: 'z2', title: 'Zeta test', notes: '', project: 'C--work-zeta', column: 'z2', run: { status: 'running' } },
+    { id: 'z3', title: 'Zeta review', notes: '', project: 'C--work-zeta', column: 'z3', run: { status: 'running' } },
+    { id: 'zd', title: 'Zeta done', notes: '', project: 'C--work-zeta', column: 'done' }
+  ]
+};
+const legendRows = html => Array.from(html.matchAll(/<li class="[^"]*"([^>]*)>\s*<div class="tb-rd-leg-head"><span class="tb-rd-leg-name">([^<]+)<\/span><span class="tb-col-count">(\d+)<\/span>/g),
+  m => ({ title: m[2], count: Number(m[3]), drop: (m[1].match(/data-column="([^"]+)"/) || [])[1] || '' }));
+
+test('Radar: one disc for all shown projects, a ring per stage position, shared or "Stage k" titles', () => {
+  const html = TaskBoard.viewHtml(RADAR, [], 'radar');
+  assert.strictEqual((html.match(/class="tb-rd-svg"/g) || []).length, 1);
+  assert.strictEqual((html.match(/class="tb-rd-ring/g) || []).length, 6, 'ToDo, Ready, 3 positions, Finalize');
+  assert.deepStrictEqual(legendRows(html).map(r => [r.title, r.count]),
+    [['ToDo', 1], ['Ready', 0], ['Plan', 0], ['Stage 2', 2], ['Review', 1], ['Finalize', 0], ['Done', 1]]);
+  assert.match(html, /tb-rd-core-text"[^>]*>1</);
+  assert.match(html, /<span class="tb-lane-name">2 projects<\/span><span class="git-count-badge">5<\/span>/);
+  assert.doesNotMatch(html, /\+ Ticket|tb-workflow-btn/, 'no single project to add to');
+});
+
+test('Radar: legend tickets carry project and differing stage, icons, and only ToDo, Ready and Done take drops', () => {
+  const html = TaskBoard.viewHtml(RADAR, [], 'radar');
+  assert.match(html, /data-id="a2"[\s\S]*?class="tb-viz-tag" title="work\/alpha · Build"/);
+  assert.match(html, /data-id="z3"[\s\S]*?class="tb-viz-tag" title="work\/zeta"/, 'stage named like its row is not repeated');
+  assert.match(html, /tb-viz-ticket tb-viz--idle" draggable="true" data-id="at"[\s\S]*?tb-card-delete/);
+  assert.match(html, /tb-viz-ticket tb-viz--done" draggable="true" data-id="zd"[\s\S]*?tb-card-memo[\s\S]*?tb-card-delete/);
+  assert.deepStrictEqual(legendRows(html).filter(r => r.drop).map(r => r.drop), ['todo', 'ready', 'done']);
+  assert.doesNotMatch(html, /<li[^>]*data-lane=/, 'rows span projects');
+});
+
+test('Radar: filtered to one project it uses its stage titles and has its Workflow and + Ticket', () => {
+  const html = TaskBoard.viewHtml(RADAR, ['C--work-alpha'], 'radar');
+  assert.deepStrictEqual(legendRows(html).map(r => r.title), ['ToDo', 'Ready', 'Plan', 'Test', 'Review', 'Finalize', 'Done']);
+  assert.match(html, /TaskBoard\.openEditor\(null, 'C--work-zeta'\)/);
+  assert.doesNotMatch(html, /Alpha/);
+  assert.doesNotMatch(html, /class="tb-viz-tag"/, 'no project tag for one project');
+});
+
+test('Radar: an All chip, active while no project is hidden; other views have none', () => {
+  assert.match(TaskBoard.viewHtml(RADAR, [], 'radar'), /<button class="tb-chip tb-chip--all active" onclick="TaskBoard\.toggleAllLanes\(\)">All<\/button>/);
+  assert.match(TaskBoard.viewHtml(RADAR, ['C--work-zeta'], 'radar'), /<button class="tb-chip tb-chip--all" onclick/);
+  for (const v of ['board', 'compact', 'pipeline']) assert.doesNotMatch(TaskBoard.viewHtml(RADAR, [], v), /tb-chip--all/, v);
+});
+
+test('All chip: shows every lane when any is hidden, else hides them all', () => {
+  const store = { [TaskBoard.HIDDEN_KEY]: JSON.stringify(['C--work-zeta']) };
+  context.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } };
+  const board = TaskBoard.board, render = TaskBoard.render;
+  TaskBoard.board = RADAR;
+  TaskBoard.render = () => {};
+  TaskBoard.toggleAllLanes();
+  assert.deepStrictEqual(JSON.parse(store[TaskBoard.HIDDEN_KEY]), []);
+  TaskBoard.toggleAllLanes();
+  assert.deepStrictEqual(JSON.parse(store[TaskBoard.HIDDEN_KEY]), ['C--work-alpha', 'C--work-zeta']);
+  TaskBoard.board = board;
+  TaskBoard.render = render;
+  delete context.localStorage;
+});
+
+test('drops: a Radar row (no lane) takes any project, a lane column only its own; index counts only that project', () => {
+  const board = TaskBoard.board;
+  TaskBoard.board = RADAR;
+  TaskBoard._drag = RADAR.cards.find(c => c.id === 'zd');
+  assert.strictEqual(TaskBoard.dropAllowed({ dataset: { column: 'todo' } }), true);
+  assert.strictEqual(TaskBoard.dropAllowed({ dataset: { column: 'ready' } }), false);
+  assert.strictEqual(TaskBoard.dropAllowed({ dataset: { lane: 'C--work-alpha', column: 'todo' } }), false);
+  assert.strictEqual(TaskBoard.dropAllowed({ dataset: { lane: 'C--work-zeta', column: 'todo' } }), true);
+  const el = (id, top) => ({ dataset: { id }, getBoundingClientRect: () => ({ top, height: 10 }) });
+  const col = { querySelectorAll: () => [el('at', 0), el('z2', 20), el('z3', 40)] };
+  assert.strictEqual(TaskBoard.dropIndex(col, 25), 1, 'the Alpha ticket above is not counted');
+  TaskBoard._drag = null;
+  TaskBoard.board = board;
 });
