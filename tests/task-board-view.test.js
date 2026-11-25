@@ -1615,6 +1615,17 @@ test('Radar: the disc scales by viewBox, no fixed width or height', () => {
   assert.doesNotMatch(svg, /\s(width|height)=/);
 });
 
+test('Radar: fits the view height, the disc sized by height and the legend scrolling', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf-8');
+  const rule = sel => css.match(new RegExp(`\\n${sel.replace(/[.()>:]/g, '\\$&')}\\s*\\{([^}]*)\\}`))[1];
+  assert.match(rule('#task-board-body:has(> .tb-rd-lane)'), /height:\s*100%;/);
+  assert.match(rule('.tb-rd-lane'), /min-height:\s*0;/);
+  assert.match(rule('.tb-rd-body'), /min-height:\s*0;/);
+  assert.match(rule('.tb-rd-svg'), /height:\s*100%;/);
+  assert.match(rule('.tb-rd-svg'), /aspect-ratio:\s*1;/);
+  assert.match(rule('.tb-rd-legend'), /overflow-y:\s*auto;/);
+});
+
 test('Radar: no sweep while nothing runs', () => {
   const idle = { projects: VIZ.projects, cards: [VIZ.cards[0], { id: 'q', title: 'q', notes: '', project: 'p', column: 'ready' }] };
   assert.doesNotMatch(TaskBoard.viewHtml(idle, [], 'radar'), /tb-rd-sweep/);

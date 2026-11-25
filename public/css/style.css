@@ -7718,17 +7718,32 @@ body.git-split-dragging {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+#task-board-body:has(> .tb-rd-lane) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.tb-rd-lane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
 .tb-rd-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: flex-start;
   gap: 16px;
   padding: 12px;
 }
 .tb-rd-svg {
-  flex: 0 0 50%;
+  flex: 0 0 auto;
+  height: 100%;
+  width: auto;
   max-width: 50%;
-  min-width: 300px;
-  height: auto;
+  min-height: 200px;
   aspect-ratio: 1;
 }
 .tb-rd-ring {
@@ -7775,6 +7790,8 @@ body.git-split-dragging {
 .tb-rd-legend {
   flex: 1;
   min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
   margin: 0;
   padding: 0;
   list-style: none;
