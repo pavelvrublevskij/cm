@@ -660,6 +660,31 @@ test('a lane shows the project branch only when git gives one', () => {
   assert.doesNotMatch(TaskBoard.laneHtml(BOARD, 'C--work-zeta'), /tb-lane-git/);
 });
 
+test('a lane has a New Session menu right after Workflow that starts a session in the lane project', () => {
+  const html = TaskBoard.laneHtml(BOARD, 'C--work-zeta');
+  assert.match(html, /tb-workflow-btn[^>]*>Workflow[^<]*<\/button>\s*<div class="action-menu tb-new-session">/);
+  assert.match(html, /Sessions\.newSessionOS\('C--work-zeta'\)">In OS terminal</);
+  assert.match(html, /Sessions\.newSessionBrowser\('C--work-zeta'\)">In browser terminal</);
+});
+
+test('the board refresh waits while a drag is on or a lane menu is open', () => {
+  const savedDoc = context.document;
+  let open = null;
+  context.document = { querySelector: sel => (sel === '#task-board-body .action-menu-panel.open' ? open : null) };
+  try {
+    TaskBoard._drag = null;
+    assert.strictEqual(TaskBoard.pollPaused(), false);
+    open = {};
+    assert.strictEqual(TaskBoard.pollPaused(), true);
+    open = null;
+    TaskBoard._drag = { id: '1' };
+    assert.strictEqual(TaskBoard.pollPaused(), true);
+  } finally {
+    TaskBoard._drag = null;
+    context.document = savedDoc;
+  }
+});
+
 test('Finalize and Done cards show a to-dos button with the open count, or done/total once all are done', () => {
   const card = { id: '9', title: 'T', notes: '', project: 'C--work-zeta', column: 'done', closed: false, todos: [{ text: 'a', done: true }, { text: 'b', done: false }] };
   const html = TaskBoard.cardHtml(card, [], false);
