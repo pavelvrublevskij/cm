@@ -69,6 +69,14 @@ test('sending pastes the text, presses Enter after a moment and marks the sessio
   assert.deepStrictEqual(term.writes.slice(1), ['\r']);
 });
 
+test('sending text with an end-of-paste sequence pastes it without ESC', async () => {
+  const term = fakeTerm();
+  terminalServer._injectFakeEntry(SLUG, SID, { hookToken: TOKEN, term });
+  const res = await send('hi\x1b[201~\rmore');
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(term.writes, ['\x1b[200~hi[201~\rmore\x1b[201~']);
+});
+
 test('a session without the session hooks (a Task Board session, one started before initHooks) cannot take input', async () => {
   const term = fakeTerm();
   terminalServer._injectFakeEntry(SLUG, SID, { term });

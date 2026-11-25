@@ -145,6 +145,7 @@ Terminal and shells use WebSocket upgrades on the same server.
 - `~/.claude/` is written only through feature endpoints with `backup()` first; app data never goes into `~/.claude/`.
 - Path traversal is blocked: `safeSlug()`, `safeMemoryFile()`, `safeJoin()` for any name from a request, validated filenames, hex-only commit shas.
 - Request values used as object keys go through `isSafeKey()` (no `__proto__`); OS terminals get the project folder as cwd/env, never inside a command line (`lib/terminal-launch.js`).
+- Text pasted into a pty goes through `bracketedPaste()` (`lib/terminal-paste.js`), which removes ESC so the text cannot end the paste early.
 - Credentials are read, never written.
 - `/api/task-board/hook` acts only for a running ticket and only with that run's random token.
 - `/api/terminal/hook` acts only for a running browser-terminal session and only with that session's random token.
