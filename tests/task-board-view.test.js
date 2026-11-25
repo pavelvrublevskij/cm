@@ -816,9 +816,22 @@ test('a ticket in Finalize is still in the workflow and says so in the session b
 
 test('a lane shows the project branch only when git gives one', () => {
   const withBranch = Object.assign({}, BOARD, { projectBranches: { 'C--work-zeta': 'feature/<x>', 'C--work-alpha': '' } });
-  assert.match(TaskBoard.laneHtml(withBranch, 'C--work-zeta'), /class="tb-card-git tb-lane-git"[^>]*>&#5833; feature\/&lt;x&gt;</);
+  assert.match(TaskBoard.laneHtml(withBranch, 'C--work-zeta'), /class="btn btn-sm tb-card-git tb-lane-git"[^>]*>&#5833; feature\/&lt;x&gt; </);
   assert.doesNotMatch(TaskBoard.laneHtml(withBranch, 'C--work-alpha'), /tb-lane-git/);
   assert.doesNotMatch(TaskBoard.laneHtml(BOARD, 'C--work-zeta'), /tb-lane-git/);
+});
+
+test('the lane branch opens the branch picker only while no ticket is between To Do and Done', () => {
+  const lane = cards => TaskBoard.laneHtml(Object.assign({}, BOARD, { cards, projectBranches: { 'C--work-zeta': 'main' } }), 'C--work-zeta');
+  const card = column => ({ id: column, title: 'T', notes: '', project: 'C--work-zeta', column, closed: false });
+  const open = /<button class="btn btn-sm tb-card-git tb-lane-git"[^>]*onclick="TaskBoard\.openBranchPicker\('C--work-zeta'\)">/;
+  const enabled = html => !/class="btn btn-sm tb-card-git tb-lane-git"[^>]* disabled/.test(html);
+  assert.match(lane([]), open);
+  assert.match(lane([]), /id="tb-branch-picker-C--work-zeta"/);
+  assert.ok(enabled(lane([card('todo'), card('done')])));
+  for (const column of ['ready', 'stage-1', 'finalize']) {
+    assert.ok(!enabled(lane([card('todo'), card(column)])), column + ' blocks switching');
+  }
 });
 
 test('a lane has a New Session menu right after Workflow that starts a session in the lane project', () => {
@@ -831,13 +844,18 @@ test('a lane has a New Session menu right after Workflow that starts a session i
 test('the board refresh waits while a drag is on or a lane menu is open', () => {
   const savedDoc = context.document;
   let open = null;
-  context.document = { querySelector: sel => (sel === '#task-board-body .action-menu-panel.open' ? open : null) };
+  let picker = null;
+  context.document = { querySelector: sel => (sel === '#task-board-body .action-menu-panel.open' ? open
+    : sel === '#task-board-body .git-branch-picker.open' ? picker : null) };
   try {
     TaskBoard._drag = null;
     assert.strictEqual(TaskBoard.pollPaused(), false);
     open = {};
     assert.strictEqual(TaskBoard.pollPaused(), true);
     open = null;
+    picker = {};
+    assert.strictEqual(TaskBoard.pollPaused(), true, 'a branch picker is open');
+    picker = null;
     TaskBoard._drag = { id: '1' };
     assert.strictEqual(TaskBoard.pollPaused(), true);
   } finally {

@@ -375,6 +375,22 @@ test('push from the footer repaints the panel as well', async () => {
   assert.strictEqual(harness.panelRefreshes, 1);
 });
 
+test('checkoutIn switches the named project and repaints only when it is the open one', async () => {
+  const calls = [];
+  harness.apiHandler = (url, opts) => {
+    if (opts && opts.method === 'POST') { calls.push([url, opts.body]); return { output: '' }; }
+    if (url.includes('terminal/info')) return { available: true, running: false };
+    return { available: true, branch: 'b', files: [], unpushed: [] };
+  };
+  await GitActions.init('proj');
+  assert.strictEqual(await GitActions.checkoutIn('other', 'dev', false, true), true);
+  assert.match(calls[0][0], /other\/git\/checkout$/);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(calls[0][1])), { branch: 'dev', remote: false, stash: true });
+  assert.strictEqual(harness.panelRefreshes, 0, 'another project leaves the open git views alone');
+  await GitActions.checkoutIn('proj', 'dev', false, false);
+  assert.strictEqual(harness.panelRefreshes, 1);
+});
+
 // ── one action, no dropdown ──────────────────────────────────────────────────
 
 test('the footer button opens the panel directly, with no menu', async () => {

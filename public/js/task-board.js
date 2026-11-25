@@ -98,9 +98,10 @@ const TaskBoard = {
     TaskBoard.startPolling();
   },
 
-  /** A refresh would redraw the board under a drag or an open lane menu (New Session), so it waits. */
+  /** A refresh would redraw the board under a drag, an open lane menu (New Session) or branch picker, so it waits. */
   pollPaused() {
-    return !!TaskBoard._drag || !!document.querySelector('#task-board-body .action-menu-panel.open');
+    return !!TaskBoard._drag || !!document.querySelector('#task-board-body .action-menu-panel.open')
+      || !!document.querySelector('#task-board-body .git-branch-picker.open');
   },
 
   /** Keep running tickets current while the board is open (at the conversation refresh rate); stops once another view is shown. */
@@ -697,6 +698,42 @@ const TaskBoard = {
       </div>`;
   },
 
+  /** Switching the project branch is only safe while none of the lane's tickets sits between To Do and Done. */
+  canSwitchBranch(cards) {
+    return cards.every(c => c.column === 'todo' || c.column === 'done');
+  },
+
+  /** The lane's project branch, a button opening the git panel's branch picker for this project. */
+  laneBranchHtml(key, projectBranch, cards) {
+    const can = TaskBoard.canSwitchBranch(cards);
+    const title = can
+      ? 'Project branch: worktree tickets merge into it at Finalize. Click to switch branch'
+      : "Finish or move the lane's tickets to To Do or Done to switch branch";
+    const id = 'tb-branch-picker-' + key;
+    return `<div class="git-menu tb-lane-branch git-branch-host">
+        <button class="btn btn-sm tb-card-git tb-lane-git" title="${escapeAttr(title)}"${can ? '' : ' disabled'}
+          onclick="TaskBoard.openBranchPicker('${escapeAttr(key)}')">&#5833; ${escapeHtml(projectBranch)} <span class="dd-arrow"></span></button>
+        <div class="git-menu-panel git-branch-picker" id="${escapeAttr(id)}"></div>
+      </div>`;
+  },
+
+  /** Opens the branch picker under a lane's branch; its uncommitted file count decides whether switching asks first. */
+  async openBranchPicker(key) {
+    if (GitBranchPicker.isOpenIn('tb-branch-picker-' + key)) return GitBranchPicker.close();
+    const info = await GitApi.info(key) || {};
+    const files = (info.files || []).length;
+    GitBranchPicker.open({
+      slug: key,
+      panelId: 'tb-branch-picker-' + key,
+      files: () => files,
+      label: () => info.branch || '',
+      checkout: async (name, remote, stash) => {
+        await GitActions.checkoutIn(key, name, remote, stash);
+        await TaskBoard.load();
+      },
+    });
+  },
+
   laneHtml(board, key, compact) {
     const columns = TaskBoard.laneColumns(board, key, compact);
     const cards = (board.cards || []).filter(c => c.project === key);
@@ -709,7 +746,7 @@ const TaskBoard = {
     const projectBranch = (board.projectBranches || {})[key];
     const head = `<div class="tb-lane-head">
         <span class="tb-lane-name">${escapeHtml(decodeName(key))}</span>
-        ${projectBranch ? `<span class="tb-card-git tb-lane-git" title="Project branch: worktree tickets merge into it at Finalize">&#5833; ${escapeHtml(projectBranch)}</span>` : ''}
+        ${projectBranch ? TaskBoard.laneBranchHtml(key, projectBranch, cards) : ''}
         <span class="git-count-badge">${cards.length}</span>
         <button class="btn btn-sm tb-workflow-btn" onclick="TaskBoard.openWorkflow('${k}')">Workflow${stages.length ? ' · ' + stages.length : ''}</button>
         <div class="action-menu tb-new-session">
