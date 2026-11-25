@@ -1206,7 +1206,7 @@ const TaskBoard = {
 
   openAddLane() {
     const taken = Object.keys(TaskBoard.board.projects || {});
-    const free = slug => !taken.includes(slug);
+    const free = slug => !taken.includes(slug) && !slug.includes('--claude-worktrees-');
     if (!(Projects.data || []).some(p => free(p.slug))) {
       toast('Every project already has a lane', 'error');
       return;
