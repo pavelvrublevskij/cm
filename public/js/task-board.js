@@ -740,7 +740,7 @@ const TaskBoard = {
   /** The whole board: lane filter chips, then each visible lane. Pure, for tests. */
   html(board, hidden, compact) {
     const keys = TaskBoard.laneKeys(board);
-    if (!keys.length) return '<div class="empty-state"><p>No tickets yet. Add a project lane or a new ticket to start.</p></div>';
+    if (!keys.length) return '<div class="empty-state"><p>No tickets yet. Add a project lane to start.</p></div>';
     const chips = keys.map(k => `<button class="tb-chip${hidden.includes(k) ? '' : ' active'}" onclick="TaskBoard.toggleLaneVisible('${escapeAttr(k)}')">${escapeHtml(decodeName(k))}</button>`).join('');
     const lanes = keys.filter(k => !hidden.includes(k)).map(k => TaskBoard.laneHtml(board, k, compact)).join('');
     return `<div class="tb-chips">${chips}</div>${lanes || '<div class="empty-state"><p>All lanes are hidden.</p></div>'}`;
