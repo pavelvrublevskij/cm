@@ -7136,7 +7136,8 @@ body.git-split-dragging {
   margin: 0 0 12px;
   font-weight: 600;
 }
-.tb-workflow-btn {
+.tb-workflow-btn,
+.tb-new-session {
   margin-left: 4px;
 }
 .tb-flag {

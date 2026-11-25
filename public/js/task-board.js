@@ -98,6 +98,11 @@ const TaskBoard = {
     TaskBoard.startPolling();
   },
 
+  /** A refresh would redraw the board under a drag or an open lane menu (New Session), so it waits. */
+  pollPaused() {
+    return !!TaskBoard._drag || !!document.querySelector('#task-board-body .action-menu-panel.open');
+  },
+
   /** Keep running tickets current while the board is open (at the conversation refresh rate); stops once another view is shown. */
   startPolling() {
     const ms = Sessions.refreshIntervalMs();
@@ -110,7 +115,7 @@ const TaskBoard = {
         if (App.currentView !== 'session-detail') setFooterStatus('Idle', false);
         return;
       }
-      if (TaskBoard._drag) return;
+      if (TaskBoard.pollPaused()) return;
       try {
         TaskBoard.board = await api('/api/task-board');
         TaskBoard.render();
@@ -707,6 +712,13 @@ const TaskBoard = {
         ${projectBranch ? `<span class="tb-card-git tb-lane-git" title="Project branch: worktree tickets merge into it at Finalize">&#5833; ${escapeHtml(projectBranch)}</span>` : ''}
         <span class="git-count-badge">${cards.length}</span>
         <button class="btn btn-sm tb-workflow-btn" onclick="TaskBoard.openWorkflow('${k}')">Workflow${stages.length ? ' · ' + stages.length : ''}</button>
+        <div class="action-menu tb-new-session">
+          <button class="btn btn-sm" onclick="event.stopPropagation(); Sessions.toggleActionMenu(this)">New Session <span class="dd-arrow"></span></button>
+          <div class="action-menu-panel">
+            <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.newSessionOS('${k}')">In OS terminal</button>
+            <button class="action-menu-item" onclick="event.stopPropagation(); Sessions.newSessionBrowser('${k}')">In browser terminal</button>
+          </div>
+        </div>
         ${flags}
         <label class="tb-parallel" title="Run several of this project's tickets at once (limit in CM Settings); in a git project each gets its own worktree, otherwise they share the project folder">
           <input type="checkbox"${lane.parallel ? ' checked' : ''} onchange="TaskBoard.setParallel('${escapeAttr(key)}', this.checked)"> Parallel
@@ -740,7 +752,7 @@ const TaskBoard = {
   /** The whole board: lane filter chips, then each visible lane. Pure, for tests. */
   html(board, hidden, compact) {
     const keys = TaskBoard.laneKeys(board);
-    if (!keys.length) return '<div class="empty-state"><p>No tickets yet. Add a project lane or a new ticket to start.</p></div>';
+    if (!keys.length) return '<div class="empty-state"><p>No tickets yet. Add a project lane to start.</p></div>';
     const chips = keys.map(k => `<button class="tb-chip${hidden.includes(k) ? '' : ' active'}" onclick="TaskBoard.toggleLaneVisible('${escapeAttr(k)}')">${escapeHtml(decodeName(k))}</button>`).join('');
     const lanes = keys.filter(k => !hidden.includes(k)).map(k => TaskBoard.laneHtml(board, k, compact)).join('');
     return `<div class="tb-chips">${chips}</div>${lanes || '<div class="empty-state"><p>All lanes are hidden.</p></div>'}`;

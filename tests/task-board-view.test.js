@@ -27,7 +27,12 @@ test('one lane per project, sorted by name', () => {
 });
 
 test('an empty board says how to start', () => {
-  assert.match(TaskBoard.html({ cards: [], projects: {} }, []), /No tickets yet/);
+  assert.match(TaskBoard.html({ cards: [], projects: {} }, []), /No tickets yet\. Add a project lane to start\./);
+});
+
+test('the board header has no New ticket button (lanes have + Ticket)', () => {
+  const index = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf-8');
+  assert.doesNotMatch(index, /task-board-new-btn/);
 });
 
 test('every lane has the fixed columns around its workflow', () => {
@@ -814,6 +819,31 @@ test('a lane shows the project branch only when git gives one', () => {
   assert.match(TaskBoard.laneHtml(withBranch, 'C--work-zeta'), /class="tb-card-git tb-lane-git"[^>]*>&#5833; feature\/&lt;x&gt;</);
   assert.doesNotMatch(TaskBoard.laneHtml(withBranch, 'C--work-alpha'), /tb-lane-git/);
   assert.doesNotMatch(TaskBoard.laneHtml(BOARD, 'C--work-zeta'), /tb-lane-git/);
+});
+
+test('a lane has a New Session menu right after Workflow that starts a session in the lane project', () => {
+  const html = TaskBoard.laneHtml(BOARD, 'C--work-zeta');
+  assert.match(html, /tb-workflow-btn[^>]*>Workflow[^<]*<\/button>\s*<div class="action-menu tb-new-session">/);
+  assert.match(html, /Sessions\.newSessionOS\('C--work-zeta'\)">In OS terminal</);
+  assert.match(html, /Sessions\.newSessionBrowser\('C--work-zeta'\)">In browser terminal</);
+});
+
+test('the board refresh waits while a drag is on or a lane menu is open', () => {
+  const savedDoc = context.document;
+  let open = null;
+  context.document = { querySelector: sel => (sel === '#task-board-body .action-menu-panel.open' ? open : null) };
+  try {
+    TaskBoard._drag = null;
+    assert.strictEqual(TaskBoard.pollPaused(), false);
+    open = {};
+    assert.strictEqual(TaskBoard.pollPaused(), true);
+    open = null;
+    TaskBoard._drag = { id: '1' };
+    assert.strictEqual(TaskBoard.pollPaused(), true);
+  } finally {
+    TaskBoard._drag = null;
+    context.document = savedDoc;
+  }
 });
 
 test('Finalize and Done cards show a to-dos button with the open count, or done/total once all are done', () => {
