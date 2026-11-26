@@ -6,8 +6,8 @@ const path = require('path');
 // directories, so a year of runs left thousands of stale ones — and an editor indexing the nested
 // repos surfaces their fixture commits as if they belonged to this project.
 //
-// Wired to npm pretest and posttest: the tree is clean before a run, and clean again after a passing
-// one. A failing run leaves its directories behind on purpose, so they can be inspected.
+// Each test process removes its own home/data directories on exit (tests/helpers/app.js), pass or
+// fail. This sweep, wired to npm pretest and posttest, catches anything a killed process left behind.
 
 const TMP = path.resolve(__dirname, '..', 'tmp');
 
