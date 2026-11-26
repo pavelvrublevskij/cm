@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const { safeSlug, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
-const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus, diffNumstat, listBranches, listStashes } = require('../lib/git');
+const { git, gitRaw, gitOk, gitInstalled, isSha, headInfo, upstreamStatus, unpushedCommits, incomingCommits, logCommits, commitDetail, parseStatus, diffNumstat, listBranches, listStashes, cachedWorktreeStatus, clearWorktreeStatusCache, linkedWorktreeBase } = require('../lib/git');
 const { computeDiff } = require('../lib/diff');
 const commitMessage = require('../lib/commit-message');
 const insights = require('../lib/usage-insights');
@@ -10,6 +10,12 @@ const fs = require('fs');
 const path = require('path');
 
 const router = Router();
+
+// A commit, checkout, pull or any other git action can change what a worktree holds that its base lacks.
+router.post('/:slug/git/*', (req, res, next) => {
+  res.on('finish', clearWorktreeStatusCache);
+  next();
+});
 
 // Every route answers the same way when git cannot be used, so an action never surfaces a raw
 // spawn error like "spawn git ENOENT" to the user.
@@ -82,6 +88,20 @@ router.get('/:slug/git/info', wrapRoute(async (req, res) => {
   ]);
 
   res.json({ available: true, branch, detached, upstream, ahead, behind, unpushed, incoming, hasRemote, files });
+}));
+
+/**
+ * When the folder is a linked git worktree: its uncommitted files and the commits not yet in the
+ * branch the main checkout is on now (where worktree branches merge back). { worktree: false } otherwise.
+ */
+router.get('/:slug/git/worktree', wrapRoute(async (req, res) => {
+  if (!safeSlug(req.params.slug)) return res.status(400).json({ error: 'Invalid slug' });
+  const dir = decodeSlug(req.params.slug);
+  if (!dir || !fs.existsSync(dir)) return res.json({ worktree: false });
+  const linked = await linkedWorktreeBase(dir);
+  if (!linked) return res.json({ worktree: false });
+  const status = await cachedWorktreeStatus(dir, linked.base);
+  res.json({ worktree: true, name: path.basename(dir), ...status });
 }));
 
 router.post('/:slug/git/commit', wrapRoute(async (req, res) => {

@@ -1,0 +1,7 @@
+# Shared by the CodeQL workflow and `npm run codeql`.
+name: CM CodeQL config
+paths-ignore:
+  - node_modules
+  - tests/tmp
+  - bench/tmp
+  - .codeql

@@ -1,7 +1,11 @@
 // --- GitBranchPicker ---
-// Searchable branch list dropping from the branch name in the git menu bar. Local branches first,
-// then remote branches nothing local tracks yet — picking one of those creates the tracking branch.
-// ↑/↓ move through the filtered list, Enter switches, Esc closes.
+// Searchable branch list dropping from the branch name in the git menu bar, or from a Task Board
+// lane's branch. Local branches first, then remote branches nothing local tracks yet — picking one
+// of those creates the tracking branch. ↑/↓ move through the filtered list, Enter switches, Esc closes.
+//
+// open(ctx) says where it shows and which project it switches: { slug, panelId, files(), label(),
+// checkout(name, remote, stash) }. Without one it is the git panel's picker. Clicks outside the
+// element marked .git-branch-host close it.
 //
 // Switching with uncommitted changes asks first: stash them and switch, or bring them along (which
 // git itself refuses when the target branch would overwrite them).
@@ -11,23 +15,44 @@ const GitBranchPicker = {
   _branches: null,      // { local, remote } once read; null while loading
   _filter: '',
   _hl: 0,               // index into _matches()
+  _ctx: null,           // where the open picker shows and what it switches
+  _listening: false,
+
+  /** The git panel's picker: its project, its uncommitted files, its busy guard. */
+  _gitPanelCtx() {
+    return {
+      slug: GitPanel._slug,
+      panelId: 'git-branch-picker',
+      files: () => ((GitPanel._info || {}).files || []).length,
+      label: () => GitPanel._branchLabel(),
+      checkout: (name, remote, stash) => GitPanel._withBusy('checkout', () => GitActions.checkout(name, remote, stash)),
+    };
+  },
+
+  /** Open, and showing in this panel (the git panel's or a lane's). */
+  isOpenIn(panelId) {
+    return GitBranchPicker._isOpen && !!GitBranchPicker._ctx && GitBranchPicker._ctx.panelId === panelId;
+  },
 
   toggle() {
-    if (GitBranchPicker._isOpen) GitBranchPicker.close();
+    if (GitBranchPicker.isOpenIn('git-branch-picker')) GitBranchPicker.close();
     else GitBranchPicker.open();
   },
 
-  async open() {
-    GitMenu.close();
+  async open(ctx) {
+    if (typeof GitMenu !== 'undefined') GitMenu.close();
+    GitBranchPicker.close();
+    GitBranchPicker._ctx = ctx || GitBranchPicker._gitPanelCtx();
     GitBranchPicker._isOpen = true;
     GitBranchPicker._branches = null;
     GitBranchPicker._filter = '';
     GitBranchPicker._hl = 0;
-    GitMenu.render();
+    GitBranchPicker._listen();
+    GitBranchPicker.render();
 
     let branches;
     try {
-      branches = await GitApi.branches(GitPanel._slug);
+      branches = await GitApi.branches(GitBranchPicker._ctx.slug);
     } catch (e) {
       toast(`Could not list branches: ${e.message}`, 'error');
       GitBranchPicker.close();
@@ -41,7 +66,7 @@ const GitBranchPicker = {
   close() {
     if (!GitBranchPicker._isOpen) return;
     GitBranchPicker._isOpen = false;
-    const panel = document.getElementById('git-branch-picker');
+    const panel = document.getElementById(GitBranchPicker._ctx.panelId);
     if (panel) { panel.classList.remove('open'); panel.innerHTML = ''; }
   },
 
@@ -56,7 +81,8 @@ const GitBranchPicker = {
   },
 
   render() {
-    const panel = document.getElementById('git-branch-picker');
+    if (!GitBranchPicker._ctx) return;
+    const panel = document.getElementById(GitBranchPicker._ctx.panelId);
     if (!panel) return;
     panel.classList.add('open');
     if (!GitBranchPicker._branches) {
@@ -136,17 +162,29 @@ const GitBranchPicker = {
   },
 
   switchTo(name, remote) {
-    const files = ((GitPanel._info || {}).files || []).length;
-    if (!files) return GitPanel._withBusy('checkout', () => GitActions.checkout(name, remote, false));
+    const ctx = GitBranchPicker._ctx;
+    const files = ctx.files();
+    if (!files) return ctx.checkout(name, remote, false);
 
     openModal({
       title: 'Uncommitted changes',
-      body: `<p>${files} changed file${files === 1 ? '' : 's'} on ${escapeHtml(GitPanel._branchLabel())}. What should happen to them when switching to <code>${escapeHtml(name)}</code>?</p>
+      body: `<p>${files} changed file${files === 1 ? '' : 's'} on ${escapeHtml(ctx.label())}. What should happen to them when switching to <code>${escapeHtml(name)}</code>?</p>
         <div class="git-menu-hint">Bring along keeps them in the working tree; git refuses if ${escapeHtml(name)} would overwrite them.</div>`,
       buttons: [
-        { label: 'Bring changes along', onClick: () => { GitPanel._withBusy('checkout', () => GitActions.checkout(name, remote, false)); } },
-        { label: 'Stash & switch', primary: true, onClick: () => { GitPanel._withBusy('checkout', () => GitActions.checkout(name, remote, true)); } },
+        { label: 'Bring changes along', onClick: () => { ctx.checkout(name, remote, false); } },
+        { label: 'Stash & switch', primary: true, onClick: () => { ctx.checkout(name, remote, true); } },
       ],
+    });
+  },
+
+  /** One document-level outside-click listener: a click outside the picker's host closes it. */
+  _listen() {
+    if (GitBranchPicker._listening) return;
+    GitBranchPicker._listening = true;
+    document.addEventListener('mousedown', e => {
+      if (!GitBranchPicker._isOpen) return;
+      if (e.target.closest && e.target.closest('.git-branch-host')) return;
+      GitBranchPicker.close();
     });
   },
 };

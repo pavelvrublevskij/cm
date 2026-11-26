@@ -61,6 +61,27 @@ test('a sibling directory whose name merely starts with tests/tmp is refused', (
   assert.throws(() => cleanDir(TMP + '-evil'), /refusing to clean outside/);
 });
 
+test('a test process removes its own home and data directories on exit, even when it fails', () => {
+  const { spawnSync } = require('child_process');
+  const helper = path.join(__dirname, 'helpers', 'app.js');
+  const script = `
+    const { HOME } = require(${JSON.stringify(helper)});
+    const repo = require('path').join(HOME, 'fixture-proj');
+    require('fs').mkdirSync(repo, { recursive: true });
+    require('child_process').execFileSync('git', ['init', '-q'], { cwd: repo });
+    console.log(process.pid);
+    process.exit(1);
+  `;
+  const env = { ...process.env };
+  delete env.__CLAUDE_MANAGER_TEST_HOME;
+  const child = spawnSync(process.execPath, ['-e', script], { env, encoding: 'utf8' });
+
+  assert.strictEqual(child.status, 1, child.stderr);
+  const pid = child.stdout.trim();
+  assert.strictEqual(fs.existsSync(path.join(TMP, `home-${pid}`)), false, 'home directory removed');
+  assert.strictEqual(fs.existsSync(path.join(TMP, `data-${pid}`)), false, 'data directory removed');
+});
+
 test('TMP itself is allowed, since that is what pretest cleans', () => {
   // Assert the guard's decision without deleting: TMP resolves inside itself by definition.
   assert.doesNotThrow(() => cleanDir(path.join(TMP, `clean-probe-${process.pid}`, 'nope')));

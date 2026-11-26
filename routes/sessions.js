@@ -1,12 +1,13 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
-const { safeSlug, wrapRoute, backup } = require('../lib/file-helpers');
+const { execFile } = require('child_process');
+const { safeSlug, safeJoin, wrapRoute, backup } = require('../lib/file-helpers');
 const { CLAUDE_DIR } = require('../lib/paths');
 const planCache = require('../lib/plan-cache');
 const { getProjectUsageMap, getSessionUsage, calcCost } = require('../lib/usage-index');
-const { decodeSlug } = require('../lib/slug');
+const { decodeSlug, parentSlug } = require('../lib/slug');
+const { listProjectDirs, removedWorktreeSlugs } = require('../lib/project-list');
 const { scanSession, firstMeaningfulPrompt } = require('../lib/session-scan');
 const terminalServer = require('../lib/terminal-server');
 const activeSessions = require('../lib/active-sessions');
@@ -17,6 +18,8 @@ const { getArchivedIds, archiveSession, unarchiveSession } = require('../lib/ses
 const { getAllSessionColors, getSessionColors, setSessionColor, isValidColor } = require('../lib/session-colors');
 const { groupMemberSlugs } = require('../lib/project-grouping');
 const { getProjectArtifacts, getSessionArtifacts } = require('../lib/artifact-index');
+const { renameSession } = require('../lib/session-rename');
+const { launchTerminal } = require('../lib/terminal-launch');
 
 const router = express.Router({ mergeParams: true });
 
@@ -64,44 +67,6 @@ function isSkippablePrompt(text) {
   return normalizePrompt(t) === '/clear';
 }
 
-
-function safeSpawn(cmd, args, opts) {
-  const proc = spawn(cmd, args, opts);
-  // Without an 'error' listener, an async spawn failure crashes Node.
-  proc.on('error', () => { /* swallowed; caller decides what to do */ });
-  return proc;
-}
-
-function launchTerminal(projectPath, cmd) {
-  if (process.env.__CLAUDE_MANAGER_TEST_HOME) return;
-  const platform = process.platform;
-  if (platform === 'win32') {
-    const wtArgs = ['-d', projectPath, 'cmd.exe', '/k', cmd];
-    const proc = spawn('wt.exe', wtArgs, { detached: true, stdio: 'ignore' });
-    proc.on('error', () => {
-      safeSpawn('cmd.exe', ['/c', `start "" cmd.exe /k "cd /d ${projectPath} && ${cmd}"`], { shell: true, detached: true, stdio: 'ignore' }).unref();
-    });
-    proc.unref();
-  } else if (platform === 'darwin') {
-    const script = `tell application "Terminal" to do script "cd '${projectPath}' && ${cmd}"`;
-    const proc = safeSpawn('osascript', ['-e', script]);
-    proc.unref();
-  } else {
-    const terminals = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
-    for (const term of terminals) {
-      try {
-        const args = term === 'gnome-terminal'
-          ? ['--', 'bash', '-c', `cd '${projectPath}' && ${cmd}; exec bash`]
-          : ['-e', `bash -c "cd '${projectPath}' && ${cmd}; exec bash"`];
-        const proc = safeSpawn(term, args);
-        proc.unref();
-        return;
-      } catch (_) { continue; }
-    }
-    throw new Error('No supported terminal found');
-  }
-}
-
 router.get('/active', wrapRoute((req, res) => {
   const all = listAllActiveSessions();
   const archivedBySlug = {};
@@ -133,6 +98,21 @@ router.get('/session-colors', wrapRoute((req, res) => {
 }));
 
 /** Newest first, tolerating entries whose timestamp never got recorded. */
+/**
+ * A tool_result block for the conversation view: the tool call it answers and, for an AskUserQuestion,
+ * the answers Claude Code logged with it ({ "<question text>": "<answer>" }; none when it was declined).
+ */
+function toolResultBlock(block, text, toolUseResult, questionIds) {
+  const tr = { type: 'tool_result', toolUseId: block.tool_use_id || '', text };
+  if (toolUseResult && typeof toolUseResult === 'object' && Array.isArray(toolUseResult.questions)) {
+    tr.answers = toolUseResult.answers && typeof toolUseResult.answers === 'object' ? toolUseResult.answers : {};
+  } else if (questionIds.has(tr.toolUseId)) {
+    // Cancelled (Esc, interrupt): claude logs an error string instead of the questions and answers.
+    tr.answers = {};
+  }
+  return tr;
+}
+
 function byNewestFirst(a, b) {
   return new Date(b.modified || 0) - new Date(a.modified || 0);
 }
@@ -222,11 +202,15 @@ function listProjectSessions(slug, dir, showArchived) {
  * Collects `fn(slug, dir)` across this project alone, or across every project grouped with it when
  * the request asks for scope=group — which folds in sibling worktrees and linked-in repos so their
  * sessions are listed and searched alongside this project's own. Assumes the request's own slug has
- * already been validated; members resolved from the group are validated here.
+ * already been validated; members resolved from the group are validated here. Removed Claude
+ * worktrees of the included projects are always folded in.
  */
 function forProjectScope(req, fn) {
   const ownSlug = req.params.slug;
   const slugs = req.query.scope === 'group' ? groupMemberSlugs(ownSlug) : [ownSlug];
+  for (const removed of removedWorktreeSlugs(listProjectDirs())) {
+    if (slugs.includes(parentSlug(removed))) slugs.push(removed);
+  }
 
   const out = [];
   for (const memberSlug of slugs) {
@@ -454,6 +438,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
   let indexSummary = '';
   let created = null;
   let hasPlan = planCache.get(sessionId) === true;
+  const questionIds = new Set();   // AskUserQuestion calls, so a cancelled one's result reads as declined
 
   for (const line of lines) {
     try {
@@ -503,8 +488,10 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
             if (block.type === 'text') {
               msg.content.push({ type: 'text', text: block.text });
             } else if (block.type === 'tool_use') {
+              if (block.name === 'AskUserQuestion') questionIds.add(block.id);
               msg.content.push({
                 type: 'tool_use',
+                id: block.id,
                 name: block.name,
                 input: block.input
               });
@@ -519,7 +506,7 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
                   .join('\n')
                   .slice(0, 2000);
               }
-              const tr = { type: 'tool_result', text: resultText };
+              const tr = toolResultBlock(block, resultText, entry.toolUseResult, questionIds);
               if (entry.toolUseResult?.agentId) {
                 tr.agentId = entry.toolUseResult.agentId;
                 tr.agentType = entry.toolUseResult.agentType || '';
@@ -534,6 +521,18 @@ router.get('/:slug/sessions/:sessionId', wrapRoute((req, res) => {
         if (msg.content.length > 0) {
           messages.push(msg);
         }
+      }
+      // A message sent while claude works reaches it mid-turn and is logged as a queued_command
+      // attachment, not as a user entry.
+      const att = entry.type === 'attachment' && entry.attachment;
+      if (att && att.type === 'queued_command' && att.commandMode === 'prompt' && typeof att.prompt === 'string' && att.prompt.trim()) {
+        messages.push({
+          role: 'user',
+          timestamp: entry.timestamp || att.timestamp,
+          gitBranch: entry.gitBranch || '',
+          model: '',
+          content: [{ type: 'text', text: att.prompt }]
+        });
       }
     } catch (_) { /* malformed JSONL line, skip */ }
   }
@@ -633,21 +632,20 @@ router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res)
   const dir = safeSlug(req.params.slug);
   if (!dir) return res.status(400).json({ error: 'Invalid slug' });
 
-  const sessionId = req.params.sessionId;
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
+  const sessionDir = safeJoin(dir, req.params.sessionId);
+  if (!sessionDir) return res.status(400).json({ error: 'Invalid session ID' });
 
   const agentId = req.params.agentId;
   if (!/^[a-zA-Z0-9_-]+$/.test(agentId)) {
     return res.status(400).json({ error: 'Invalid agent ID' });
   }
 
-  const filePath = path.join(dir, sessionId, 'subagents', 'agent-' + agentId + '.jsonl');
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Sub-agent session not found' });
+  const filePath = safeJoin(path.join(sessionDir, 'subagents'), 'agent-' + agentId + '.jsonl');
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ error: 'Sub-agent session not found' });
 
   const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
   const messages = [];
+  const questionIds = new Set();
 
   for (const line of lines) {
     try {
@@ -667,7 +665,8 @@ router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res)
           if (block.type === 'text') {
             msg.content.push({ type: 'text', text: block.text });
           } else if (block.type === 'tool_use') {
-            msg.content.push({ type: 'tool_use', name: block.name, input: block.input });
+            if (block.name === 'AskUserQuestion') questionIds.add(block.id);
+            msg.content.push({ type: 'tool_use', id: block.id, name: block.name, input: block.input });
           } else if (block.type === 'tool_result') {
             let resultText = '';
             if (typeof block.content === 'string') {
@@ -675,7 +674,7 @@ router.get('/:slug/sessions/:sessionId/subagents/:agentId', wrapRoute((req, res)
             } else if (Array.isArray(block.content)) {
               resultText = block.content.filter(c => c.type === 'text').map(c => c.text).join('\n').slice(0, 2000);
             }
-            const tr = { type: 'tool_result', text: resultText };
+            const tr = toolResultBlock(block, resultText, entry.toolUseResult, questionIds);
             if (entry.toolUseResult?.agentId) {
               tr.agentId = entry.toolUseResult.agentId;
               tr.agentType = entry.toolUseResult.agentType || '';
@@ -715,6 +714,10 @@ router.post('/:slug/sessions/:sessionId/resume', wrapRoute((req, res) => {
   if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
     return res.status(400).json({ error: 'Invalid session ID' });
   }
+  // It also goes into a terminal command line: session IDs are UUIDs, so allow nothing else.
+  if (!/^[\w-]+$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
 
   const filePath = path.join(dir, sessionId + '.jsonl');
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Session not found' });
@@ -738,6 +741,44 @@ router.post('/:slug/sessions/:sessionId/deactivate', wrapRoute((req, res) => {
   res.json({ ok: true });
 }));
 
+router.get('/:slug/sessions/:sessionId/input-state', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  res.json({
+    state: terminalServer.inputState(p.slug, p.sessionId),
+    questions: terminalServer.heldQuestions(p.slug, p.sessionId)
+  });
+}));
+
+/** POST …/question/answer { toolUseId, answers } — answer an AskUserQuestion held by CM's question hook */
+router.post('/:slug/sessions/:sessionId/question/answer', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const { toolUseId, answers } = req.body || {};
+  const result = terminalServer.answerQuestion(p.slug, p.sessionId, toolUseId, answers);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true });
+}));
+
+/** POST …/question/release { toolUseId } — let claude show the held question in the terminal instead */
+router.post('/:slug/sessions/:sessionId/question/release', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const result = terminalServer.releaseQuestion(p.slug, p.sessionId, (req.body || {}).toolUseId);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true });
+}));
+
+router.post('/:slug/sessions/:sessionId/input', wrapRoute((req, res) => {
+  const p = validateSessionParams(req, res);
+  if (!p) return;
+  const text = req.body && req.body.text;
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'Message is empty' });
+  const result = terminalServer.sendInput(p.slug, p.sessionId, text);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true });
+}));
+
 router.post('/:slug/sessions/:sessionId/open-readonly', wrapRoute((req, res) => {
   const p = validateSessionParams(req, res);
   if (!p) return;
@@ -757,41 +798,9 @@ router.post('/:slug/sessions/:sessionId/close-readonly', wrapRoute((req, res) =>
 }));
 
 router.post('/:slug/sessions/:sessionId/rename', wrapRoute((req, res) => {
-  const dir = safeSlug(req.params.slug);
-  if (!dir) return res.status(400).json({ error: 'Invalid slug' });
-
-  const sessionId = req.params.sessionId;
-  if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
-
-  const title = (req.body?.title || '').trim();
-  if (!title) return res.status(400).json({ error: 'Title is required' });
-  if (title.length > 500) return res.status(400).json({ error: 'Title too long' });
-
-  const filePath = path.join(dir, sessionId + '.jsonl');
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Session not found' });
-
-  backup(filePath);
-  const line = JSON.stringify({ type: 'custom-title', customTitle: title, sessionId }) + '\n';
-  const existing = fs.readFileSync(filePath, 'utf-8');
-  const needsNewline = existing.length > 0 && !existing.endsWith('\n');
-  fs.appendFileSync(filePath, (needsNewline ? '\n' : '') + line);
-
-  const indexFile = path.join(dir, 'sessions-index.json');
-  if (fs.existsSync(indexFile)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(indexFile, 'utf-8'));
-      const entry = (data.entries || []).find(e => e.sessionId === sessionId);
-      if (entry) {
-        backup(indexFile);
-        entry.summary = title;
-        fs.writeFileSync(indexFile, JSON.stringify(data, null, 2), 'utf-8');
-      }
-    } catch (_) { /* malformed index, skip */ }
-  }
-
-  res.json({ ok: true, title });
+  const result = renameSession(req.params.slug, req.params.sessionId, req.body?.title);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, title: result.title });
 }));
 
 router.post('/:slug/sessions/:sessionId/color', wrapRoute((req, res) => {

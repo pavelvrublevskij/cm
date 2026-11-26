@@ -6,6 +6,7 @@ const Agents = makeFrontmatterCrud({
   containerId: 'agents-content',
   apiBase: '/api/agents/global',
   itemKey: 'filename',
+  transferKind: 'agents',
   idPrefix: 'gagent',
   itemLabel: 'Agent',
   cardTitle: a => `<span style="color:var(--accent)">${escapeHtml(a.name)}</span>`,

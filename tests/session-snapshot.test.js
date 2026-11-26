@@ -20,6 +20,8 @@ const harness = {
   apiCalls: [],
   totalMessages: 5,
   openFileCalls: [],
+  resizeCalls: 0,
+  widthCalls: 0,
 };
 
 function makeEl() {
@@ -45,8 +47,7 @@ function fakeMessage(i) {
 
 async function fakeApi(url) {
   harness.apiCalls.push(url);
-  // A file "changed" so the Files tab has content to show — otherwise loadContext auto-switches
-  // to Conversation, which is real (documented) behavior but not what these tests are about.
+  // A file "changed" so the Files tab has content to show.
   if (url.includes('/context')) {
     return { files: [{ path: 'a.js', hash: 'x', versions: [1], isNew: false, isDeleted: false, mtime: 1 }], plans: [], projSlug: 'proj' };
   }
@@ -113,8 +114,9 @@ const context = vm.createContext({
     },
   },
   App: { navigate: () => {}, setHash: () => {} },
-  TerminalPanel: { isOpen: () => false, hasAttachedPty: () => false, shouldAutoOpen: () => false, open: () => {} },
+  TerminalPanel: { isOpen: () => false, hasAttachedPty: () => false, shouldAutoOpen: () => false, open: () => {}, _sendResize: () => { harness.resizeCalls++; }, applySavedWidth: () => { harness.widthCalls++; } },
   ActiveSessionsBar: { _sessions: [], poll: () => {} },
+  SessionColors: { applyToDetailHeader: () => {} },
 });
 vm.runInContext(sessionsSrc + '\n' + contextSrc + '\n' + messagesSrc + '\nglobalThis._Sessions = Sessions;', context);
 const Sessions = context._Sessions;
@@ -138,6 +140,8 @@ beforeEach(() => {
   harness.apiCalls = [];
   harness.totalMessages = 5;
   harness.openFileCalls = [];
+  harness.resizeCalls = 0;
+  harness.widthCalls = 0;
   Sessions.detailState = { slug: null, sessionId: null, offset: 0, loading: false, hasMore: false, total: 0 };
   Sessions._activeTab = null;
   Sessions._detailSearchQuery = '';
@@ -198,12 +202,12 @@ test('loadDetail with no prior snapshot starts on Files with one page loaded', a
 
 test('loadDetail restores the saved tab, message offset, search and scroll position', async () => {
   harness.totalMessages = 45;
-  const map = { 'proj|s1': { tab: 'conversation', scrollTop: 321, offset: 40, searchQuery: 'msg2', ts: Date.now() } };
+  const map = { 'proj|s1': { tab: 'activity', scrollTop: 321, offset: 40, searchQuery: 'msg2', ts: Date.now() } };
   harness.sessionStore[Sessions.SNAPSHOT_KEY] = JSON.stringify(map);
 
   await Sessions.loadDetail('proj', 's1', {}, false);
 
-  assert.strictEqual(Sessions._activeTab, 'conversation');
+  assert.strictEqual(Sessions._activeTab, 'activity');
   assert.strictEqual(Sessions.detailState.offset, 40, 'should have paged in messages up to the saved offset');
   assert.strictEqual(Sessions._detailSearchQuery, 'msg2');
   assert.strictEqual(harness.elementsById['session-messages-pane'].scrollTop, 321);
@@ -254,7 +258,7 @@ test('loadDetail does not over-fetch beyond a small saved offset', async () => {
 test('captureSnapshot evicts the oldest entry once the cap is exceeded', () => {
   for (let i = 0; i < Sessions.SNAPSHOT_MAX; i++) {
     Sessions.detailState = { slug: 'proj', sessionId: 's' + i, offset: 1, loading: false, hasMore: false, total: 1 };
-    Sessions._activeTab = 'conversation';
+    Sessions._activeTab = 'activity';
     Sessions.captureSnapshot();
   }
   assert.strictEqual(Object.keys(Sessions._loadSnapshots()).length, Sessions.SNAPSHOT_MAX);
@@ -266,4 +270,107 @@ test('captureSnapshot evicts the oldest entry once the cap is exceeded', () => {
   assert.strictEqual(keys.length, Sessions.SNAPSHOT_MAX, 'the cap must not grow unbounded');
   assert.ok(!('proj|s0' in Sessions._loadSnapshots()), 'the oldest entry should have been evicted');
   assert.ok('proj|extra' in Sessions._loadSnapshots());
+});
+
+// The Conversation moved out of the left tabs into the right pane, next to the Terminal.
+
+function trackedEl() {
+  const el = makeEl();
+  const classes = new Set();
+  el.classList = {
+    toggle(c, on) { if (on) classes.add(c); else classes.delete(c); },
+    add(c) { classes.add(c); },
+    remove(c) { classes.delete(c); },
+    contains: c => classes.has(c),
+  };
+  return el;
+}
+
+function rightPaneEls() {
+  for (const id of ['right-tab-btn-conversation', 'right-tab-btn-terminal']) harness.elementsById[id] = trackedEl();
+  return {
+    msgs: harness.elementsById['session-messages-wrap'] = trackedEl(),
+    term: harness.elementsById['terminal-pane'] = trackedEl(),
+    cvBtn: harness.elementsById['right-tab-btn-conversation'],
+    tmBtn: harness.elementsById['right-tab-btn-terminal'],
+  };
+}
+
+test('switchRightTab shows the terminal, hides the conversation and refits xterm', () => {
+  const el = rightPaneEls();
+
+  Sessions.switchRightTab('terminal');
+
+  assert.ok(el.msgs.classList.contains('right-tab-hidden'));
+  assert.ok(!el.term.classList.contains('right-tab-hidden'));
+  assert.ok(el.tmBtn.classList.contains('active'));
+  assert.ok(!el.cvBtn.classList.contains('active'));
+  assert.strictEqual(harness.resizeCalls, 1);
+});
+
+test('switchRightTab back to conversation hides the terminal', () => {
+  const el = rightPaneEls();
+  Sessions.switchRightTab('terminal');
+
+  Sessions.switchRightTab('conversation');
+
+  assert.ok(!el.msgs.classList.contains('right-tab-hidden'));
+  assert.ok(el.term.classList.contains('right-tab-hidden'));
+  assert.ok(el.cvBtn.classList.contains('active'));
+  assert.ok(!el.tmBtn.classList.contains('active'));
+});
+
+test('loadDetail opens the right pane on Terminal even if Chat was selected before', async () => {
+  const el = rightPaneEls();
+  Sessions.switchRightTab('conversation');
+
+  await Sessions.loadDetail('proj', 's1', {}, false);
+
+  assert.strictEqual(Sessions._activeRightTab, 'terminal');
+  assert.ok(!el.term.classList.contains('right-tab-hidden'));
+  assert.ok(el.msgs.classList.contains('right-tab-hidden'));
+  assert.ok(el.tmBtn.classList.contains('active'));
+  assert.ok(!el.cvBtn.classList.contains('active'));
+});
+
+test('loadDetail for a read-only session opens on Chat', async () => {
+  rightPaneEls();
+  Sessions.switchRightTab('terminal');
+
+  await Sessions.loadDetail('proj', 's1', {}, true);
+
+  assert.strictEqual(Sessions._activeRightTab, 'conversation');
+  assert.strictEqual(harness.widthCalls, 1, 'the right pane gets its saved width even without a terminal');
+});
+
+test('a saved Conversation tab from before the move opens Files on the left', async () => {
+  const map = { 'proj|s1': { tab: 'conversation', scrollTop: 0, offset: 20, searchQuery: '', ts: Date.now() } };
+  harness.sessionStore[Sessions.SNAPSHOT_KEY] = JSON.stringify(map);
+
+  await Sessions.loadDetail('proj', 's1', {}, false);
+
+  assert.strictEqual(Sessions._activeTab, 'file-changes');
+});
+
+test('loadDetail with no session id yet starts on Files and Terminal', async () => {
+  rightPaneEls();
+  Sessions._activeTab = 'activity';
+  Sessions.switchRightTab('conversation');
+  Sessions._startDiscovery = () => {};
+
+  await Sessions.loadDetail('proj', null, {}, false);
+
+  assert.strictEqual(Sessions._activeTab, 'file-changes');
+  assert.strictEqual(Sessions._activeRightTab, 'terminal');
+});
+
+test('message polling keeps running while the left panel is collapsed', async () => {
+  harness.localStore[Sessions.MAIN_PANEL_HIDDEN_KEY] = '1';
+
+  await Sessions.loadDetail('proj', 's1', {}, false);
+  assert.ok(Sessions._refreshTimer, 'conversation refresh should be scheduled');
+
+  harness.apiCalls = [];
+  await Sessions.pollNewMessages();
+  assert.ok(harness.apiCalls.some(u => u.includes('/sessions/s1?offset=0')), 'poll should fetch new messages');
 });

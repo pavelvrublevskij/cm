@@ -12,7 +12,8 @@ const TermView = {
   /** True when the xterm.js CDN scripts are present. */
   librariesLoaded() {
     return typeof window.Terminal === 'function'
-      && !!(window.FitAddon && typeof window.FitAddon.FitAddon === 'function');
+      && !!(window.FitAddon && typeof window.FitAddon.FitAddon === 'function')
+      && !!(window.Unicode11Addon && typeof window.Unicode11Addon.Unicode11Addon === 'function');
   },
 
   /**
@@ -37,9 +38,14 @@ const TermView = {
       theme: { background: '#000000', foreground: '#e6edf3' },
       scrollback: TermView.SCROLLBACK,
       convertEol: false,
+      allowProposedApi: true,
     });
     const fit = new window.FitAddon.FitAddon();
     term.loadAddon(fit);
+    // Claude's TUI measures emoji/icons as two cells (Unicode 11); xterm defaults to Unicode 6
+    // widths, so without this every line with an icon is drawn shifted and overlapping.
+    term.loadAddon(new window.Unicode11Addon.Unicode11Addon());
+    term.unicode.activeVersion = '11';
     term.open(host);
 
     const view = {
@@ -65,10 +71,11 @@ const TermView = {
 
       focus() { term.focus(); },
 
-      /** Refit to the DOM and tell the pty its new size. */
+      /** Refit to the DOM, repaint every row, and tell the pty its new size. */
       resize() {
         if (!view.isConnected()) return;
         try { fit.fit(); } catch (_) {}
+        if (term.rows > 0) term.refresh(0, term.rows - 1);
         if (term.cols > 0 && term.rows > 0) view.send({ t: 'r', c: term.cols, r: term.rows });
       },
 
@@ -97,6 +104,10 @@ const TermView = {
             term.write(`\r\n\x1b[31m${label}\x1b[0m\r\n`);
             if (control.hint) term.write(`\x1b[33m${control.hint}\x1b[0m\r\n`);
             if (opts.onSpawnError) opts.onSpawnError(control.message, control);
+            return;
+          }
+          if (control && typeof control === 'object' && control.t === 'send-error') {
+            toast(control.error, 'error');
             return;
           }
           term.write(raw);
@@ -144,6 +155,7 @@ const TermView = {
     setTimeout(() => { try { fit.fit(); } catch (_) {} }, 0);
     view.connect();
     view.observeResize();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => view.resize());
     return view;
   },
 

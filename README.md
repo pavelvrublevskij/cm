@@ -12,12 +12,12 @@ Runs entirely on your machine. No cloud, no accounts, no external dependencies b
 
 **macOS / Linux / Git Bash on Windows:**
 ```bash
-./run.sh 1
+./run.sh
 ```
 
 **Windows (Command Prompt / PowerShell):**
 ```cmd
-run.bat 1
+run.bat
 ```
 
 The script will install Node.js if missing, install dependencies, and open the app in your browser automatically.
@@ -33,7 +33,7 @@ Run the script without an argument to pick an option from a menu (↑/↓ and En
 
 ## Requirements
 
-- Claude Code installed (`~/.claude/` directory must exist)
+- **Claude Code CLI** installed in the terminal (`claude` on PATH, `~/.claude/` exists) — Claude Desktop alone is not enough; CM reads `~/.claude/` and starts `claude` for terminals and Task Board tickets
 - Node.js 18+ (the run script checks your version and links to nodejs.org if it's missing or too old)
 - git (optional) — the Git panel appears only for projects that are repositories, on machines that have git; everything else works without it
 
@@ -41,72 +41,62 @@ Run the script without an argument to pick an option from a menu (↑/↓ and En
 
 | Feature | Config File | Actions |
 |---------|-------------|---------|
-| **Dashboard** | — | Overview: recent sessions, usage summary, quick links |
-| **Token Usage** | `data/usage-index.json` | Aggregated stats, cost estimates, period/project breakdowns, charts |
-| **Settings** | `~/.claude/settings.json` | Visual tree editor + raw JSON + inline reference panel |
+| **Dashboard** | — | Recent sessions, usage summary, quick links |
+| **Task Board** | `data/` | Tickets per project run through a workflow by background Claude sessions |
+| **Token Usage** | `data/usage-index.json` | Stats, cost estimates, breakdowns, charts |
+| **Settings** | `~/.claude/settings.json` | Tree editor, raw JSON, reference panel |
 | **CLAUDE.md** | `~/.claude/CLAUDE.md` | Markdown editor with live preview |
-| **MCP Servers (user scope)** | `~/.claude.json` → `mcpServers` | Add, edit, enable/disable, delete — available across all projects |
-| **Cloud Integrations** | `~/.claude/.credentials.json` (read-only) | View OAuth-connected services (Atlassian, etc.) |
-| **Keybindings** | `~/.claude/keybindings.json` | Add contexts, map key combos to actions |
-| **Skills** | `~/.claude/skills/*/SKILL.md` | Create, edit, delete custom slash commands |
-| **Output Styles** | `~/.claude/output-styles/*.md` | Create, edit, delete response presets |
-| **Plugins** | `~/.claude/plugins/` | View marketplaces and blocklist (read-only) |
-| **Project Memory** | `~/.claude/projects/*/memory/` | CRUD memory files with frontmatter editor, export/import as ZIP |
-| **Sessions** | `~/.claude/projects/*/` | Browse history, rename, search messages, view conversation with tool-use display, in-page terminal |
-| **Project Files** | `<project>/**` | Browse the project tree in a session's **Files** tab, read any file, edit and save it (optional autosave) |
-| **Git** | `<project>/.git` | Commit, push, pull, fetch; per-file diffs; paged history; a project shell with an annotated recipe list |
-| **Project Settings** | `.claude/settings.local.json`, `.claude/settings.json` | Edit local and shared project permissions |
-| **Project MCP (project scope)** | `<project>/.mcp.json` | Project-level MCP server config (checked into git) |
-| **Project MCP (local scope)** | `~/.claude.json` → `projects["<path>"].mcpServers` | Per-project, per-user MCP server config |
-| **Project Agents** | `.claude/agents/*.md` | Create, edit, delete custom subagents |
-| **Project Skills** | `.claude/skills/*/SKILL.md` | Project-scoped custom slash commands |
-| **Project Output Styles** | `.claude/output-styles/*.md` | Project-scoped response presets |
-| **Manager Settings** | `data/` | Pricing fetch URL, pricing history, manual model pricing editor |
+| **MCP Servers (user scope)** | `~/.claude.json` → `mcpServers` | Add, edit, enable/disable, delete |
+| **Cloud Integrations** | `~/.claude/.credentials.json` (read-only) | View OAuth-connected services |
+| **Keybindings** | `~/.claude/keybindings.json` | Map key combos to actions |
+| **Skills** | `~/.claude/skills/*/SKILL.md` | Create, edit, delete |
+| **Output Styles** | `~/.claude/output-styles/*.md` | Create, edit, delete |
+| **Plugins** | `~/.claude/plugins/` | View marketplaces and blocklist |
+| **Project Memory** | `~/.claude/projects/*/memory/` | Edit memory files, export/import as ZIP |
+| **Sessions** | `~/.claude/projects/*/` | Browse, rename, search, replay, in-page terminal |
+| **Project Files** | `<project>/**` | Browse, view and edit files |
+| **Git** | `<project>/.git` | Commit, push, pull, diffs, history, shell |
+| **Project Settings** | `.claude/settings.local.json`, `.claude/settings.json` | Edit project permissions |
+| **Project MCP (project scope)** | `<project>/.mcp.json` | Project MCP servers (in git) |
+| **Project MCP (local scope)** | `~/.claude.json` → `projects["<path>"].mcpServers` | Per-project, per-user MCP servers |
+| **Project Agents** | `.claude/agents/*.md` | Create, edit, delete subagents |
+| **Project Skills** | `.claude/skills/*/SKILL.md` | Project skills |
+| **Project Output Styles** | `.claude/output-styles/*.md` | Project output styles |
+| **Manager Settings** | `data/` | Pricing source, history, manual pricing, editor and Task Board options |
 
 ### MCP scopes
 
-Claude Code supports three MCP scopes; CM shows all of them in the matching location Claude Code itself uses, so what you see in the UI matches what `claude mcp list` reports:
+CM shows each MCP scope where Claude Code stores it, matching `claude mcp list`:
 
-- **User scope** (`claude mcp add --scope user`) → `~/.claude.json` → `mcpServers` — visible on the global **MCP Servers** page.
-- **Project scope** (`claude mcp add --scope project`) → `<project>/.mcp.json` at the project root (checked into git) — visible inside a project's **MCP** tab.
-- **Local scope** (`claude mcp add --scope local`, the default) → `~/.claude.json` → `projects["<project path>"].mcpServers` — visible inside a project's **MCP** tab alongside project scope.
+- **User** → `~/.claude.json` → `mcpServers` (global **MCP Servers** page)
+- **Project** → `<project>/.mcp.json` (project **MCP** tab)
+- **Local** (default) → `~/.claude.json` → `projects["<path>"].mcpServers` (project **MCP** tab)
 
 ## Highlighted Features
 
-### Token Usage & Charts
-Tracks all token consumption and estimated costs across every session. Charts show cost and token trends over time, cost by model, and top projects by spend. Pricing is fetched from Anthropic automatically on startup and kept in a history log so historical cost calculations stay accurate.
+### Task Board
+All projects on one board, one lane per project, showing the project's current git branch.
 
-### In-Session Terminal
-An embedded xterm.js terminal panel lives inside the session detail view — open a shell in the project directory without leaving the browser. Clipboard shortcuts (Ctrl+C/V) work, the pane is resizable, and state persists across page refreshes.
+- **Workflows** — stages between Ready and Done built from the project's skills and agents; draw them as a diagram with conditions and loop limits; save, load, export and import workflows.
+- **Tickets run by themselves** — Ready starts a background Claude session that works through the stages; it waits when it needs your input. A type icon (bug, feature, question, other) shows on each card.
+- **Parallel lanes** — several tickets at once (3 by default, set in CM Settings); in a git project each gets its own worktree and branch.
+- **Finalize** — runs the project's tests; a worktree ticket then waits for you to Merge (no squash) or Create PR.
+- **Follow-ups and to-dos** — drag a ticket back to ToDo to follow up; keep private to-dos on finished tickets and turn any into a new ticket.
 
-### Session Conversation
-Full conversation replay with structured tool-use display: `Edit` renders a before/after diff, `Bash` shows the command in a code block, and other tools (Read, Write, Glob, Grep, Agent, WebFetch…) each have a tailored compact view. User messages, assistant responses, and tool calls all render with syntax highlighting.
+### Token Usage
+Token and cost tracking across all sessions with charts, usage marks and AI efficiency insights. Pricing is fetched from Anthropic and kept in a history log.
 
-### Project File Explorer & Editor
-A session's **Files** tab pairs the session with the project it ran in: the files that session changed stay pinned at the top as a tree with new/edited/deleted badges, and the full project tree sits below them, minus those changed files. Clicking any file opens it in the pane beside the tree — source first, with a Source/Diff toggle for files the session touched. Source is editable and saved back to disk (CodeMirror, syntax highlighting driven by each theme's own token palette). With the terminal open the tab sits at 25% structure / 50% source / 25% terminal, all draggable. The **Scratchpad** tab uses the same layout and pane for the temp files Claude created during the session, read-only. Unsaved edits are marked with ● on the file row, in the pane header, and in the status bar; autosave is off by default and configurable under **CM Settings → Editor**. Switching files keeps unsaved text in memory rather than dropping it, and a file's original line endings are preserved on save.
+### Sessions
+Full conversation replay with tailored tool-use views, full-text search across a project, and an embedded terminal in the project directory.
+
+### Files
+A session's **Files** tab pins the files it changed above the project tree; open any file to view, diff or edit it (CodeMirror, optional autosave). The **Scratchpad** tab shows Claude's temp files.
 
 ### Git
-Git is a panel, not a page. The footer button carries the current branch, how far ahead or behind its upstream you are, how many files are changed, and a dot while a shell is running; clicking it opens the panel — as the project's **Git** tab in the project view, or in a modal from a session so you never leave what you were doing. Both are the same component.
+A Git panel per project: commit, push, fetch and pull (`--ff-only`), diffs, paged history, a project shell and ~50 git recipes that are typed into the shell but never run for you.
 
-The left column is what a commit would include and what a push would send: changed files either flat or as a folder tree whose folders tick and untick together, a message box, and **Commit** / **Commit & Push** / **Push**, with **Fetch** and **Pull** on the incoming side. Each button says what it is doing while it runs, and every action is disabled until it finishes.
-
-The middle column holds three panes that swap without tearing each other down — a diff never kills a live terminal:
-
-- **Shell** — your own shell (PowerShell on Windows, `$SHELL` elsewhere) in the project directory. It survives closing the panel and reattaches with its scrollback.
-- **Diff** — click any changed file to see exactly what committing it would record, or a file inside a commit to see that commit's change to it.
-- **History** — the log, fifty commits at a time; expand a commit for its message and file list.
-
-The right column is a list of ~50 annotated git recipes, grouped by task, that appears with the shell and folds away to a rail. Clicking one **types** it into the shell without a newline: nothing runs until you press Enter. That is deliberate — anything that rewrites history or destroys work (`rebase`, `reset --hard`, `clean -fd`, force-push) is terminal-only, documented in the recipes rather than offered as a button. `pull` is `--ff-only` and `fetch` is `--prune`, so a merge is never made behind your back.
-
-### Session Search
-Full-text search across all messages in a project — covers user messages, assistant responses, tool calls, and tool results — with context snippets and match highlighting.
-
-### Themes
-Four built-in themes: Dark, Light, Matrix, and Default (Catppuccin). Cycle through them via the sidebar button.
-
-## Custom Skills
-
-This project includes a `/p-run` skill to start the development server.
+### Sidebar & Themes
+Star favorite projects to pin them on top; a Compact switch shows only General and Projects. Four themes: Dark, Light, Matrix and Default (Catppuccin).
 
 ## Architecture
 
@@ -121,7 +111,8 @@ lib/               # Shared server helpers
   git.js           # Non-interactive git invocation + status, log and commit helpers
   diff.js          # Line diff shared by file history and the git panel
   terminal-server.js # WebSocket <-> pty bridge for claude sessions and project shells
-routes/            # Express route modules (20 files)
+  task-board*.js   # Task Board store, workflow and ticket runner
+routes/            # Express route modules
 data/              # App-local storage (gitignored, never in ~/.claude/)
 public/
   index.html       # SPA shell
@@ -151,6 +142,15 @@ Works on Windows, macOS, and Linux. Path resolution handles all OS conventions a
 - Git runs with prompts disabled and a timeout, so a call can never hang the UI waiting for credentials
 - Only safe git operations are exposed as actions (`pull --ff-only`, `fetch --prune`, no forced push); rewriting history is left to the shell, where git can ask you
 - A commit is only ever addressed by a validated hex sha, never by raw input
+- API requests are rate-limited (10000/min by default, board hooks exempt, `CM_RATE_LIMIT` to change)
+
+### CodeQL
+
+CodeQL runs on every PR, push to `main` and weekly (JavaScript and GitHub Actions workflows). To run it locally:
+
+1. Download the [CodeQL bundle](https://github.com/github/codeql-action/releases/latest) for your OS and extract it into `.codeql/` (giving `.codeql/codeql/codeql`), or put `codeql` on `PATH`, or set `CODEQL_PATH`
+2. `npm run codeql` — exits non-zero on findings
+3. Optional, scan before every push: `git config core.hooksPath .githooks`
 
 ## Changelog
 

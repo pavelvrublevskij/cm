@@ -2,41 +2,50 @@ const GitActions = {
   _slug: null,
   _info: null,
   _shellRunning: false,
+  // Bumped by init() and reset(): a request answers only the generation it was started in.
+  _gen: 0,
 
   async init(slug) {
+    const gen = ++GitActions._gen;
     GitActions._slug = slug;
     GitActions._info = null;
     GitActions._shellRunning = false;
     GitActions._clearContainers();
-    await GitActions._fetchInfo();
-    GitActions._render();
+    if (await GitActions._fetchInfo(slug, gen)) GitActions._render();
   },
 
   async refresh() {
-    if (!GitActions._slug) return;
-    await GitActions._fetchInfo();
-    GitActions._render();
+    const slug = GitActions._slug;
+    if (!slug) return;
+    if (await GitActions._fetchInfo(slug, GitActions._gen)) GitActions._render();
   },
 
-  async _fetchInfo() {
-    GitActions._info = await GitApi.info(GitActions._slug) || { available: false };
-    if (!GitActions._info.available) { GitActions._shellRunning = false; return; }
-    await GitActions._fetchShellState();
+  /** Resolves false when reset() or another init() ran while a request was in flight, so a late
+   *  answer from the previous view never repaints the footer or overwrites newer state. */
+  async _fetchInfo(slug, gen) {
+    const info = await GitApi.info(slug) || { available: false };
+    if (GitActions._gen !== gen) return false;
+    GitActions._info = info;
+    if (!info.available) { GitActions._shellRunning = false; return true; }
+    return GitActions._fetchShellState(slug, gen);
   },
 
-  async _fetchShellState() {
-    const shell = await GitApi.shellInfo(GitActions._slug);
+  async _fetchShellState(slug, gen) {
+    const shell = await GitApi.shellInfo(slug);
+    if (GitActions._gen !== gen) return false;
     GitActions._shellRunning = !!(shell && shell.running);
+    return true;
   },
 
   /** Re-check whether a shell is alive and repaint the footer dot. */
   async refreshShellState() {
-    if (!GitActions._slug || !GitActions._info || !GitActions._info.available) return;
-    await GitActions._fetchShellState();
-    GitActions._render();
+    const slug = GitActions._slug;
+    if (!slug || !GitActions._info || !GitActions._info.available) return;
+    if (await GitActions._fetchShellState(slug, GitActions._gen)) GitActions._render();
   },
 
   reset() {
+    GitActions._gen++;
     GitActions._slug = null;
     GitActions._info = null;
     GitActions._shellRunning = false;
@@ -149,6 +158,13 @@ const GitActions = {
 
   checkout(branch, remote, stash) {
     return GitActions._remote(() => GitApi.checkout(GitActions._slug, branch, remote, stash), `Switched to ${branch}`);
+  },
+
+  /** Switch another project's branch (the Task Board lane), repainting git views if it is the open project. */
+  async checkoutIn(slug, branch, remote, stash) {
+    const ok = await GitActions._call(() => GitApi.checkout(slug, branch, remote, stash), `Switched to ${branch}`);
+    if (slug === GitActions._slug) await GitActions._repaint();
+    return ok;
   },
 
   createBranch(name) {

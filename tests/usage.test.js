@@ -84,6 +84,38 @@ before(() => {
   ];
   fs.writeFileSync(path.join(subagentDir, 'sess-subagent.jsonl'), subagentLines.join('\n') + '\n');
 
+  // Seed a session whose sub-agent also has its own transcript in <sessionId>/subagents/.
+  // Its real per-request usage must be counted instead of the notification's lump sum.
+  const fileSlug = 'usage-proj-subagent-file';
+  const fileDir = path.join(paths.PROJECTS_DIR, fileSlug);
+  fs.mkdirSync(path.join(fileDir, 'sess-subagent-file', 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(fileDir, 'sess-subagent-file.jsonl'), [
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-03-01T12:00:00Z',
+      message: {
+        model: 'claude-sonnet-4-6',
+        usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+      }
+    }),
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-03-01T12:00:05Z',
+      toolUseResult: { isAsync: true, agentId: 'abc123', resolvedModel: 'claude-haiku-4-5' }
+    }),
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-03-01T12:00:10Z',
+      message: { role: 'user', content: '<task-notification>\n<task-id>abc123</task-id>\n<usage><subagent_tokens>9000</subagent_tokens></usage>\n</task-notification>' }
+    })
+  ].join('\n') + '\n');
+  const subUsage = { input_tokens: 5, output_tokens: 7, cache_creation_input_tokens: 100, cache_read_input_tokens: 2000 };
+  fs.writeFileSync(path.join(fileDir, 'sess-subagent-file', 'subagents', 'agent-abc123.jsonl'), [
+    JSON.stringify({ type: 'assistant', requestId: 'req-sub-1', timestamp: '2026-03-01T12:00:06Z', message: { model: 'claude-haiku-4-5', usage: subUsage } }),
+    JSON.stringify({ type: 'assistant', requestId: 'req-sub-1', timestamp: '2026-03-01T12:00:06Z', message: { model: 'claude-haiku-4-5', usage: subUsage } }),
+    JSON.stringify({ type: 'assistant', requestId: 'req-sub-2', timestamp: '2026-03-01T12:00:08Z', message: { model: 'claude-haiku-4-5', usage: subUsage } })
+  ].join('\n') + '\n');
+
   // Newer Claude Code versions deliver the same task-notification as a plain 'user' message
   // whose content is a raw string, instead of an 'attachment' entry with a commandMode.
   const subagentSlug2 = 'usage-proj-subagent-plain';
@@ -301,6 +333,29 @@ test('usage indexer attributes each of several subagents to its own resolved mod
   assert.ok(Math.abs(res.body.cost.total - expectedCost) < 1e-9, 'cost.total sums per-model rates correctly');
 });
 
+test('usage indexer counts a sub-agent transcript with its real token split instead of the notification total', async () => {
+  const res = await request(app).get('/api/usage/project/usage-proj-subagent-file');
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(res.body.byModel['claude-haiku-4-5'], {
+    input_tokens: 10, output_tokens: 14, cache_creation_input_tokens: 200, cache_read_input_tokens: 4000
+  });
+  assert.strictEqual(res.body.totals.output_tokens, 20 + 14, 'notification lump sum is not added on top');
+});
+
+test('GET /api/usage/summary with fromTime cuts inside an hour by minute', async () => {
+  // All seeded turns are at 12:00 UTC; a fromTime one minute later in the same local hour excludes them.
+  const seededTs = new Date('2026-03-01T12:00:00Z');
+  const localHour = String(seededTs.getHours()).padStart(2, '0');
+  const localMinute = String(seededTs.getMinutes()).padStart(2, '0');
+
+  const inRange = await request(app).get(`/api/usage/summary?fromTime=${localHour}:${localMinute}&toTime=${localHour}:59`);
+  assert.ok(inRange.body.totals.input_tokens >= 100, 'turn at the fromTime minute is included');
+
+  const nextMinute = String(seededTs.getMinutes() + 1).padStart(2, '0');
+  const outRange = await request(app).get(`/api/usage/summary?fromTime=${localHour}:${nextMinute}&toTime=${localHour}:59`);
+  assert.strictEqual(outRange.body.totals.input_tokens, 0, 'turn before fromTime in the same hour is excluded');
+});
+
 test('GET /api/usage/summary with fromTime/toTime filters by hour', async () => {
   // fromTime/toTime are local hours; server converts UTC hour keys to local before comparing.
   const seededTs = new Date('2026-03-01T12:00:00Z');
@@ -362,4 +417,52 @@ test('by-project: date filter scopes project data', async () => {
   assert.strictEqual(outRange.status, 200);
   const proj2 = outRange.body.projects.find(p => p.slug === 'usage-proj-gamma');
   assert.ok(!proj2, 'project should not appear for February filter');
+});
+
+test('getProjectUsageMap refreshes only its own project and keeps other projects\' entries', async () => {
+  const { buildIndex, getProjectUsageMap } = require('../lib/usage-index');
+  const { readJson } = require('../lib/file-helpers');
+  buildIndex();
+
+  const write = (slug, id, input) => {
+    const dir = path.join(paths.PROJECTS_DIR, slug);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, id + '.jsonl'), JSON.stringify({
+      type: 'assistant', timestamp: '2026-03-01T12:00:00Z',
+      message: { model: 'claude-sonnet-4-6', usage: { input_tokens: input, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }
+    }) + '\n');
+  };
+  write('usage-scope-own', 'own-1', 42);
+  write('usage-scope-other', 'other-1', 7);
+
+  const map = getProjectUsageMap('usage-scope-own');
+  assert.strictEqual(map['own-1'].totals.input_tokens, 42);
+
+  const sessions = readJson(paths.USAGE_DB, { sessions: {} }).sessions;
+  assert.ok(!sessions['usage-scope-other/other-1'], 'other project was not indexed');
+  assert.ok(sessions['usage-proj-gamma/sess-001'], 'other projects\' entries are kept');
+
+  fs.rmSync(path.join(paths.PROJECTS_DIR, 'usage-scope-own', 'own-1.jsonl'));
+  getProjectUsageMap('usage-scope-own');
+  const after = readJson(paths.USAGE_DB, { sessions: {} }).sessions;
+  assert.ok(!after['usage-scope-own/own-1'], 'deleted session of this project is dropped');
+  assert.ok(after['usage-proj-gamma/sess-001']);
+});
+
+test('getSessionUsage picks up a changed session file of its own project', async () => {
+  const { getSessionUsage } = require('../lib/usage-index');
+  const dir = path.join(paths.PROJECTS_DIR, 'usage-scope-session');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 's-1.jsonl');
+  const entry = (input) => JSON.stringify({
+    type: 'assistant', timestamp: '2026-03-01T12:00:00Z',
+    message: { model: 'claude-sonnet-4-6', usage: { input_tokens: input, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }
+  });
+  fs.writeFileSync(file, entry(10) + '\n');
+  assert.strictEqual(getSessionUsage('usage-scope-session', 's-1').totals.input_tokens, 10);
+
+  fs.appendFileSync(file, entry(5) + '\n');
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(file, later, later);
+  assert.strictEqual(getSessionUsage('usage-scope-session', 's-1').totals.input_tokens, 15);
 });

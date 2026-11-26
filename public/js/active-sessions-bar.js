@@ -5,6 +5,7 @@ const ActiveSessionsBar = {
   _sessions: [],
   _lastSidebarKey: null,
   _projectBranches: {},
+  _worktreeStatus: {},
   COLORS: ['#f85149', '#f0883e', '#d29922', '#3fb950', '#2bb5a8', '#388bfd', '#a371f7', '#db61a2'],
 
   start() {
@@ -82,7 +83,7 @@ const ActiveSessionsBar = {
     try {
       const sessions = await api('/api/projects/active');
       ActiveSessionsBar._sessions = sessions || [];
-      await ActiveSessionsBar._fetchProjectBranches();
+      await Promise.all([ActiveSessionsBar._fetchProjectBranches(), ActiveSessionsBar._fetchWorktreeStatus()]);
       ActiveSessionsBar._render();
       ActiveSessionsBar._renderSidebar();
       if (typeof Sessions !== 'undefined') Sessions.syncCloseButton();
@@ -101,12 +102,40 @@ const ActiveSessionsBar = {
     }));
   },
 
+  /** Uncommitted files and unmerged commits of the worktree sessions (slugs of .claude/worktrees folders). */
+  async _fetchWorktreeStatus() {
+    const slugs = [...new Set(ActiveSessionsBar._sessions.map(s => s.slug))].filter(slug => slug.includes('--claude-worktrees-'));
+    const next = {};
+    await Promise.all(slugs.map(async slug => {
+      try {
+        const st = await api(`/api/projects/${encodeURIComponent(slug)}/git/worktree`);
+        if (st.worktree) next[slug] = st;
+      } catch (_) { /* no icon */ }
+    }));
+    ActiveSessionsBar._worktreeStatus = next;
+  },
+
+  /** A dot on sessions whose worktree holds changes not yet in its base branch. */
+  _worktreeIconHtml(s) {
+    const st = ActiveSessionsBar._worktreeStatus[s.slug];
+    if (!worktreeHasChanges(st)) return '';
+    const parts = [];
+    if (st.files.length) parts.push(`${st.files.length} uncommitted`);
+    if (st.unmergedCount) parts.push(`${st.unmergedCount} unmerged into ${st.base}`);
+    return `<span class="asb-worktree-icon" title="Worktree changes: ${escapeAttr(parts.join(', '))}">&#9679;</span>`;
+  },
+
   _hasBranchMismatch(s) {
     const projectBranch = ActiveSessionsBar._projectBranches[s.slug];
     return !!(s.lastGitBranch && projectBranch && s.lastGitBranch !== projectBranch);
   },
 
-  _archiveIconSvg: '<svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" style="vertical-align:-1px"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v1.5C0 5.216.784 6 1.75 6v6.25c0 .966.784 1.75 1.75 1.75h9c.966 0 1.75-.784 1.75-1.75V6A1.75 1.75 0 0 0 16 4.25v-1.5A1.75 1.75 0 0 0 14.25 1ZM6.5 9.5h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1 0-1.5Z"/></svg>',
+  /** A Task Board ticket's session waiting for the user shows its needs input / conflict badge. */
+  _attentionHtml(s) {
+    return typeof TaskBoard !== 'undefined' && s.kind !== 'readonly' ? TaskBoard.attentionBadgeHtml(s.sessionId) : '';
+  },
+
+  _archiveIconSvg:'<svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" style="vertical-align:-1px"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v1.5C0 5.216.784 6 1.75 6v6.25c0 .966.784 1.75 1.75 1.75h9c.966 0 1.75-.784 1.75-1.75V6A1.75 1.75 0 0 0 16 4.25v-1.5A1.75 1.75 0 0 0 14.25 1ZM6.5 9.5h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1 0-1.5Z"/></svg>',
 
   _render() {
     const bar = document.getElementById('active-sessions-bar');
@@ -145,8 +174,8 @@ const ActiveSessionsBar = {
         const instanceAttr = s.instanceId ? ` data-asb-instance="${escapeHtml(s.instanceId)}"` : '';
         return `<div class="asb-pill${isCurrent ? ' asb-pill--current' : ''}${warn ? ' asb-pill--branch-warn' : ''}${s.color ? ' asb-pill--colored' : ''}" style="${ActiveSessionsBar._colorStyle(s)}" data-asb-session="${escapeHtml(s.sessionId)}" data-asb-slug="${escapeHtml(s.slug)}" data-asb-kind="${escapeHtml(s.kind)}"${instanceAttr} title="${escapeHtml(s.title || s.sessionId)}${roTitle}">
           <span class="session-active-dot session-active-dot--${s.kind}"></span>
-          ${warnIcon}${archiveIcon}
-          <span class="asb-session">${escapeHtml(label)}</span>
+          ${warnIcon}${archiveIcon}${ActiveSessionsBar._worktreeIconHtml(s)}
+          <span class="asb-session">${escapeHtml(label)}</span>${ActiveSessionsBar._attentionHtml(s)}
           <button class="asb-close" data-asb-close-session="${escapeHtml(s.sessionId)}" data-asb-close-slug="${escapeHtml(s.slug)}"${instanceAttr} title="Close session" aria-label="Close">&#215;</button>
         </div>`;
       }).join('');
@@ -197,7 +226,7 @@ const ActiveSessionsBar = {
 
   _renderSidebar() {
     const { currentSessionId, currentReadOnly, currentInstanceId } = ActiveSessionsBar._currentSelector();
-    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived + '|' + (s.color || '')).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
+    const key = ActiveSessionsBar._sessions.map(s => s.slug + '|' + s.sessionId + '|' + (s.instanceId || '') + '|' + ActiveSessionsBar._hasBranchMismatch(s) + '|' + !!s.archived + '|' + (s.color || '') + '|' + ActiveSessionsBar._attentionHtml(s) + '|' + ActiveSessionsBar._worktreeIconHtml(s)).join(',') + '|' + currentSessionId + '|' + currentReadOnly + '|' + currentInstanceId;
     if (key === ActiveSessionsBar._lastSidebarKey) return;
     ActiveSessionsBar._lastSidebarKey = key;
 
@@ -243,7 +272,7 @@ const ActiveSessionsBar = {
         const warn = ActiveSessionsBar._hasBranchMismatch(s);
         const warnIcon = warn ? `<span class="asb-branch-warn-icon" title="Branch mismatch: session on &quot;${escapeHtml(s.lastGitBranch)}&quot;, project on &quot;${escapeHtml(ActiveSessionsBar._projectBranches[s.slug])}&quot;">&#9888;</span>` : '';
         const archiveIcon = s.archived ? `<span class="asb-archive-icon" title="Session is archived">${ActiveSessionsBar._archiveIconSvg}</span>` : '';
-        div.innerHTML = `<span class="session-active-dot session-active-dot--${s.kind}"></span>${warnIcon}${archiveIcon}<span class="nav-label">${escapeHtml(label)}</span>`;
+        div.innerHTML = `<span class="session-active-dot session-active-dot--${s.kind}"></span>${warnIcon}${archiveIcon}${ActiveSessionsBar._worktreeIconHtml(s)}<span class="nav-label">${escapeHtml(label)}</span>${ActiveSessionsBar._attentionHtml(s)}`;
         div.appendChild(closeBtn);
         div.addEventListener('click', (function(slug, sessionId, kind) {
           return () => ActiveSessionsBar.open(slug, sessionId, kind === 'readonly');
@@ -284,6 +313,7 @@ const ActiveSessionsBar = {
   },
 
   async close(slug, sessionId) {
+    if (typeof TaskBoard !== 'undefined' && !(await TaskBoard.confirmCloseSession(sessionId))) return;
     try {
       await api(`/api/projects/${slug}/sessions/${sessionId}/deactivate`, { method: 'POST' });
     } catch (_) {}

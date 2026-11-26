@@ -86,6 +86,8 @@ const TerminalPanel = {
   },
 
   killSession()       { this._sendWs({ t: 'close' }); },
+  /** Send the message box text to claude through the pty's WebSocket; false when it is not connected. */
+  sendMessage(text)   { return this.hasAttachedPty() && this._sendWs({ t: 'send', text }); },
   notifySessionId(id) {
     if (!id) return;
     this._sendWs({ t: 'session', id });
@@ -95,6 +97,14 @@ const TerminalPanel = {
   _sendWs(payload) {
     const view = this.state && this.state.view;
     return !!view && view.send(payload);
+  },
+
+  /** Size the right pane (Terminal / Chat) from the saved splitter position. */
+  applySavedWidth() {
+    const body = document.getElementById('session-detail-body');
+    if (!body) return;
+    const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || this.DEFAULT_WIDTH_PCT;
+    body.style.setProperty('--terminal-width', savedWidth + '%');
   },
 
   open(slug, sessionId) {
@@ -108,8 +118,7 @@ const TerminalPanel = {
     if (!pane || !body) return;
 
     _terminalUI.hideError();
-    const savedWidth = parseFloat(localStorage.getItem(this.WIDTH_KEY)) || this.DEFAULT_WIDTH_PCT;
-    body.style.setProperty('--terminal-width', savedWidth + '%');
+    this.applySavedWidth();
     pane.classList.add('connected');
 
     const view = TermView.create({
@@ -157,20 +166,14 @@ const TerminalPanel = {
     this.state = { open: false, slug: null, sessionId: null, view: null };
   },
 
-  _setConversationHidden(hidden, instantPoll) {
+  _setMainPanelHidden(hidden) {
     if (typeof Sessions === 'undefined') {
       const body = document.getElementById('session-detail-body');
-      if (body) body.classList.toggle('conversation-hidden', !!hidden);
+      if (body) body.classList.toggle('main-panel-hidden', !!hidden);
       return;
     }
-    localStorage.setItem(Sessions.CONVERSATION_HIDDEN_KEY, hidden ? '1' : '0');
-    Sessions.applyConversationHiddenState();
-    if (hidden) {
-      Sessions.stopConversationRefresh();
-    } else {
-      if (instantPoll) Sessions.pollNewMessages();
-      Sessions.startAutoRefresh();
-    }
+    localStorage.setItem(Sessions.MAIN_PANEL_HIDDEN_KEY, hidden ? '1' : '0');
+    Sessions.applyMainPanelHiddenState();
   },
 
   startDrag(ev) {
@@ -179,12 +182,12 @@ const TerminalPanel = {
     if (!body) return;
     const rect = body.getBoundingClientRect();
     const startX = ev.clientX;
-    const wasHidden = body.classList.contains('conversation-hidden');
+    const wasHidden = body.classList.contains('main-panel-hidden');
     let dragMode = false;
 
     const enterDragMode = () => {
       dragMode = true;
-      if (wasHidden) body.classList.remove('conversation-hidden');
+      if (wasHidden) body.classList.remove('main-panel-hidden');
     };
 
     const onMove = e => {
@@ -204,7 +207,7 @@ const TerminalPanel = {
 
       if (!dragMode) {
         // Pure click — toggle hidden state
-        this._setConversationHidden(!wasHidden, /*instantPoll=*/ wasHidden);
+        this._setMainPanelHidden(!wasHidden);
         this._sendResize();
         return;
       }
@@ -213,12 +216,12 @@ const TerminalPanel = {
       const collapse = !isNaN(finalPct) && finalPct >= this.COLLAPSE_THRESHOLD_PCT;
 
       if (collapse) {
-        this._setConversationHidden(true);
+        this._setMainPanelHidden(true);
       } else {
         const saved = isNaN(finalPct) ? this.DEFAULT_WIDTH_PCT : Math.max(this.MIN_WIDTH_PCT, Math.min(this.MAX_WIDTH_PCT, finalPct));
         body.style.setProperty('--terminal-width', saved + '%');
         localStorage.setItem(this.WIDTH_KEY, String(saved));
-        if (wasHidden) this._setConversationHidden(false, true);
+        if (wasHidden) this._setMainPanelHidden(false);
       }
       this._sendResize();
     };

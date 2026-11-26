@@ -15,13 +15,19 @@ DIM='\033[2m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PORT=3000
+export PORT=$(node "$SCRIPT_DIR/scripts/port.js" 2>/dev/null || echo 3000)
+SERVER_JS="$SCRIPT_DIR/server.js"
 URL="http://127.0.0.1:$PORT"
 MIN_NODE=18
 
 IS_WINDOWS=false
 if printf '%s' "$OSTYPE" | grep -qE "msys|mingw|cygwin"; then
   IS_WINDOWS=true
+fi
+
+SERVER_JS_WIN=""
+if $IS_WINDOWS; then
+  SERVER_JS_WIN=$(cygpath -w "$SERVER_JS")
 fi
 
 VERSION=$(sed -n 's/^  "version": *"\([^"]*\)".*/\1/p' "$SCRIPT_DIR/package.json" | head -1)
@@ -167,6 +173,23 @@ find_unix_server_pid() {
     fi
 }
 
+# Only CM's own server: its command line points at this project's server.js, so another
+# application listening on the same port is never touched.
+is_cm_pid() {
+    if $IS_WINDOWS; then
+        powershell.exe -NoProfile -Command "\$c = (Get-CimInstance Win32_Process -Filter 'ProcessId=$1').CommandLine; if (\$c -and \$c.Replace('/','\\').ToLower().Contains('$SERVER_JS_WIN'.ToLower())) { exit 0 } else { exit 1 }" >/dev/null 2>&1
+    else
+        ps -p "$1" -o args= 2>/dev/null | grep -qF "$SERVER_JS"
+    fi
+}
+
+find_cm_unix_pid() {
+    local pid
+    for pid in $(find_unix_server_pid); do
+        if is_cm_pid "$pid"; then printf '%s\n' "$pid"; fi
+    done
+}
+
 # A single `kill` can be swallowed -- a busy process, a race with the process's own shutdown, or a
 # macOS quirk where the port briefly reports free before the old process actually exits. Escalate
 # through increasingly forceful/different approaches, re-checking the port after each one, and
@@ -176,21 +199,21 @@ kill_unix_server_pid() {
 
     kill $pid 2>/dev/null || true
     sleep 1
-    pid=$(find_unix_server_pid)
+    pid=$(find_cm_unix_pid)
     if [ -z "$pid" ]; then return 0; fi
 
     printf "  ${RED}Kill unsuccessful, still running (PID $pid) -- retrying with SIGKILL...${NC}\n"
     kill -9 $pid 2>/dev/null || true
     sleep 1
-    pid=$(find_unix_server_pid)
+    pid=$(find_cm_unix_pid)
     if [ -z "$pid" ]; then return 0; fi
 
     printf "  ${RED}Kill unsuccessful, still running (PID $pid) -- retrying by matching the process name...${NC}\n"
     if command -v pkill >/dev/null 2>&1; then
-        pkill -9 -f "node .*server\.js" 2>/dev/null || true
+        pkill -9 -f "$(printf '%s' "$SERVER_JS" | sed 's/[][\.*^$(){}+?|]/\\&/g')" 2>/dev/null || true
     fi
     sleep 1
-    pid=$(find_unix_server_pid)
+    pid=$(find_cm_unix_pid)
     if [ -z "$pid" ]; then return 0; fi
 
     printf "  ${RED}⚠ Could not stop the server (PID $pid). Try manually: kill -9 $pid${NC}\n"
@@ -217,6 +240,14 @@ wait_for_url() {
 do_local_start() {
     printf "${BOLD}${GREEN}▶ Start${NC}\n\n"
 
+    if $INTERACTIVE; then
+        local port_input
+        read -rp "  Port [$PORT]: " port_input
+        [ -n "$port_input" ] && PORT="$port_input"
+        URL="http://127.0.0.1:$PORT"
+        printf "\n"
+    fi
+
     if command -v node >/dev/null 2>&1; then
         NODE_VER=$(node -v | sed 's/v//' | cut -d. -f1)
         if [ "$NODE_VER" -lt "$MIN_NODE" ]; then
@@ -235,6 +266,10 @@ do_local_start() {
     if $IS_WINDOWS; then
         PID=$(netstat.exe -aon 2>/dev/null | grep "127.0.0.1:$PORT " | grep LISTENING | awk '{print $NF}' | head -1 || true)
         if [ -n "$PID" ]; then
+            if ! is_cm_pid "$PID"; then
+                printf "  ${RED}⚠ Port $PORT is used by another application (PID $PID). Choose a different port.${NC}\n\n"
+                return 1
+            fi
             printf "  Port $PORT in use (PID $PID), stopping previous instance...\n"
             taskkill.exe //PID "$PID" //F >/dev/null 2>&1 || true
             local attempts=0
@@ -251,6 +286,11 @@ do_local_start() {
     else
         PID=$(find_unix_server_pid)
         if [ -n "$PID" ]; then
+            PID=$(find_cm_unix_pid)
+            if [ -z "$PID" ]; then
+                printf "  ${RED}⚠ Port $PORT is used by another application. Choose a different port.${NC}\n\n"
+                return 1
+            fi
             printf "  Port $PORT in use (PID $PID), stopping previous instance...\n"
             kill_unix_server_pid "$PID" || true
         fi
@@ -268,10 +308,12 @@ do_local_start() {
 
     printf "\n"
 
+    node "$SCRIPT_DIR/scripts/port.js" "$PORT"
+
     if $IS_WINDOWS; then
-        powershell.exe -command "Start-Process node -ArgumentList 'server.js' -WorkingDirectory '$(pwd -W)' -WindowStyle Hidden"
+        powershell.exe -command "Start-Process node -ArgumentList '\"$SERVER_JS_WIN\"' -WorkingDirectory '$(pwd -W)' -WindowStyle Hidden"
     else
-        nohup node server.js > /dev/null 2>&1 &
+        nohup node "$SERVER_JS" > /dev/null 2>&1 &
     fi
 
     wait_for_url "$URL" && open_browser "$URL" || true
@@ -286,17 +328,21 @@ do_stop() {
     local PID=""
     if $IS_WINDOWS; then
         PID=$(netstat.exe -aon 2>/dev/null | grep "127.0.0.1:$PORT " | grep LISTENING | awk '{print $NF}' | head -1 || true)
-        if [ -n "$PID" ]; then
+        if [ -n "$PID" ] && ! is_cm_pid "$PID"; then
+            printf "  Port $PORT is used by another application (PID $PID), not stopping it.\n"
+        elif [ -n "$PID" ]; then
             printf "  Stopping server (PID $PID)...\n"
             taskkill.exe //PID "$PID" //F >/dev/null 2>&1 || true
         else
             printf "  Server is not running.\n"
         fi
     else
-        PID=$(find_unix_server_pid)
+        PID=$(find_cm_unix_pid)
         if [ -n "$PID" ]; then
             printf "  Stopping server (PID $PID)...\n"
             kill_unix_server_pid "$PID" || true
+        elif [ -n "$(find_unix_server_pid)" ]; then
+            printf "  Port $PORT is used by another application, not stopping it.\n"
         else
             printf "  Server is not running.\n"
         fi
@@ -384,7 +430,9 @@ print_header
 
 CHOICE=$(printf '%s' "${1:-}" | tr -d '\r')
 
+INTERACTIVE=false
 if [ -z "$CHOICE" ]; then
+    INTERACTIVE=true
     choose_option
     printf "\n"
 fi

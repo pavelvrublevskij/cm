@@ -211,3 +211,55 @@ test('search hints: a click types the prefix, appending after existing text', ()
   Sessions._applySearchHint({ preventDefault() {} }, 'proj', 't:');
   assert.strictEqual(input.value, 'widget t:');
 });
+
+test('a worktree session\'s main-checkout change diffs, opens and is labelled under its own slug', async () => {
+  setCtx([file('src/a.js', [1]), file('sources/repo/b.js', [1], { projSlug: 'main' })]);
+  assert.strictEqual(Sessions._ctxSlugFor('sources/repo/b.js'), 'main');
+  assert.strictEqual(Sessions._ctxSlugFor('src/a.js'), 'proj');
+  assert.strictEqual(Sessions._ctxFileSlug('src/a.js'), null);
+
+  const html = Sessions._renderCtxFileList();
+  assert.strictEqual((html.match(/ctx-file-badge-main/g) || []).length, 1, 'only the main-checkout file is marked');
+
+  SessionChanges.active = true;
+  await SessionChanges.render();
+  assert.deepStrictEqual(harness.diffCalls.map(c => [c[4], c[3]]), [['src/a.js', 'proj'], ['sources/repo/b.js', 'main']]);
+});
+
+test('open in editor and show in explorer use a main-checkout file\'s own slug', async () => {
+  setCtx([file('src/a.js', [1]), file('sources/repo/b.js', [1], { projSlug: 'main' })]);
+  const calls = [];
+  const origApi = context.api;
+  context.api = async (url, opts) => { calls.push([url, opts.body.projSlug, opts.body.filePath]); return {}; };
+  try {
+    await Sessions.openCtxFile('sources/repo/b.js');
+    await Sessions.revealCtxFile('sources/repo/b.js');
+    await Sessions.openCtxFile('src/a.js');
+  } finally {
+    context.api = origApi;
+  }
+  assert.deepStrictEqual(calls, [
+    ['/api/file-history/open-file', 'main', 'sources/repo/b.js'],
+    ['/api/file-history/reveal-file', 'main', 'sources/repo/b.js'],
+    ['/api/file-history/open-file', 'proj', 'src/a.js'],
+  ]);
+});
+
+test('diff window prev/next loads each file under its own slug', async () => {
+  const fhCtx = vm.createContext({ Sessions, escapeHtml: s => String(s), document: { addEventListener() {} } });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/js/file-history.js'), 'utf-8') + '\nglobalThis._FH = FileHistory;', fhCtx);
+  const FH = fhCtx._FH;
+  const loaded = [];
+  FH._updateNav = () => {};
+  FH._updateActionButtons = () => {};
+  FH._loadDiff = async (overlay, session, hash, version, projSlug, filePath) => { loaded.push([filePath, projSlug]); };
+  setCtx([file('src/a.js', [1]), file('sources/repo/b.js', [1], { projSlug: 'main' })]);
+  const overlay = { querySelector: () => null, _fhState: {} };
+  const items = [
+    { dataset: { session: 's1', hash: 'h', from: '1', path: 'src/a.js', isNew: '', isDeleted: '', readBase: '' } },
+    { dataset: { session: 's1', hash: 'h', from: '1', path: 'sources/repo/b.js', isNew: '', isDeleted: '', readBase: '' } },
+  ];
+  await FH._navToDiff(overlay, items, 1);
+  await FH._navToDiff(overlay, items, 0);
+  assert.deepStrictEqual(loaded, [['sources/repo/b.js', 'main'], ['src/a.js', 'proj']]);
+});

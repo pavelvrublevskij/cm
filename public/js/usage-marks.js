@@ -254,16 +254,15 @@ const UsageMarks = {
     const today = new Date();
     const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
     const selected = init ? init.project : (Usage.currentProjects.size === 1 ? Array.from(Usage.currentProjects.keys())[0] : '');
-    const projectOptions = ['<option value="">Global (all projects)</option>']
-      .concat(Usage.allProjects
-        .map(p => ({ slug: p.slug, base: Usage.basename(p.name), name: p.name }))
-        .sort((a, b) => a.base.localeCompare(b.base))
-        .map(p => `<option value="${escapeHtml(p.slug)}" title="${escapeHtml(p.name)}"${p.slug === selected ? ' selected' : ''}>${escapeHtml(p.base)}</option>`))
-      .join('');
+    const projectSelect = Projects.selectHtml('mark-project', selected, {
+      leading: [['', 'Global (all projects)']],
+      extra: Usage.projectExtras(),
+      filter: slug => Usage.allProjects.some(p => p.slug === slug)
+    });
     const body =
       formRow(
         formGroup('Date', `<input type="date" id="mark-date" value="${escapeHtml(init ? init.date : todayStr)}">`),
-        formGroup('Scope', `<select id="mark-project">${projectOptions}</select>`)
+        formGroup('Scope', projectSelect)
       ) +
       formGroup('Title', `<input type="text" id="mark-title" maxlength="80" placeholder="e.g. Added code optimization skill" value="${escapeHtml(init ? init.title : '')}">`) +
       formGroup('Description', `<textarea id="mark-description" rows="3" placeholder="What changed?">${escapeHtml(init ? init.description || '' : '')}</textarea>`) +

@@ -1,0 +1,107 @@
+// The message box under the conversation: sends a message to a session CM runs in its terminal.
+// The server says whether the session can take one now; the sent message shows up in the
+// conversation once claude writes it to the session JSONL.
+const SessionInput = {
+  state: 'none',
+  sending: false,
+  seq: 0,   // bumped on every send, so a poll started before it cannot re-enable the box
+
+  NOTES: {
+    none: 'Messages can be sent here only to a session running in CM\'s terminal — use the terminal for this one.',
+    busy: 'Claude is working — a message sent now waits until it finishes.',
+    question: 'Answer the open question first — in its card above or in the terminal.',
+    ready: ''
+  },
+
+  async refresh() {
+    const { slug, sessionId } = Sessions.detailState;
+    if (!slug) { SessionInput.render('none'); return; }
+    // A new session gets its id with its first JSONL line; until then its first message goes
+    // through the terminal panel, which runs claude idle at its prompt.
+    if (!sessionId) { if (SessionInput.state !== 'busy') SessionInput.render('ready'); return; }
+    const seq = SessionInput.seq;
+    try {
+      const data = await api(`/api/projects/${slug}/sessions/${sessionId}/input-state`);
+      const now = Sessions.detailState;
+      if (now.slug !== slug || now.sessionId !== sessionId) return;
+      if (typeof SessionQuestions !== 'undefined') {
+        SessionQuestions.setHeld(Sessions.detailSessionUrl(), data.questions);
+        Sessions.applyQuestions();
+      }
+      if (SessionInput.sending || seq !== SessionInput.seq) return;
+      SessionInput.render(data.state);
+    } catch (_) {}
+  },
+
+  render(state) {
+    SessionInput.state = state;
+    const wrap = document.getElementById('session-input');
+    if (!wrap) return;
+    const text = document.getElementById('session-input-text');
+    const note = document.getElementById('session-input-note');
+    const { slug, readOnly } = Sessions.detailState;
+    wrap.style.display = slug && !readOnly ? '' : 'none';
+    wrap.dataset.state = state;
+    text.disabled = state !== 'ready' && state !== 'busy';
+    SessionInput.renderNote(note, state);
+  },
+
+  // Rewrites the note only when its state changes, so a poll does not restart the busy spinner.
+  renderNote(note, state) {
+    if (note.dataset.state === state) return;
+    note.dataset.state = state;
+    if (state === 'busy') note.innerHTML = `<span class="btn-spinner"></span>${SessionInput.NOTES.busy}`;
+    else note.textContent = SessionInput.NOTES[state] || '';
+  },
+
+  // Drag on the grip above the box: up makes it taller; its CSS min/max-height bound the size.
+  startResize(event) {
+    event.preventDefault();
+    const text = document.getElementById('session-input-text');
+    const startY = event.clientY;
+    const startH = text.offsetHeight;
+    const css = getComputedStyle(text);
+    const minH = parseFloat(css.minHeight), maxH = parseFloat(css.maxHeight);
+    const onMove = e => {
+      text.style.height = Math.min(maxH, Math.max(minH, startH + startY - e.clientY)) + 'px';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  },
+
+  onKeyDown(event) {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    SessionInput.send();
+  },
+
+  async send() {
+    const text = document.getElementById('session-input-text');
+    const message = text.value;
+    const { slug, sessionId, readOnly } = Sessions.detailState;
+    if (readOnly || SessionInput.sending || !['ready', 'busy'].includes(SessionInput.state) || !message.trim()) return;
+    SessionInput.sending = true;
+    SessionInput.seq++;
+    SessionInput.render('busy');
+    if (!sessionId) {
+      SessionInput.sending = false;
+      if (typeof TerminalPanel !== 'undefined' && TerminalPanel.sendMessage(message)) { text.value = ''; return; }
+      toast('The terminal is not connected yet', 'error');
+      SessionInput.render('ready');
+      return;
+    }
+    try {
+      await api(`/api/projects/${slug}/sessions/${sessionId}/input`, { method: 'POST', body: { text: message } });
+      text.value = '';
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      SessionInput.sending = false;
+    }
+    SessionInput.refresh();
+  }
+};

@@ -7,7 +7,8 @@ const path = require('path');
 // Load active-sessions-bar.js in a browser-like sandbox so closing a pill can be asserted
 // without a browser: the bar, the cached session list, the dashboard and the session view
 // must all stop treating the session as active.
-const src = fs.readFileSync(path.join(__dirname, '../public/js/active-sessions-bar.js'), 'utf-8');
+const src = fs.readFileSync(path.join(__dirname, '../public/js/worktree-changes.js'), 'utf-8') + '\n'
+  + fs.readFileSync(path.join(__dirname, '../public/js/active-sessions-bar.js'), 'utf-8');
 
 const SLUG = 'proj-a';
 const SESSION_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -66,6 +67,7 @@ const context = vm.createContext({
   clearInterval: () => {},
   api: async url => { harness.apiCalls.push(url); return {}; },
   escapeHtml: s => String(s),
+  escapeAttr: s => String(s),
   decodeName: s => s,
   ActiveCount: { refresh: () => {} },
 });
@@ -323,4 +325,44 @@ test('applyColor updates the pill and resetting removes the tint', () => {
   ActiveSessionsBar.applyColor(SLUG, SESSION_B, null);
   assert.strictEqual(ActiveSessionsBar._sessions[1].color, null);
   assert.strictEqual(elementsById['asb-groups'].innerHTML.includes('asb-pill--colored'), false);
+});
+
+test('a Task Board session waiting for input shows its badge on the pill', () => {
+  context.TaskBoard = { attentionBadgeHtml: sid => (sid === SESSION_A ? '<span class="tb-badge tb-badge--needs_input">needs input</span>' : '') };
+  ActiveSessionsBar._render();
+  const html = elementsById['asb-groups'].innerHTML;
+  assert.strictEqual(html.split('tb-badge--needs_input').length - 1, 1, 'only the waiting session has the badge');
+  delete context.TaskBoard;
+});
+
+test('a worktree session with changes not yet in its base shows a dot, only on worktree slugs', async () => {
+  const wtSlug = 'C--p--claude-worktrees-cm-1';
+  const saved = ActiveSessionsBar._sessions;
+  const savedApi = context.api;
+  const asked = [];
+  context.api = async url => {
+    asked.push(url);
+    return { worktree: true, base: 'main', files: [{ path: 'a.txt', label: 'modified' }], unmerged: [], unmergedCount: 2 };
+  };
+  try {
+    ActiveSessionsBar._sessions = [
+      { slug: wtSlug, sessionId: 'wt-session', kind: 'pty', title: 'wt' },
+      { slug: SLUG, sessionId: 'plain-session', kind: 'pty', title: 'plain' }
+    ];
+    await ActiveSessionsBar._fetchWorktreeStatus();
+    assert.deepStrictEqual(asked, [`/api/projects/${wtSlug}/git/worktree`], 'only worktree slugs are asked');
+    ActiveSessionsBar._render();
+    const html = elementsById['asb-groups'].innerHTML;
+    assert.strictEqual(html.split('asb-worktree-icon').length - 1, 1);
+    assert.ok(html.includes('Worktree changes: 1 uncommitted, 2 unmerged into main'));
+
+    context.api = async () => ({ worktree: true, base: 'main', files: [], unmerged: [], unmergedCount: 0 });
+    await ActiveSessionsBar._fetchWorktreeStatus();
+    ActiveSessionsBar._render();
+    assert.ok(!elementsById['asb-groups'].innerHTML.includes('asb-worktree-icon'), 'nothing pending, no dot');
+  } finally {
+    ActiveSessionsBar._sessions = saved;
+    ActiveSessionsBar._worktreeStatus = {};
+    context.api = savedApi;
+  }
 });

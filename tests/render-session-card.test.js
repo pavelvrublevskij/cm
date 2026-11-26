@@ -156,3 +156,32 @@ test('SessionColors.set posts, updates the map, recolors cards and notifies the 
   assert.strictEqual(card.style._p['--session-color'], undefined);
   SC._map = {};
 });
+
+test('SessionColors.applyToDetailHeader colors the opened session header line', async () => {
+  const header = {
+    classList: { _set: new Set(), toggle(c, on) { if (on) this._set.add(c); else this._set.delete(c); } },
+    style: { _p: {}, setProperty(k, v) { this._p[k] = v; }, removeProperty(k) { delete this._p[k]; } },
+  };
+  sandbox.document.getElementById = id => (id === 'session-detail-header' ? header : null);
+  sandbox.document.querySelectorAll = () => [];
+  sandbox.api = async (url, opts) => ({ ok: true, color: opts.body.color });
+  sandbox.ActiveSessionsBar = { applyColor: () => {} };
+  sandbox.Sessions = { detailState: { slug: 'proj', sessionId: 's1' } };
+  const SC = vm.runInContext('SessionColors', sandbox);
+  SC._map = { proj: { s1: '#a371f7' } };
+
+  SC.applyToDetailHeader();
+  assert.ok(header.classList._set.has('session-header--colored'));
+  assert.strictEqual(header.style._p['--session-color'], '#a371f7');
+
+  await SC.set('proj', 's2', '#388bfd');
+  assert.strictEqual(header.style._p['--session-color'], '#a371f7');
+
+  await SC.set('proj', 's1', null);
+  assert.strictEqual(header.classList._set.has('session-header--colored'), false);
+  assert.strictEqual(header.style._p['--session-color'], undefined);
+
+  SC._map = {};
+  sandbox.document.getElementById = () => null;
+  delete sandbox.Sessions;
+});

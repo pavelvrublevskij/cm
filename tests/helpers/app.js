@@ -31,6 +31,11 @@ if (!process.env.__CLAUDE_MANAGER_TEST_HOME) {
   process.env.USERPROFILE = HOME;
   process.env.CLAUDE_MANAGER_DATA_DIR = DATA;
   process.env.__CLAUDE_MANAGER_TEST_HOME = HOME;
+  process.on('exit', () => {
+    for (const dir of [HOME, DATA]) {
+      try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch (_) {}
+    }
+  });
 }
 
 const app = require('../../server');

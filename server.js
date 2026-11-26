@@ -1,9 +1,24 @@
 const express = require('express');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
-const PORT = parseInt(process.env.PORT, 10) || 3000;
+const PORT = require('./lib/port').getPort();
 const HOST = process.env.HOST || '127.0.0.1';
+
+// Generous: the UI polls and the Changes view fetches one diff per file at once.
+// CM_RATE_LIMIT overrides the per-minute cap. Board hooks are never limited: a lost one stalls a ticket.
+// Session hooks neither: one fires on every tool call, and a lost one leaves the tab badge wrong.
+// Nor the question hook: a refused one shows claude's menu instead of CM's question card.
+const rateLimitOptions = {
+  windowMs: 60 * 1000,
+  limit: parseInt(process.env.CM_RATE_LIMIT, 10) || 10000,
+  skip: req => req.path === '/task-board/hook' || req.path === '/terminal/hook' || req.path === '/terminal/question',
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests' }
+};
+app.use('/api', rateLimit(rateLimitOptions));
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -168,6 +183,29 @@ function npmInstall() {
   });
 }
 
+/** POST /api/terminal/hook — events from scripts/session-hook.js, authenticated by the session's token */
+app.post('/api/terminal/hook', (req, res) => {
+  const result = terminalServer.handleHook(req.body || {});
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+/**
+ * POST /api/terminal/question — an AskUserQuestion from scripts/question-hook.js, authenticated by the
+ * session's (or Task Board run's) token. Held open until the question is answered in CM ({ answers }),
+ * released to the terminal ({}), or the hook goes away.
+ */
+app.post('/api/terminal/question', (req, res) => {
+  const held = terminalServer.holdQuestion(req.body || {}, reply => res.json(reply));
+  if (held.error) return res.status(held.status).json({ error: held.error });
+  res.on('close', held.cancel);
+});
+
+/** GET /api/terminal/attention — how many browser-terminal sessions wait for the user */
+app.get('/api/terminal/attention', (req, res) => {
+  res.json({ waiting: terminalServer.attentionCount() });
+});
+
 app.post('/api/terminal/repair', async (req, res) => {
   try {
     fixPtyPermissions();
@@ -291,8 +329,9 @@ app.use('/api/projects', require('./routes/git'));
 app.use('/api/projects', require('./routes/scratchpad'));
 app.use('/api/projects', require('./routes/project-files'));
 app.use('/api/autostart', require('./routes/autostart'));
+app.use('/api/task-board', require('./routes/task-board'));
 
-app.get('*', (req, res) => {
+app.get('*', rateLimit(rateLimitOptions), (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -314,6 +353,17 @@ if (require.main === module) {
   });
   server.listen(PORT, HOST, () => {
     console.log(`CM running at http://${HOST}:${PORT}`);
+
+    terminalServer.initHooks(`http://${HOST}:${PORT}`);
+
+    require('./lib/task-board-runner').init({
+      spawn: terminalServer.spawnBackground,
+      bind: terminalServer.bindSessionId,
+      trackHook: terminalServer.trackHookEvent,
+      reveal: terminalServer.reveal,
+      hide: terminalServer.hide,
+      url: `http://${HOST}:${PORT}`
+    });
 
     // Set only by the OS-native autostart launcher (Startup shortcut on Windows, env var from the
     // LaunchAgent/XDG entry on macOS/Linux) — a plain `npm start` never opens the browser, and

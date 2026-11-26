@@ -5,8 +5,10 @@ const { backup, wrapRoute } = require('../lib/file-helpers');
 const { decodeSlug } = require('../lib/slug');
 const { readFrontmatterFile, readFrontmatterDir, writeFrontmatter } = require('../lib/frontmatter');
 const { AGENTS_DIR } = require('../lib/paths');
+const { mountTransferRoutes } = require('../lib/config-transfer');
 
 const router = express.Router();
+mountTransferRoutes(router, 'agents');
 
 /** An agent file name straight inside the agents folder: no path parts, must end in .md. */
 function safeAgentFile(filename) {

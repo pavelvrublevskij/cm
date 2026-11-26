@@ -10,9 +10,11 @@
  * @param {Function} [opts.onClose] - Called after the modal is dismissed, however it was dismissed
  * @param {string} [opts.cancelLabel] - Label for the dismiss button (default "Cancel")
  * @param {boolean|{minWidth?: number, minHeight?: number}} [opts.resizable] - Adds a drag handle to resize the modal
+ * @param {boolean} [opts.maximizable] - Adds a title-bar button that toggles the modal fullscreen
+ * @param {string} [opts.headerHtml] - HTML placed in the title bar before its buttons
  * @returns {HTMLElement} The overlay element (for external removal if needed)
  */
-function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel, resizable }) {
+function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel, resizable, maximizable, headerHtml }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   const close = () => { overlay.remove(); if (onClose) onClose(); };
@@ -23,7 +25,36 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
 
   const h3 = document.createElement('h3');
   h3.textContent = title;
-  modal.appendChild(h3);
+  const header = document.createElement('div');
+  header.className = 'modal-header';
+  header.appendChild(h3);
+  const actions = document.createElement('div');
+  actions.className = 'modal-header-actions';
+  if (headerHtml) {
+    const extra = document.createElement('div');
+    extra.className = 'modal-header-extra';
+    extra.innerHTML = headerHtml;
+    actions.appendChild(extra);
+  }
+  if (maximizable) {
+    const maxBtn = document.createElement('button');
+    maxBtn.className = 'btn btn-sm modal-maximize';
+    const setMaxState = full => {
+      maxBtn.textContent = full ? '❒' : '□';
+      maxBtn.title = full ? 'Restore' : 'Maximize';
+    };
+    setMaxState(false);
+    maxBtn.onclick = () => setMaxState(modal.classList.toggle('modal--fullscreen'));
+    actions.appendChild(maxBtn);
+  }
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'modal-close';
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Close';
+  closeBtn.onclick = close;
+  actions.appendChild(closeBtn);
+  header.appendChild(actions);
+  modal.appendChild(header);
 
   const content = document.createElement('div');
   content.className = 'modal-body';
@@ -38,15 +69,34 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
   cancelBtn.textContent = cancelLabel || 'Cancel';
   cancelBtn.onclick = close;
   btnGroup.appendChild(cancelBtn);
+  const lockable = [closeBtn, cancelBtn];
 
-  for (const { label, primary, danger, onClick } of buttons) {
+  for (const { label, primary, danger, onClick, busyLabel } of buttons) {
     const btn = document.createElement('button');
     btn.className = 'btn' + (primary ? ' btn-primary' : '') + (danger ? ' btn-danger' : '');
     btn.textContent = label;
     btn.onclick = async () => {
-      const result = await onClick();
-      if (result !== false) close();
+      // A busyLabel button locks the dialog and shows a spinner while its onClick runs.
+      if (busyLabel) {
+        lockable.forEach(b => { b.disabled = true; });
+        const spinner = document.createElement('span');
+        spinner.className = 'btn-spinner';
+        btn.textContent = '';
+        btn.appendChild(spinner);
+        btn.appendChild(document.createTextNode(busyLabel));
+      }
+      let result = false;
+      try {
+        result = await onClick();
+      } finally {
+        if (result !== false) close();
+        else if (busyLabel) {
+          lockable.forEach(b => { b.disabled = false; });
+          btn.textContent = label;
+        }
+      }
     };
+    lockable.push(btn);
     btnGroup.appendChild(btn);
   }
 
@@ -54,8 +104,6 @@ function openModal({ title, width, body, buttons = [], cls, onClose, cancelLabel
   if (resizable) addModalResizeHandle(modal, typeof resizable === 'object' ? resizable : {});
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
-
-  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
   return overlay;
 }

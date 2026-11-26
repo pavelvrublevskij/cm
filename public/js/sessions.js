@@ -821,9 +821,9 @@ const Sessions = {
   detailState: { slug: null, sessionId: null, offset: 0, loading: false, hasMore: false, total: 0 },
   _detailHasPlan: false,
   REFRESH_INTERVAL_KEY: 'claude-manager-conversation-refresh-ms',
-  REFRESH_INTERVAL_DEFAULT_MS: 5000,
+  REFRESH_INTERVAL_DEFAULT_MS: 3000,
   REFRESH_INTERVAL_MIN_MS: 1000,
-  CONVERSATION_HIDDEN_KEY: 'claude-manager-conversation-hidden',
+  MAIN_PANEL_HIDDEN_KEY: 'claude-manager-conversation-hidden', // key kept so the saved preference survives
   SHOW_TOOL_DETAILS_KEY: 'claude-manager-show-tool-details',
   DEFAULT_READONLY_KEY: 'claude-manager-default-readonly',
   SNAPSHOT_KEY: 'claude-manager-session-snapshots',
@@ -870,7 +870,7 @@ const Sessions = {
     const key = Sessions._snapshotKey(state.slug, state.sessionId);
     delete map[key];
     map[key] = {
-      tab: Sessions._activeTab || 'conversation',
+      tab: Sessions._activeTab || 'file-changes',
       scrollTop: scroller ? scroller.scrollTop : 0,
       offset: state.offset || 0,
       searchQuery: Sessions._detailSearchQuery || '',
@@ -894,18 +894,18 @@ const Sessions = {
   setRefreshIntervalMs(ms) {
     if (!Number.isFinite(ms) || ms < Sessions.REFRESH_INTERVAL_MIN_MS) return false;
     localStorage.setItem(Sessions.REFRESH_INTERVAL_KEY, String(ms));
-    if (Sessions._refreshTimer && !Sessions.isConversationHidden()) Sessions.startAutoRefresh();
+    if (Sessions._refreshTimer) Sessions.startAutoRefresh();
     if (Sessions._ctxTimer) Sessions.startCtxPolling();
     return true;
   },
 
-  isConversationHidden() {
-    return localStorage.getItem(Sessions.CONVERSATION_HIDDEN_KEY) === '1';
+  isMainPanelHidden() {
+    return localStorage.getItem(Sessions.MAIN_PANEL_HIDDEN_KEY) === '1';
   },
 
-  applyConversationHiddenState() {
+  applyMainPanelHiddenState() {
     const body = document.getElementById('session-detail-body');
-    if (body) body.classList.toggle('conversation-hidden', Sessions.isConversationHidden());
+    if (body) body.classList.toggle('main-panel-hidden', Sessions.isMainPanelHidden());
   },
 
   applyReadOnlyState() {
@@ -1008,10 +1008,34 @@ const Sessions = {
     Sessions.renderDetailBranches(merged);
     if (merged.lastGitBranch) Sessions.detailState.lastGitBranch = merged.lastGitBranch;
     Sessions.updateBranchWarning(Sessions.detailState.lastGitBranch || merged.lastGitBranch);
+    if (typeof TaskBoard !== 'undefined') TaskBoard.renderSessionInfo(Sessions.detailState.sessionId);
+    Sessions.renderWorktreeInfo(Sessions.detailState.slug, Sessions.detailState.sessionId);
 
     if (stats && typeof stats.archived !== 'undefined' && stats.archived) {
       Sessions._setDetailArchivedUI(stats.active);
     }
+  },
+
+  /** A session run in a git worktree: its uncommitted files and commits not yet in the main checkout's branch. */
+  async renderWorktreeInfo(slug, sessionId) {
+    const el = document.getElementById('session-worktree-info');
+    if (!el || !slug) return;
+    // Another session's line must not stay up while this one loads.
+    if (el.dataset.session !== sessionId) { el.style.display = 'none'; el.dataset.session = sessionId; }
+    // Polls and loadMore can overlap: only the latest request may draw, so an older answer never wins.
+    const seq = Sessions._worktreeInfoSeq = (Sessions._worktreeInfoSeq || 0) + 1;
+    let st = { worktree: false };
+    try { st = await api(`/api/projects/${encodeURIComponent(slug)}/git/worktree`); } catch (_) { /* no line */ }
+    if (seq !== Sessions._worktreeInfoSeq) return;
+    if (Sessions.detailState.slug !== slug || Sessions.detailState.sessionId !== sessionId) return;
+    if (!st.worktree) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    const branch = st.branch ? ` on <code>${escapeHtml(st.branch)}</code>` : '';
+    el.innerHTML = `<span class="session-worktree-label">Worktree:</span> <code>${escapeHtml(st.name)}</code>${branch} ${worktreeChangesHtml(st, { slug })}`;
+    el.style.display = 'flex';
   },
 
   updateBranchWarning(lastGitBranch) {
@@ -1064,6 +1088,7 @@ const Sessions = {
     const snapshot = Sessions._getSnapshot(slug, sessionId);
     Sessions.detailState = { slug, sessionId, offset: 0, loading: false, hasMore: false, total: 0, readOnly: !!readOnly, readOnlyInstanceId: null };
     Sessions.syncCloseButton();
+    SessionColors.applyToDetailHeader();
     Sessions.renderDetailMeta(null);
     Sessions.applyReadOnlyState();
 
@@ -1086,6 +1111,7 @@ const Sessions = {
     Sessions._updateArtifactsTabVisibility(false);
     if (typeof SessionFiles !== 'undefined') SessionFiles.reset(slug);
     container.innerHTML = '';
+    if (typeof SessionInput !== 'undefined') { SessionInput.render('none'); SessionInput.refresh(); }
 
     // Reset search
     Sessions._detailSearchQuery = '';
@@ -1094,8 +1120,11 @@ const Sessions = {
     const countEl = document.getElementById('session-detail-search-count');
     if (countEl) countEl.textContent = '';
 
+    Sessions.switchRightTab(readOnly ? 'conversation' : 'terminal');
+    if (typeof TerminalPanel !== 'undefined') TerminalPanel.applySavedWidth();
+
     if (!sessionId) {
-      Sessions.switchTab('conversation');
+      Sessions.switchTab('file-changes');
       container.innerHTML = '<div class="empty-state"><p>Waiting for session to start...</p></div>';
       const ctxEl = document.getElementById('sf-changed');
       if (ctxEl) ctxEl.innerHTML = '';
@@ -1107,7 +1136,7 @@ const Sessions = {
         if (TerminalPanel.isOpen()) TerminalPanel.close();
         TerminalPanel.open(slug, null);
       }
-      Sessions.applyConversationHiddenState();
+      Sessions.applyMainPanelHiddenState();
       Sessions.applyToolDetailsState();
       Sessions._startDiscovery(slug);
       return;
@@ -1121,8 +1150,7 @@ const Sessions = {
         .catch(() => {});
     }
 
-    // Start on the saved tab if we're restoring one, otherwise Files — loadContext may still
-    // switch to Conversation if nothing changed, but the restore below has the final say.
+    // Start on the saved tab if we're restoring one, otherwise Files.
     Sessions.switchTab(snapshot ? snapshot.tab : 'file-changes');
     const ctxEl = document.getElementById('sf-changed');
     if (ctxEl) { ctxEl.innerHTML = ''; }
@@ -1158,15 +1186,14 @@ const Sessions = {
       TerminalPanel.open(slug, sessionId);
     }
 
-    Sessions.applyConversationHiddenState();
+    Sessions.applyMainPanelHiddenState();
     Sessions.applyToolDetailsState();
-    if (!Sessions.isConversationHidden()) Sessions.startAutoRefresh();
+    Sessions.startAutoRefresh();
     Sessions.startCtxPolling();
   },
 
   startAutoRefresh() {
     Sessions.stopConversationRefresh();
-    if (Sessions.isConversationHidden()) return;
     Sessions._refreshTimer = setInterval(() => Sessions.pollNewMessages(), Sessions.refreshIntervalMs());
     if (typeof setFooterStatus === 'function') {
       const sec = Math.round(Sessions.refreshIntervalMs() / 1000);
@@ -1181,6 +1208,7 @@ const Sessions = {
       if (!slug || !sessionId) return;
       Sessions.pollContext(slug, sessionId);
       Sessions.pollScratchpad();
+      if (typeof SessionInput !== 'undefined') SessionInput.refresh();
     }, Sessions.refreshIntervalMs());
   },
 
@@ -1231,16 +1259,27 @@ const Sessions = {
     Sessions.loadContext(session.sessionId, session);
     Sessions.loadMore().then(() => {
       Sessions.setupScroll();
-      if (!Sessions.isConversationHidden()) Sessions.startAutoRefresh();
+      Sessions.startAutoRefresh();
       Sessions.startCtxPolling();
     });
+  },
+
+  /** The open session's URL, under which its question cards answer. */
+  detailSessionUrl() {
+    const { slug, sessionId } = Sessions.detailState;
+    return `/api/projects/${slug}/sessions/${sessionId}`;
+  },
+
+  /** Bring the conversation's AskUserQuestion cards up to date (answered, answerable here, or open). */
+  applyQuestions() {
+    if (typeof SessionQuestions === 'undefined' || !Sessions.detailState.sessionId) return;
+    SessionQuestions.apply(document.getElementById('session-messages'), Sessions.detailSessionUrl(), !Sessions.detailState.readOnly);
   },
 
   async pollNewMessages() {
     const state = Sessions.detailState;
     if (!state.slug || !state.sessionId) return;
     if (state.loading) return;
-    if (Sessions.isConversationHidden()) return;
     if (Sessions._detailSearchQuery) return; // don't disturb active filter
     const slugAtStart = state.slug;
     const sessionAtStart = state.sessionId;
@@ -1276,6 +1315,7 @@ const Sessions = {
       if (!container) return;
       container.insertAdjacentHTML('afterbegin', html);
       addCodeCopyButtons(container);
+      Sessions.applyQuestions();
 
       state.total = data.total;
       state.offset += added;
@@ -1363,6 +1403,7 @@ const Sessions = {
       const html = data.messages.map(m => Sessions.renderMessage(m)).join('');
       container.insertAdjacentHTML('beforeend', html);
       addCodeCopyButtons(container);
+      Sessions.applyQuestions();
 
       Sessions.updateMessageCount();
 
@@ -1399,7 +1440,14 @@ const Sessions = {
     }
   },
 
+  /** The project a new session starts in: a worktree under <project>/.claude/worktrees/ starts it in that project (as lib/slug.js parentSlug). */
+  _newSessionSlug(slug) {
+    const i = slug.indexOf('--claude-worktrees-');
+    return i > 0 ? slug.slice(0, i) : slug;
+  },
+
   async newSessionOS(slug) {
+    slug = Sessions._newSessionSlug(slug);
     document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
     try {
       await Sessions.checkPricing();
@@ -1412,6 +1460,7 @@ const Sessions = {
   },
 
   async newSessionBrowser(slug) {
+    slug = Sessions._newSessionSlug(slug);
     document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
     try { await Sessions.checkPricing(); } catch (_) { /* non-fatal */ }
     if (typeof TerminalPanel === 'undefined') {
@@ -1489,7 +1538,42 @@ const Sessions = {
     if (!panel) return;
     const isOpen = panel.classList.contains('open');
     document.querySelectorAll('.action-menu-panel.open').forEach(p => p.classList.remove('open'));
-    if (!isOpen) panel.classList.add('open');
+    if (isOpen) return;
+    // Fixed positioning so overflow/stacking of ancestors can't clip the panel
+    const r = btn.getBoundingClientRect();
+    // Measure the CSS (absolute) layout first to keep the panel's own left/right alignment
+    panel.classList.remove('fixed');
+    panel.style.top = panel.style.left = panel.style.right = '';
+    panel.classList.add('open');
+    const pr = panel.getBoundingClientRect();
+    const leftAligned = Math.abs(pr.left - r.left) < Math.abs(pr.right - r.right);
+    panel.classList.add('fixed');
+    panel._anchor = btn;
+    if (leftAligned) {
+      panel.style.left = r.left + 'px';
+      panel.style.right = 'auto';
+    } else {
+      panel.style.right = (window.innerWidth - r.right) + 'px';
+      panel.style.left = 'auto';
+    }
+    const h = panel.offsetHeight;
+    const below = r.bottom + 4;
+    panel.style.top = (below + h > window.innerHeight && r.top - 4 - h >= 0 ? r.top - 4 - h : below) + 'px';
+    if (!Sessions._actionMenuListeners) {
+      Sessions._actionMenuListeners = true;
+      // Close only when the scrolled element moves the anchor button (page or an ancestor scroll)
+      window.addEventListener('scroll', e => {
+        const t = e.target;
+        document.querySelectorAll('.action-menu-panel.open.fixed').forEach(p => {
+          if (t === document || t === document.documentElement || (t && t.contains && p._anchor && t.contains(p._anchor) && !p.contains(t))) {
+            p.classList.remove('open');
+          }
+        });
+      }, true);
+      window.addEventListener('resize', () => {
+        document.querySelectorAll('.action-menu-panel.open.fixed').forEach(p => p.classList.remove('open'));
+      });
+    }
   },
 
   renameAction(btn) {
@@ -1585,30 +1669,28 @@ const Sessions = {
     });
   },
 
+  /** Left panel tabs. Anything else (e.g. 'conversation' from an old snapshot) falls back to Files. */
   switchTab(tab) {
     const ctx = document.getElementById('session-context');
-    const msgs = document.getElementById('session-messages-wrap');
     const act = document.getElementById('session-activity');
     const sp = document.getElementById('session-scratchpad');
     const art = document.getElementById('session-artifacts');
     const fcBtn = document.getElementById('tab-btn-file-changes');
-    const cvBtn = document.getElementById('tab-btn-conversation');
     const acBtn = document.getElementById('tab-btn-activity');
     const spBtn = document.getElementById('tab-btn-scratchpad');
     const artBtn = document.getElementById('tab-btn-artifacts');
-    if (!ctx || !msgs || !fcBtn || !cvBtn) return;
+    if (!ctx || !fcBtn) return;
+    if (!['file-changes', 'activity', 'scratchpad', 'artifacts'].includes(tab)) tab = 'file-changes';
     Sessions._activeTab = tab;
     const isFC = tab === 'file-changes';
     const isAct = tab === 'activity';
     const isSP = tab === 'scratchpad';
     const isArt = tab === 'artifacts';
     ctx.style.display = isFC ? 'flex' : 'none';
-    msgs.style.display = isAct || isFC || isSP || isArt ? 'none' : '';
     if (act) act.style.display = isAct ? 'flex' : 'none';
     if (sp) sp.style.display = isSP ? 'flex' : 'none';
     if (art) art.style.display = isArt ? '' : 'none';
     fcBtn.classList.toggle('active', isFC);
-    cvBtn.classList.toggle('active', !isFC && !isAct && !isSP && !isArt);
     if (acBtn) acBtn.classList.toggle('active', isAct);
     if (spBtn) spBtn.classList.toggle('active', isSP);
     if (artBtn) artBtn.classList.toggle('active', isArt);
@@ -1624,6 +1706,22 @@ const Sessions = {
     }
     if (isAct && !Sessions._activityLoaded) Sessions.loadActivity();
     if (isSP && !Sessions._scratchpadLoaded) Sessions.loadScratchpad();
+  },
+
+  /** Right pane tabs: 'terminal' (default) or 'conversation' (shown as Chat beta; default in a read-only view). */
+  switchRightTab(tab) {
+    const msgs = document.getElementById('session-messages-wrap');
+    const term = document.getElementById('terminal-pane');
+    const cvBtn = document.getElementById('right-tab-btn-conversation');
+    const tmBtn = document.getElementById('right-tab-btn-terminal');
+    if (!msgs || !term) return;
+    const isTerm = tab === 'terminal';
+    Sessions._activeRightTab = isTerm ? 'terminal' : 'conversation';
+    msgs.classList.toggle('right-tab-hidden', isTerm);
+    term.classList.toggle('right-tab-hidden', !isTerm);
+    if (cvBtn) cvBtn.classList.toggle('active', !isTerm);
+    if (tmBtn) tmBtn.classList.toggle('active', isTerm);
+    if (isTerm && typeof TerminalPanel !== 'undefined') TerminalPanel._sendResize();
   },
 
   _rerenderPlans() {

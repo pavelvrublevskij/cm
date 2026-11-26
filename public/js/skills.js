@@ -3,6 +3,7 @@ const Skills = makeFrontmatterCrud({
   containerId: 'skills-content',
   apiBase: '/api/skills/global',
   itemKey: 'name',
+  transferKind: 'skills',
   idPrefix: 'skill',
   itemLabel: 'Skill',
   cardTitle: s => `<span style="color:var(--accent);font-family:var(--font-mono)">/${escapeHtml(s.name)}</span>`,
