@@ -1189,7 +1189,7 @@ const TaskBoard = {
     openModal({
       title: 'Delete ticket?',
       body: TaskBoard.deleteMessageHtml(TaskBoard.findCard(id) || {}),
-      buttons: [{ label: 'Delete', danger: true, onClick: async () => {
+      buttons: [{ label: 'Delete', danger: true, busyLabel: 'Deleting…', onClick: async () => {
         let res;
         try {
           res = await api('/api/task-board/cards/' + encodeURIComponent(id), { method: 'DELETE' });

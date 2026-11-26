@@ -930,6 +930,7 @@ test('a kept worktree on delete opens the Force remove dialog, which posts proje
   TaskBoard.board = { projects: {}, cards: [{ id: 'x', project: 'p', column: 'done', worktree: 'cm-ab12cd34' }] };
   try {
     TaskBoard.confirmDelete('x');
+    assert.strictEqual(modals[0].buttons[0].busyLabel, 'Deleting…', 'the Delete button shows a spinner while deleting');
     await modals[0].buttons[0].onClick();
     assert.strictEqual(modals.length, 2);
     assert.strictEqual(modals[1].title, 'Worktree kept');
